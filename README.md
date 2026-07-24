@@ -40,7 +40,8 @@ will extract its working pieces into reusable packages without changing the
 wire behavior established here.
 
 USB attachment discovery and exact-device opening now live in `usb`;
-the proof still performs interface and transfer operations directly.
+the package also owns the selected interface. Control and bulk transfers
+remain in the proof.
 
 ## Design direction
 

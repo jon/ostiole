@@ -25,10 +25,8 @@ const (
 	bulkOutA   = 0x02
 	bulkInA    = 0x81
 
-	usbfsClaimInterface   = 0x8004550f
-	usbfsControl          = 0xc0185500
-	usbfsBulk             = 0xc0185502
-	usbfsReleaseInterface = 0x80045510
+	usbfsControl = 0xc0185500
+	usbfsBulk    = 0xc0185502
 
 	requestReset      = 0x00
 	requestSetLatency = 0x09
@@ -136,7 +134,7 @@ func readDPIDR(ctx context.Context) (value uint32, err error) {
 }
 
 func (d *device) enterMPSSE(ctx context.Context) error {
-	if err := d.interfaceIOCTL(usbfsClaimInterface); err != nil {
+	if err := d.raw.ClaimInterface(interfaceA); err != nil {
 		return fmt.Errorf("ostiole: claim USB interface: %w", err)
 	}
 	d.claimed = true
@@ -207,7 +205,7 @@ func (d *device) close() error {
 				d.control(ctx, uint8(step[0]), step[1], indexA),
 			)
 		}
-		result = errors.Join(result, d.interfaceIOCTL(usbfsReleaseInterface))
+		result = errors.Join(result, d.raw.ReleaseInterface(interfaceA))
 	}
 	return errors.Join(result, d.raw.Close())
 }
@@ -240,20 +238,6 @@ func (d *device) control(
 			value,
 			errno,
 		)
-	}
-	return nil
-}
-
-func (d *device) interfaceIOCTL(request uintptr) error {
-	value := uint32(interfaceA)
-	_, _, errno := syscall.Syscall(
-		syscall.SYS_IOCTL,
-		d.raw.FD(),
-		request,
-		uintptr(unsafe.Pointer(&value)),
-	)
-	if errno != 0 {
-		return errno
 	}
 	return nil
 }

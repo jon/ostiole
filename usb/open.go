@@ -15,6 +15,9 @@ import (
 // usbfs operations behind Device methods.
 type Device struct {
 	file      *os.File
+	ioctl     ioctlFunc
+	claimed   uint8
+	hasClaim  bool
 	closeOnce sync.Once
 	closeErr  error
 }
@@ -102,8 +105,12 @@ func (d *Device) Close() error {
 		return nil
 	}
 	d.closeOnce.Do(func() {
+		var releaseErr error
+		if d.hasClaim {
+			releaseErr = d.ReleaseInterface(d.claimed)
+		}
 		if d.file != nil {
-			d.closeErr = d.file.Close()
+			d.closeErr = errors.Join(releaseErr, d.file.Close())
 		}
 	})
 	return d.closeErr
