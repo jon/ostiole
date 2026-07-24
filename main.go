@@ -13,10 +13,6 @@ import (
 )
 
 const (
-	requestReset      = 0x00
-	requestSetLatency = 0x09
-	requestSetBitmode = 0x0b
-
 	cmdClockBitsOutNegLSB = 0x1b
 	cmdClockBitsInPosLSB  = 0x2a
 	cmdSetDataLow         = 0x80
@@ -35,8 +31,7 @@ const (
 )
 
 type device struct {
-	raw     *ftdi.Channel
-	claimed bool
+	raw *ftdi.Channel
 }
 
 type readChunk struct {
@@ -90,7 +85,7 @@ func readDPIDR(ctx context.Context) (value uint32, err error) {
 	}
 	raw := &device{raw: channel}
 	defer func() {
-		err = errors.Join(err, raw.close())
+		err = errors.Join(err, raw.raw.Close())
 	}()
 	if err := raw.enterMPSSE(ctx); err != nil {
 		return 0, err
@@ -109,27 +104,8 @@ func readDPIDR(ctx context.Context) (value uint32, err error) {
 }
 
 func (d *device) enterMPSSE(ctx context.Context) error {
-	if err := d.raw.Claim(); err != nil {
-		return fmt.Errorf("ostiole: claim USB interface: %w", err)
-	}
-	d.claimed = true
-	steps := [][2]uint16{
-		{requestReset, 0},
-		{requestReset, 1},
-		{requestReset, 2},
-		{requestSetLatency, 2},
-		{requestSetBitmode, 0},
-		{requestSetBitmode, 0x0200},
-	}
-	for _, step := range steps {
-		if err := d.control(ctx, uint8(step[0]), step[1]); err != nil {
-			return err
-		}
-	}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(50 * time.Millisecond):
+	if err := d.raw.EnterMPSSE(ctx); err != nil {
+		return err
 	}
 	if err := d.synchronize(ctx); err != nil {
 		return err
@@ -157,47 +133,6 @@ func (d *device) synchronize(ctx context.Context) error {
 	}
 	if len(payload) != 2 || payload[0] != 0xfa || payload[1] != 0xab {
 		return fmt.Errorf("ostiole: unexpected MPSSE synchronization %x", payload)
-	}
-	return nil
-}
-
-func (d *device) close() error {
-	if d.raw == nil {
-		return nil
-	}
-	var result error
-	if d.claimed {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		for _, step := range [][2]uint16{
-			{requestSetBitmode, 0},
-			{requestSetLatency, 16},
-			{requestReset, 1},
-			{requestReset, 2},
-		} {
-			result = errors.Join(
-				result,
-				d.control(ctx, uint8(step[0]), step[1]),
-			)
-		}
-		result = errors.Join(result, d.raw.Release())
-	}
-	return errors.Join(result, d.raw.Close())
-}
-
-func (d *device) control(
-	ctx context.Context,
-	request uint8,
-	value uint16,
-) error {
-	_, err := d.raw.Control(ctx, request, value)
-	if err != nil {
-		return fmt.Errorf(
-			"ostiole: FTDI request %#02x value %#04x: %w",
-			request,
-			value,
-			err,
-		)
 	}
 	return nil
 }

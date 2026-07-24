@@ -67,6 +67,8 @@ type Channel struct {
 	bulkIn     uint8
 	bulkOut    uint8
 	packetSize int
+	claimed    bool
+	settle     func(context.Context) error
 }
 
 // NewChannel binds an open USB device to one explicit MPSSE port.
@@ -98,6 +100,7 @@ func newChannel(device usbDevice, config Config) (*Channel, error) {
 		bulkIn:     0x81 + 2*iface,
 		bulkOut:    0x02 + 2*iface,
 		packetSize: 512,
+		settle:     settleMPSSE,
 	}, nil
 }
 
@@ -114,18 +117,15 @@ func validateSelection(product uint16, port Port) error {
 	return nil
 }
 
-// Claim takes ownership of the selected USB interface.
-func (c *Channel) Claim() error {
+func (c *Channel) claim() error {
 	return c.device.ClaimInterface(c.iface)
 }
 
-// Release relinquishes the selected USB interface.
-func (c *Channel) Release() error {
+func (c *Channel) release() error {
 	return c.device.ReleaseInterface(c.iface)
 }
 
-// Control sends one vendor request to the selected channel.
-func (c *Channel) Control(
+func (c *Channel) control(
 	ctx context.Context,
 	request uint8,
 	value uint16,
@@ -152,12 +152,4 @@ func (c *Channel) bulkRead(
 	data []byte,
 ) (int, error) {
 	return c.device.BulkRead(ctx, c.bulkIn, data)
-}
-
-// Close closes the underlying USB device.
-func (c *Channel) Close() error {
-	if c == nil || c.device == nil {
-		return nil
-	}
-	return c.device.Close()
 }

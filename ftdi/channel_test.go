@@ -16,6 +16,13 @@ type fakeUSBDevice struct {
 	closed   bool
 	writeN   []int
 	readData [][]byte
+	controls []controlRecord
+}
+
+type controlRecord struct {
+	request uint8
+	value   uint16
+	index   uint16
 }
 
 func (d *fakeUSBDevice) ClaimInterface(iface uint8) error {
@@ -36,7 +43,55 @@ func (d *fakeUSBDevice) ControlTransfer(
 	_ []byte,
 ) (int, error) {
 	d.request, d.value, d.index = request, value, index
+	d.controls = append(d.controls, controlRecord{
+		request: request,
+		value:   value,
+		index:   index,
+	})
 	return 0, nil
+}
+
+func TestChannelOwnsAndRestoresMPSSEMode(t *testing.T) {
+	raw := &fakeUSBDevice{}
+	channel, err := newChannel(raw, Config{
+		ProductID: PIDFT232H,
+		Port:      PortA,
+		Interface: SWD,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	channel.settle = func(context.Context) error { return nil }
+
+	if err := channel.EnterMPSSE(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := channel.Close(); err != nil {
+		t.Fatal(err)
+	}
+	want := []controlRecord{
+		{request: 0x00, value: 0, index: 1},
+		{request: 0x00, value: 1, index: 1},
+		{request: 0x00, value: 2, index: 1},
+		{request: 0x09, value: 2, index: 1},
+		{request: 0x0b, value: 0, index: 1},
+		{request: 0x0b, value: 0x0200, index: 1},
+		{request: 0x0b, value: 0, index: 1},
+		{request: 0x09, value: 16, index: 1},
+		{request: 0x00, value: 1, index: 1},
+		{request: 0x00, value: 2, index: 1},
+	}
+	if len(raw.controls) != len(want) {
+		t.Fatalf("control requests = %#v", raw.controls)
+	}
+	for index := range want {
+		if raw.controls[index] != want[index] {
+			t.Fatalf("control request %d = %#v", index, raw.controls[index])
+		}
+	}
+	if raw.claimed != 0 || raw.released != 0 || !raw.closed {
+		t.Fatalf("ownership = %#v", raw)
+	}
 }
 
 func (d *fakeUSBDevice) BulkWrite(
@@ -115,10 +170,10 @@ func TestChannelBindsOneExplicitMPSSEPort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := channel.Claim(); err != nil {
+	if err := channel.claim(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := channel.Control(
+	if _, err := channel.control(
 		context.Background(),
 		0x0b,
 		0x0200,
@@ -137,7 +192,7 @@ func TestChannelBindsOneExplicitMPSSEPort(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	if err := channel.Release(); err != nil {
+	if err := channel.release(); err != nil {
 		t.Fatal(err)
 	}
 	if err := channel.Close(); err != nil {
