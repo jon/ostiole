@@ -25,8 +25,7 @@ const (
 	bulkOutA   = 0x02
 	bulkInA    = 0x81
 
-	usbfsControl = 0xc0185500
-	usbfsBulk    = 0xc0185502
+	usbfsBulk = 0xc0185502
 
 	requestReset      = 0x00
 	requestSetLatency = 0x09
@@ -49,16 +48,6 @@ const (
 
 	transferTimeout = 5 * time.Second
 )
-
-type usbControlTransfer struct {
-	RequestType uint8
-	Request     uint8
-	Value       uint16
-	Index       uint16
-	Length      uint16
-	Timeout     uint32
-	Data        uintptr
-}
 
 type usbBulkTransfer struct {
 	Endpoint uint32
@@ -215,28 +204,20 @@ func (d *device) control(
 	request uint8,
 	value, index uint16,
 ) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	transfer := usbControlTransfer{
-		RequestType: requestTypeOut,
-		Request:     request,
-		Value:       value,
-		Index:       index,
-		Timeout:     uint32(transferTimeout / time.Millisecond),
-	}
-	_, _, errno := syscall.Syscall(
-		syscall.SYS_IOCTL,
-		d.raw.FD(),
-		usbfsControl,
-		uintptr(unsafe.Pointer(&transfer)),
+	_, err := d.raw.ControlTransfer(
+		ctx,
+		requestTypeOut,
+		request,
+		value,
+		index,
+		nil,
 	)
-	if errno != 0 {
+	if err != nil {
 		return fmt.Errorf(
 			"ostiole: FTDI request %#02x value %#04x: %w",
 			request,
 			value,
-			errno,
+			err,
 		)
 	}
 	return nil
