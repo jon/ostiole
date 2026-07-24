@@ -44,7 +44,8 @@ the package also owns the selected interface and performs bounded control
 and bulk transfers. The proof no longer performs Linux USB operations itself.
 
 The proof explicitly binds the selected attachment to FTDI MPSSE port A
-for SWD. Protocol framing and session setup remain visible in `main.go`.
+for SWD. The FTDI package also exchanges exact command and response
+payloads while protocol framing and session setup remain visible in `main.go`.
 
 This initial FTDI path uses the standard H-series MPSSE port and endpoint
 layout. Descriptor-driven port binding is not implemented yet.

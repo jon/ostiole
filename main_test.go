@@ -36,23 +36,3 @@ func TestDecodeSamplesRestoresLSBFirstBits(t *testing.T) {
 		t.Fatalf("samples = %08b", got)
 	}
 }
-
-func TestAppendFTDIPacketIgnoresStatusOnlyPacket(t *testing.T) {
-	var payload []byte
-	var err error
-	payload, err = appendFTDIPacket(payload, []byte{0x32, 0x60}, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	payload, err = appendFTDIPacket(
-		payload,
-		[]byte{0x32, 0x60, 0xfa, 0xab},
-		4,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(payload, []byte{0xfa, 0xab}) {
-		t.Fatalf("payload = % x", payload)
-	}
-}

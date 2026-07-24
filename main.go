@@ -144,14 +144,14 @@ func (d *device) enterMPSSE(ctx context.Context) error {
 		cmdSetDataLow, 0, pinClock,
 		cmdSetDataHigh, 0, 0,
 	}
-	return d.bulkWrite(ctx, commands)
+	return d.raw.WriteExact(ctx, commands)
 }
 
 func (d *device) synchronize(ctx context.Context) error {
-	if err := d.bulkWrite(ctx, []byte{0xab}); err != nil {
+	if err := d.raw.WriteExact(ctx, []byte{0xab}); err != nil {
 		return err
 	}
-	payload, err := d.bulkRead(ctx, 2)
+	payload, err := d.raw.ReadPayload(ctx, 2)
 	if err != nil {
 		return err
 	}
@@ -200,40 +200,6 @@ func (d *device) control(
 		)
 	}
 	return nil
-}
-
-func (d *device) bulkWrite(ctx context.Context, data []byte) error {
-	count, err := d.raw.BulkWrite(ctx, data)
-	if err != nil {
-		return err
-	}
-	if count != len(data) {
-		return fmt.Errorf("ostiole: short USB write %d/%d", count, len(data))
-	}
-	return nil
-}
-
-func (d *device) bulkRead(ctx context.Context, payloadBytes int) ([]byte, error) {
-	payload := make([]byte, 0, payloadBytes)
-	for len(payload) < payloadBytes {
-		raw := make([]byte, payloadBytes-len(payload)+2)
-		count, err := d.raw.BulkRead(ctx, raw)
-		if err != nil {
-			return nil, err
-		}
-		payload, err = appendFTDIPacket(payload, raw, count)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return payload, nil
-}
-
-func appendFTDIPacket(payload, packet []byte, count int) ([]byte, error) {
-	if count < 2 {
-		return nil, fmt.Errorf("ostiole: short FTDI status packet: %d", count)
-	}
-	return append(payload, packet[2:count]...), nil
 }
 
 func (d *device) jtagToSWD(ctx context.Context) error {
@@ -288,13 +254,13 @@ func (d *device) swdIO(
 	bits int,
 ) ([]byte, error) {
 	commands, reads := swdCommands(direction, output, bits)
-	if err := d.bulkWrite(ctx, commands); err != nil {
+	if err := d.raw.WriteExact(ctx, commands); err != nil {
 		return nil, err
 	}
 	var response []byte
 	if len(reads) != 0 {
 		var err error
-		response, err = d.bulkRead(ctx, len(reads))
+		response, err = d.raw.ReadPayload(ctx, len(reads))
 		if err != nil {
 			return nil, err
 		}

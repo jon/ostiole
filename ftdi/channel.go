@@ -61,11 +61,12 @@ type usbDevice interface {
 
 // Channel addresses one explicit MPSSE-capable USB function.
 type Channel struct {
-	device  usbDevice
-	iface   uint8
-	index   uint16
-	bulkIn  uint8
-	bulkOut uint8
+	device     usbDevice
+	iface      uint8
+	index      uint16
+	bulkIn     uint8
+	bulkOut    uint8
+	packetSize int
 }
 
 // NewChannel binds an open USB device to one explicit MPSSE port.
@@ -91,11 +92,12 @@ func newChannel(device usbDevice, config Config) (*Channel, error) {
 	}
 	iface := uint8(config.Port - PortA)
 	return &Channel{
-		device:  device,
-		iface:   iface,
-		index:   uint16(iface) + 1,
-		bulkIn:  0x81 + 2*iface,
-		bulkOut: 0x02 + 2*iface,
+		device:     device,
+		iface:      iface,
+		index:      uint16(iface) + 1,
+		bulkIn:     0x81 + 2*iface,
+		bulkOut:    0x02 + 2*iface,
+		packetSize: 512,
 	}, nil
 }
 
@@ -138,16 +140,14 @@ func (c *Channel) Control(
 	)
 }
 
-// BulkWrite writes to the selected channel's OUT endpoint.
-func (c *Channel) BulkWrite(
+func (c *Channel) bulkWrite(
 	ctx context.Context,
 	data []byte,
 ) (int, error) {
 	return c.device.BulkWrite(ctx, c.bulkOut, data)
 }
 
-// BulkRead reads from the selected channel's IN endpoint.
-func (c *Channel) BulkRead(
+func (c *Channel) bulkRead(
 	ctx context.Context,
 	data []byte,
 ) (int, error) {

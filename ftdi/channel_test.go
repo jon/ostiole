@@ -14,6 +14,8 @@ type fakeUSBDevice struct {
 	wroteEP  uint8
 	readEP   uint8
 	closed   bool
+	writeN   []int
+	readData [][]byte
 }
 
 func (d *fakeUSBDevice) ClaimInterface(iface uint8) error {
@@ -43,6 +45,11 @@ func (d *fakeUSBDevice) BulkWrite(
 	data []byte,
 ) (int, error) {
 	d.wroteEP = endpoint
+	if len(d.writeN) != 0 {
+		count := d.writeN[0]
+		d.writeN = d.writeN[1:]
+		return count, nil
+	}
 	return len(data), nil
 }
 
@@ -52,7 +59,45 @@ func (d *fakeUSBDevice) BulkRead(
 	data []byte,
 ) (int, error) {
 	d.readEP = endpoint
+	if len(d.readData) != 0 {
+		payload := d.readData[0]
+		d.readData = d.readData[1:]
+		return copy(data, payload), nil
+	}
 	return len(data), nil
+}
+
+func TestChannelExchangesExactMPSSEPayloads(t *testing.T) {
+	raw := &fakeUSBDevice{
+		writeN: []int{2, 2},
+		readData: [][]byte{
+			{0x01, 0x60},
+			{0x01, 0x60, 0xaa, 0xbb},
+			{0x01, 0x60, 0xcc},
+		},
+	}
+	channel, err := newChannel(raw, Config{
+		ProductID: PIDFT232H,
+		Port:      PortA,
+		Interface: SWD,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := channel.WriteExact(
+		context.Background(),
+		[]byte{1, 2, 3, 4},
+	); err != nil {
+		t.Fatal(err)
+	}
+	got, err := channel.ReadPayload(context.Background(), 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string([]byte{0xaa, 0xbb, 0xcc}) {
+		t.Fatalf("ReadPayload() = %x", got)
+	}
 }
 
 func (d *fakeUSBDevice) Close() error {
@@ -80,13 +125,13 @@ func TestChannelBindsOneExplicitMPSSEPort(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := channel.BulkWrite(
+	if _, err := channel.bulkWrite(
 		context.Background(),
 		[]byte{1},
 	); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := channel.BulkRead(
+	if _, err := channel.bulkRead(
 		context.Background(),
 		make([]byte, 1),
 	); err != nil {
