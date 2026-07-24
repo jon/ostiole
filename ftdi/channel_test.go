@@ -132,6 +132,36 @@ func TestChannelSynchronizesTheMPSSECommandStream(t *testing.T) {
 	}
 }
 
+func TestChannelConfiguresAConservativeMPSSEClock(t *testing.T) {
+	raw := &fakeUSBDevice{}
+	channel, err := newChannel(raw, Config{
+		ClockHz:   400_000,
+		ProductID: PIDFT232H,
+		Port:      PortA,
+		Interface: SWD,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := channel.Configure(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	want := []byte{
+		0x8a,
+		0x97,
+		0x8d,
+		0x86, 74, 0,
+		0x85,
+		0x80, 0, 1,
+		0x82, 0, 0,
+	}
+	if len(raw.writes) != 1 ||
+		string(raw.writes[0]) != string(want) {
+		t.Fatalf("configuration writes = %x, want %x", raw.writes, want)
+	}
+}
+
 func (d *fakeUSBDevice) BulkRead(
 	_ context.Context,
 	endpoint uint8,
@@ -190,6 +220,7 @@ func TestChannelBindsOneExplicitMPSSEPort(t *testing.T) {
 		ProductID: PIDFT232H,
 		Port:      PortA,
 		Interface: SWD,
+		ClockHz:   400_000,
 	})
 	if err != nil {
 		t.Fatal(err)

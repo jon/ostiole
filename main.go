@@ -16,13 +16,7 @@ const (
 	cmdClockBitsOutNegLSB = 0x1b
 	cmdClockBitsInPosLSB  = 0x2a
 	cmdSetDataLow         = 0x80
-	cmdSetDataHigh        = 0x82
-	cmdDisableLoop        = 0x85
-	cmdSetClockDiv        = 0x86
 	cmdSendImmediate      = 0x87
-	cmdDisableDivBy5      = 0x8a
-	cmdDisable3Phase      = 0x8d
-	cmdDisableAdaptive    = 0x97
 
 	pinClock   = 1 << 0
 	pinDataOut = 1 << 1
@@ -76,6 +70,7 @@ func readDPIDR(ctx context.Context) (value uint32, err error) {
 		return 0, err
 	}
 	channel, err := ftdi.NewChannel(opened, ftdi.Config{
+		ClockHz:   400_000,
 		ProductID: attachments[0].PID,
 		Port:      ftdi.PortA,
 		Interface: ftdi.SWD,
@@ -110,17 +105,7 @@ func (d *device) enterMPSSE(ctx context.Context) error {
 	if err := d.raw.Synchronize(ctx); err != nil {
 		return err
 	}
-	divisor := uint16(60_000_000/(2*400_000) - 1)
-	commands := []byte{
-		cmdDisableDivBy5,
-		cmdDisableAdaptive,
-		cmdDisable3Phase,
-		cmdSetClockDiv, byte(divisor), byte(divisor >> 8),
-		cmdDisableLoop,
-		cmdSetDataLow, 0, pinClock,
-		cmdSetDataHigh, 0, 0,
-	}
-	return d.raw.WriteExact(ctx, commands)
+	return d.raw.Configure(ctx)
 }
 
 func (d *device) jtagToSWD(ctx context.Context) error {

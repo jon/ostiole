@@ -38,8 +38,9 @@ const (
 	SWD
 )
 
-// Config explicitly selects one FTDI product, port, and interface.
+// Config explicitly selects one FTDI product, port, interface, and clock.
 type Config struct {
+	ClockHz   uint32
 	ProductID uint16
 	Port      Port
 	Interface Interface
@@ -66,6 +67,7 @@ type Channel struct {
 	index      uint16
 	bulkIn     uint8
 	bulkOut    uint8
+	clockHz    uint32
 	packetSize int
 	claimed    bool
 	settle     func(context.Context) error
@@ -99,6 +101,7 @@ func newChannel(device usbDevice, config Config) (*Channel, error) {
 		index:      uint16(iface) + 1,
 		bulkIn:     0x81 + 2*iface,
 		bulkOut:    0x02 + 2*iface,
+		clockHz:    config.ClockHz,
 		packetSize: 512,
 		settle:     settleMPSSE,
 	}, nil
