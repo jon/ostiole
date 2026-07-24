@@ -30,12 +30,14 @@ target, inspect a system, or provide a project-specific recovery utility.
 
 ## Status
 
-Ostiole is at an early, exploratory stage. This revision contains repository
-scaffolding only and does not yet communicate with hardware.
+Ostiole is at an early, exploratory stage. This revision is a deliberately
+small proof of life: one pure-Go Linux program opens a generic FTDI H-series
+attachment, speaks Serial Wire Debug through its MPSSE interface, and reads a
+debug port's identification register.
 
-The first working slice is intended to be deliberately modest: pure-Go USB
-access on Linux, a generic FTDI device with an MPSSE-capable interface, Serial
-Wire Debug, and read-only identification of a generic Arm Cortex-M target.
+The implementation is still contained in the program itself. Later revisions
+will extract its working pieces into reusable packages without changing the
+wire behavior established here.
 
 ## Design direction
 
@@ -59,6 +61,29 @@ Debug and programming interfaces can reset processors, halt execution, modify
 memory, reconfigure programmable logic, and change persistent device state.
 Early hardware work is deliberately read-only. Operations with broader effects
 should be explicit and separately gated.
+
+## Linux proof of life
+
+The program expects exactly one supported FTDI H-series attachment and uses
+MPSSE channel A at 400 kHz. Connect it to a powered SWD target as follows:
+
+| Adapter signal | Target signal |
+| --- | --- |
+| D0 | SWCLK |
+| D1 through a 1 kΩ series resistor | SWDIO |
+| D2 | SWDIO |
+| GND | GND |
+
+The target supplies its own power. No reset or target-power connection is
+used. On Linux, run:
+
+```sh
+sudo go run .
+```
+
+A successful read prints only the debug-port identity, for example
+`DPIDR=0x2ba01477`. The operation does not halt or reset the target and does
+not write target memory.
 
 ## License
 
