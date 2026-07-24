@@ -43,6 +43,12 @@ USB attachment discovery and exact-device opening now live in `usb`;
 the package also owns the selected interface and performs bounded control
 and bulk transfers. The proof no longer performs Linux USB operations itself.
 
+The proof explicitly binds the selected attachment to FTDI MPSSE port A
+for SWD. Protocol framing and session setup remain visible in `main.go`.
+
+This initial FTDI path uses the standard H-series MPSSE port and endpoint
+layout. Descriptor-driven port binding is not implemented yet.
+
 ## Design direction
 
 Ostiole keeps the major hardware-access layers separate:
@@ -69,7 +75,7 @@ should be explicit and separately gated.
 ## Linux proof of life
 
 The program expects exactly one supported FTDI H-series attachment and uses
-MPSSE channel A at 400 kHz. Connect it to a powered SWD target as follows:
+MPSSE port A at 400 kHz. Connect it to a powered SWD target as follows:
 
 | Adapter signal | Target signal |
 | --- | --- |

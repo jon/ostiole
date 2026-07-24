@@ -8,25 +8,14 @@ import (
 	"os"
 	"time"
 
+	"github.com/jon/ostiole/ftdi"
 	"github.com/jon/ostiole/usb"
 )
 
 const (
-	ftdiVID = 0x0403
-
-	ft2232hPID = 0x6010
-	ft4232hPID = 0x6011
-	ft232hPID  = 0x6014
-
-	interfaceA = 0
-	indexA     = 1
-	bulkOutA   = 0x02
-	bulkInA    = 0x81
-
 	requestReset      = 0x00
 	requestSetLatency = 0x09
 	requestSetBitmode = 0x0b
-	requestTypeOut    = 0x40
 
 	cmdClockBitsOutNegLSB = 0x1b
 	cmdClockBitsInPosLSB  = 0x2a
@@ -46,7 +35,7 @@ const (
 )
 
 type device struct {
-	raw     *usb.Device
+	raw     *ftdi.Channel
 	claimed bool
 }
 
@@ -74,9 +63,9 @@ func main() {
 func readDPIDR(ctx context.Context) (value uint32, err error) {
 	enumerator := usb.New()
 	attachments, err := enumerator.List(ctx, []usb.DeviceFilter{
-		{VID: ftdiVID, PID: ft2232hPID},
-		{VID: ftdiVID, PID: ft4232hPID},
-		{VID: ftdiVID, PID: ft232hPID},
+		{VID: ftdi.VID, PID: ftdi.PIDFT2232H},
+		{VID: ftdi.VID, PID: ftdi.PIDFT4232H},
+		{VID: ftdi.VID, PID: ftdi.PIDFT232H},
 	})
 	if err != nil {
 		return 0, err
@@ -91,7 +80,15 @@ func readDPIDR(ctx context.Context) (value uint32, err error) {
 	if err != nil {
 		return 0, err
 	}
-	raw := &device{raw: opened}
+	channel, err := ftdi.NewChannel(opened, ftdi.Config{
+		ProductID: attachments[0].PID,
+		Port:      ftdi.PortA,
+		Interface: ftdi.SWD,
+	})
+	if err != nil {
+		return 0, errors.Join(err, opened.Close())
+	}
+	raw := &device{raw: channel}
 	defer func() {
 		err = errors.Join(err, raw.close())
 	}()
@@ -112,7 +109,7 @@ func readDPIDR(ctx context.Context) (value uint32, err error) {
 }
 
 func (d *device) enterMPSSE(ctx context.Context) error {
-	if err := d.raw.ClaimInterface(interfaceA); err != nil {
+	if err := d.raw.Claim(); err != nil {
 		return fmt.Errorf("ostiole: claim USB interface: %w", err)
 	}
 	d.claimed = true
@@ -125,7 +122,7 @@ func (d *device) enterMPSSE(ctx context.Context) error {
 		{requestSetBitmode, 0x0200},
 	}
 	for _, step := range steps {
-		if err := d.control(ctx, uint8(step[0]), step[1], indexA); err != nil {
+		if err := d.control(ctx, uint8(step[0]), step[1]); err != nil {
 			return err
 		}
 	}
@@ -180,10 +177,10 @@ func (d *device) close() error {
 		} {
 			result = errors.Join(
 				result,
-				d.control(ctx, uint8(step[0]), step[1], indexA),
+				d.control(ctx, uint8(step[0]), step[1]),
 			)
 		}
-		result = errors.Join(result, d.raw.ReleaseInterface(interfaceA))
+		result = errors.Join(result, d.raw.Release())
 	}
 	return errors.Join(result, d.raw.Close())
 }
@@ -191,16 +188,9 @@ func (d *device) close() error {
 func (d *device) control(
 	ctx context.Context,
 	request uint8,
-	value, index uint16,
+	value uint16,
 ) error {
-	_, err := d.raw.ControlTransfer(
-		ctx,
-		requestTypeOut,
-		request,
-		value,
-		index,
-		nil,
-	)
+	_, err := d.raw.Control(ctx, request, value)
 	if err != nil {
 		return fmt.Errorf(
 			"ostiole: FTDI request %#02x value %#04x: %w",
@@ -213,7 +203,7 @@ func (d *device) control(
 }
 
 func (d *device) bulkWrite(ctx context.Context, data []byte) error {
-	count, err := d.raw.BulkWrite(ctx, bulkOutA, data)
+	count, err := d.raw.BulkWrite(ctx, data)
 	if err != nil {
 		return err
 	}
@@ -227,7 +217,7 @@ func (d *device) bulkRead(ctx context.Context, payloadBytes int) ([]byte, error)
 	payload := make([]byte, 0, payloadBytes)
 	for len(payload) < payloadBytes {
 		raw := make([]byte, payloadBytes-len(payload)+2)
-		count, err := d.raw.BulkRead(ctx, bulkInA, raw)
+		count, err := d.raw.BulkRead(ctx, raw)
 		if err != nil {
 			return nil, err
 		}
