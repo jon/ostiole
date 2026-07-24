@@ -1,0 +1,34 @@
+version: "2"
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+linters:
+  default: standard
+  enable:
+    - cyclop
+    - dupl
+    - funlen
+    - gocognit
+    - nestif
+  settings:
+    cyclop:
+      max-complexity: 12
+    dupl:
+      threshold: 100
+    funlen:
+      lines: 60
+      statements: 40
+      ignore-comments: true
+    gocognit:
+      min-complexity: 20
+    nestif:
+      min-complexity: 5
+  exclusions:
+    rules:
+      # Production thresholds apply to every non-test Go file. Test files use
+      # the relaxed, independently enforced profile in .golangci.tests.yml.
+      - path: "_test\\.go$"
+        linters: [cyclop, dupl, funlen, gocognit, nestif]
+run:
+  timeout: 5m

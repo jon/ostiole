@@ -1,0 +1,32 @@
+version: "2"
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+linters:
+  default: none
+  enable:
+    - cyclop
+    - dupl
+    - funlen
+    - gocognit
+    - nestif
+  settings:
+    cyclop:
+      max-complexity: 18
+    dupl:
+      threshold: 150
+    funlen:
+      lines: 100
+      statements: 60
+      ignore-comments: true
+    gocognit:
+      min-complexity: 30
+    nestif:
+      min-complexity: 8
+  exclusions:
+    rules:
+      # This profile measures test code only; production files are enforced by
+      # the stricter repository profile in .golangci.yml.
+      - path-except: "_test\\.go$"
+        linters: [cyclop, dupl, funlen, gocognit, nestif]
