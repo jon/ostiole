@@ -1,0 +1,85 @@
+package ftdi
+
+import (
+	"context"
+	"errors"
+	"testing"
+)
+
+func TestOpenClosesAnInvalidSelection(t *testing.T) {
+	raw := &fakeUSBDevice{}
+
+	channel, err := openChannel(context.Background(), raw, Config{
+		ClockHz:   400_000,
+		ProductID: 0xffff,
+		Port:      PortA,
+		Interface: SWD,
+	})
+	if channel != nil || err == nil || !raw.closed {
+		t.Fatalf("openChannel() = (%T, %v), raw = %#v", channel, err, raw)
+	}
+}
+
+func TestOpenRejectsANilUSBDevice(t *testing.T) {
+	if channel, err := Open(
+		context.Background(),
+		nil,
+		Config{},
+	); channel != nil || err == nil {
+		t.Fatalf("Open(nil) = (%T, %v)", channel, err)
+	}
+}
+
+func TestOpenCleansUpEveryFailedPreparationStage(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  *fakeUSBDevice
+	}{
+		{
+			name: "mode entry",
+			raw: &fakeUSBDevice{
+				claimErr: errors.New("injected claim failure"),
+			},
+		},
+		{
+			name: "synchronization",
+			raw: &fakeUSBDevice{
+				readData: [][]byte{{0x01, 0x60, 0x00, 0x00}},
+			},
+		},
+		{
+			name: "configuration",
+			raw: &fakeUSBDevice{
+				readData: [][]byte{{0x01, 0x60, 0xfa, 0xab}},
+				writeErr: 2,
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			channel, err := newChannel(test.raw, Config{
+				ClockHz:   400_000,
+				ProductID: PIDFT232H,
+				Port:      PortA,
+				Interface: SWD,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			channel.settle = func(context.Context) error { return nil }
+
+			ready, err := prepareChannel(context.Background(), channel)
+			if ready != nil || err == nil || !test.raw.closed {
+				t.Fatalf(
+					"prepareChannel() = (%T, %v), raw = %#v",
+					ready,
+					err,
+					test.raw,
+				)
+			}
+			if test.name != "mode entry" && test.raw.releases != 1 {
+				t.Fatalf("release count = %d, want 1", test.raw.releases)
+			}
+		})
+	}
+}

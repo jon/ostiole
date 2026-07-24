@@ -18,8 +18,7 @@ type controlStep struct {
 	value   uint16
 }
 
-// EnterMPSSE claims the selected port and places it in MPSSE mode.
-func (c *Channel) EnterMPSSE(ctx context.Context) error {
+func (c *Channel) enterMPSSE(ctx context.Context) error {
 	if err := c.claim(); err != nil {
 		return fmt.Errorf("ftdi: claim USB interface: %w", err)
 	}

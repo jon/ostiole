@@ -5,8 +5,7 @@ import (
 	"fmt"
 )
 
-// Synchronize verifies that the MPSSE command parser is aligned.
-func (c *Channel) Synchronize(ctx context.Context) error {
+func (c *Channel) synchronize(ctx context.Context) error {
 	const invalidCommand = 0xab
 	if err := c.writeExact(ctx, []byte{invalidCommand}); err != nil {
 		return err

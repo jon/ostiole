@@ -2,6 +2,7 @@ package ftdi
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -18,6 +19,10 @@ type fakeUSBDevice struct {
 	readData [][]byte
 	controls []controlRecord
 	writes   [][]byte
+	claimErr error
+	writeErr int
+	writesN  int
+	releases int
 }
 
 type controlRecord struct {
@@ -27,12 +32,16 @@ type controlRecord struct {
 }
 
 func (d *fakeUSBDevice) ClaimInterface(iface uint8) error {
+	if d.claimErr != nil {
+		return d.claimErr
+	}
 	d.claimed = iface
 	return nil
 }
 
 func (d *fakeUSBDevice) ReleaseInterface(iface uint8) error {
 	d.released = iface
+	d.releases++
 	return nil
 }
 
@@ -64,7 +73,7 @@ func TestChannelOwnsAndRestoresMPSSEMode(t *testing.T) {
 	}
 	channel.settle = func(context.Context) error { return nil }
 
-	if err := channel.EnterMPSSE(context.Background()); err != nil {
+	if err := channel.enterMPSSE(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if err := channel.Close(); err != nil {
@@ -100,6 +109,10 @@ func (d *fakeUSBDevice) BulkWrite(
 	endpoint uint8,
 	data []byte,
 ) (int, error) {
+	d.writesN++
+	if d.writeErr == d.writesN {
+		return 0, errors.New("injected write failure")
+	}
 	d.wroteEP = endpoint
 	d.writes = append(d.writes, append([]byte(nil), data...))
 	if len(d.writeN) != 0 {
@@ -123,7 +136,7 @@ func TestChannelSynchronizesTheMPSSECommandStream(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := channel.Synchronize(context.Background()); err != nil {
+	if err := channel.synchronize(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if len(raw.writes) != 1 ||
@@ -144,7 +157,7 @@ func TestChannelConfiguresAConservativeMPSSEClock(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := channel.Configure(context.Background()); err != nil {
+	if err := channel.configure(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	want := []byte{
@@ -270,11 +283,5 @@ func TestChannelRejectsUnsupportedSelections(t *testing.T) {
 		if _, err := newChannel(&fakeUSBDevice{}, config); err == nil {
 			t.Fatalf("newChannel(%#v) succeeded", config)
 		}
-	}
-}
-
-func TestNewChannelRejectsANilUSBDevice(t *testing.T) {
-	if channel, err := NewChannel(nil, Config{}); channel != nil || err == nil {
-		t.Fatalf("NewChannel(nil) = (%T, %v)", channel, err)
 	}
 }

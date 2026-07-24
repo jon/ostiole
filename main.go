@@ -56,22 +56,19 @@ func readDPIDR(ctx context.Context) (value uint32, err error) {
 	if err != nil {
 		return 0, err
 	}
-	channel, err := ftdi.NewChannel(opened, ftdi.Config{
+	channel, err := ftdi.Open(ctx, opened, ftdi.Config{
 		ClockHz:   400_000,
 		ProductID: attachments[0].PID,
 		Port:      ftdi.PortA,
 		Interface: ftdi.SWD,
 	})
 	if err != nil {
-		return 0, errors.Join(err, opened.Close())
+		return 0, err
 	}
 	raw := &device{raw: channel}
 	defer func() {
 		err = errors.Join(err, raw.raw.Close())
 	}()
-	if err := raw.enterMPSSE(ctx); err != nil {
-		return 0, err
-	}
 	if err := raw.jtagToSWD(ctx); err != nil {
 		return 0, err
 	}
@@ -83,16 +80,6 @@ func readDPIDR(ctx context.Context) (value uint32, err error) {
 		return 0, fmt.Errorf("ostiole: invalid DPIDR %#08x", value)
 	}
 	return value, nil
-}
-
-func (d *device) enterMPSSE(ctx context.Context) error {
-	if err := d.raw.EnterMPSSE(ctx); err != nil {
-		return err
-	}
-	if err := d.raw.Synchronize(ctx); err != nil {
-		return err
-	}
-	return d.raw.Configure(ctx)
 }
 
 func (d *device) jtagToSWD(ctx context.Context) error {

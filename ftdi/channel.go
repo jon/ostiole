@@ -5,8 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
-	"github.com/jon/ostiole/usb"
 )
 
 const (
@@ -71,14 +69,6 @@ type Channel struct {
 	packetSize int
 	claimed    bool
 	settle     func(context.Context) error
-}
-
-// NewChannel binds an open USB device to one explicit MPSSE port.
-func NewChannel(device *usb.Device, config Config) (*Channel, error) {
-	if device == nil {
-		return nil, errors.New("ftdi: nil USB device")
-	}
-	return newChannel(device, config)
 }
 
 func newChannel(device usbDevice, config Config) (*Channel, error) {

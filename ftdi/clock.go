@@ -19,8 +19,7 @@ const (
 	pinClock           = 1 << 0
 )
 
-// Configure selects a conservative clock and the idle SWD pin state.
-func (c *Channel) Configure(ctx context.Context) error {
+func (c *Channel) configure(ctx context.Context) error {
 	divisor, err := clockDivisor(c.clockHz)
 	if err != nil {
 		return err
