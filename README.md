@@ -39,8 +39,8 @@ The implementation is still contained in the program itself. Later revisions
 will extract its working pieces into reusable packages without changing the
 wire behavior established here.
 
-USB attachment discovery now lives in `usb`; the proof still opens and
-operates the selected attachment directly.
+USB attachment discovery and exact-device opening now live in `usb`;
+the proof still performs interface and transfer operations directly.
 
 ## Design direction
 

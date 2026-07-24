@@ -1,6 +1,13 @@
 // Package usb provides pure-Go USB access for Ostiole.
 package usb
 
+import (
+	"errors"
+)
+
+// ErrStaleCandidate reports that an attachment changed after enumeration.
+var ErrStaleCandidate = errors.New("usb: stale candidate")
+
 // DeviceFilter selects devices by vendor and product ID.
 // A zero PID matches any product from the selected vendor.
 type DeviceFilter struct {

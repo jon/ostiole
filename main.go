@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"path/filepath"
 	"syscall"
 	"time"
 	"unsafe"
@@ -71,7 +70,7 @@ type usbBulkTransfer struct {
 }
 
 type device struct {
-	file    *os.File
+	raw     *usb.Device
 	claimed bool
 }
 
@@ -112,10 +111,11 @@ func readDPIDR(ctx context.Context) (value uint32, err error) {
 			len(attachments),
 		)
 	}
-	raw, err := openAttachment("/dev/bus/usb", attachments[0])
+	opened, err := enumerator.Open(ctx, attachments[0])
 	if err != nil {
 		return 0, err
 	}
+	raw := &device{raw: opened}
 	defer func() {
 		err = errors.Join(err, raw.close())
 	}()
@@ -133,19 +133,6 @@ func readDPIDR(ctx context.Context) (value uint32, err error) {
 		return 0, fmt.Errorf("ostiole: invalid DPIDR %#08x", value)
 	}
 	return value, nil
-}
-
-func openAttachment(root string, item usb.DeviceInfo) (*device, error) {
-	path := filepath.Join(
-		root,
-		fmt.Sprintf("%03d", item.Bus),
-		fmt.Sprintf("%03d", item.Address),
-	)
-	file, err := os.OpenFile(path, os.O_RDWR, 0)
-	if err != nil {
-		return nil, fmt.Errorf("ostiole: open USB attachment: %w", err)
-	}
-	return &device{file: file}, nil
 }
 
 func (d *device) enterMPSSE(ctx context.Context) error {
@@ -202,7 +189,7 @@ func (d *device) synchronize(ctx context.Context) error {
 }
 
 func (d *device) close() error {
-	if d.file == nil {
+	if d.raw == nil {
 		return nil
 	}
 	var result error
@@ -222,7 +209,7 @@ func (d *device) close() error {
 		}
 		result = errors.Join(result, d.interfaceIOCTL(usbfsReleaseInterface))
 	}
-	return errors.Join(result, d.file.Close())
+	return errors.Join(result, d.raw.Close())
 }
 
 func (d *device) control(
@@ -242,7 +229,7 @@ func (d *device) control(
 	}
 	_, _, errno := syscall.Syscall(
 		syscall.SYS_IOCTL,
-		d.file.Fd(),
+		d.raw.FD(),
 		usbfsControl,
 		uintptr(unsafe.Pointer(&transfer)),
 	)
@@ -261,7 +248,7 @@ func (d *device) interfaceIOCTL(request uintptr) error {
 	value := uint32(interfaceA)
 	_, _, errno := syscall.Syscall(
 		syscall.SYS_IOCTL,
-		d.file.Fd(),
+		d.raw.FD(),
 		request,
 		uintptr(unsafe.Pointer(&value)),
 	)
@@ -323,7 +310,7 @@ func (d *device) bulkTransfer(
 	}
 	count, _, errno := syscall.Syscall(
 		syscall.SYS_IOCTL,
-		d.file.Fd(),
+		d.raw.FD(),
 		usbfsBulk,
 		uintptr(unsafe.Pointer(&transfer)),
 	)
