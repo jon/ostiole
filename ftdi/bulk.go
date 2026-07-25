@@ -6,8 +6,7 @@ import (
 	"io"
 )
 
-// WriteExact sends one complete MPSSE command stream.
-func (c *Channel) WriteExact(ctx context.Context, data []byte) error {
+func (c *Channel) writeExact(ctx context.Context, data []byte) error {
 	for position := 0; position < len(data); {
 		count, err := c.bulkWrite(ctx, data[position:])
 		if count < 0 || count > len(data)-position {
@@ -28,9 +27,7 @@ func (c *Channel) WriteExact(ctx context.Context, data []byte) error {
 	return nil
 }
 
-// ReadPayload reads exactly size MPSSE payload bytes, discarding the two
-// modem-status bytes at the front of every FTDI USB packet.
-func (c *Channel) ReadPayload(
+func (c *Channel) readPayload(
 	ctx context.Context,
 	size int,
 ) ([]byte, error) {

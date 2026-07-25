@@ -194,13 +194,13 @@ func TestChannelExchangesExactMPSSEPayloads(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := channel.WriteExact(
+	if err := channel.writeExact(
 		context.Background(),
 		[]byte{1, 2, 3, 4},
 	); err != nil {
 		t.Fatal(err)
 	}
-	got, err := channel.ReadPayload(context.Background(), 3)
+	got, err := channel.readPayload(context.Background(), 3)
 	if err != nil {
 		t.Fatal(err)
 	}

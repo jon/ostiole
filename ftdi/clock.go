@@ -25,7 +25,7 @@ func (c *Channel) Configure(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return c.WriteExact(ctx, []byte{
+	return c.writeExact(ctx, []byte{
 		cmdDisableDivBy5,
 		cmdDisableAdaptive,
 		cmdDisable3Phase,

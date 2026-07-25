@@ -8,10 +8,10 @@ import (
 // Synchronize verifies that the MPSSE command parser is aligned.
 func (c *Channel) Synchronize(ctx context.Context) error {
 	const invalidCommand = 0xab
-	if err := c.WriteExact(ctx, []byte{invalidCommand}); err != nil {
+	if err := c.writeExact(ctx, []byte{invalidCommand}); err != nil {
 		return err
 	}
-	payload, err := c.ReadPayload(ctx, 2)
+	payload, err := c.readPayload(ctx, 2)
 	if err != nil {
 		return err
 	}
