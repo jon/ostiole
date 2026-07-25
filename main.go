@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"syscall"
 	"time"
-	"unsafe"
 
 	"github.com/jon/ostiole/usb"
 )
@@ -24,8 +22,6 @@ const (
 	indexA     = 1
 	bulkOutA   = 0x02
 	bulkInA    = 0x81
-
-	usbfsBulk = 0xc0185502
 
 	requestReset      = 0x00
 	requestSetLatency = 0x09
@@ -48,13 +44,6 @@ const (
 
 	transferTimeout = 5 * time.Second
 )
-
-type usbBulkTransfer struct {
-	Endpoint uint32
-	Length   uint32
-	Timeout  uint32
-	Data     uintptr
-}
 
 type device struct {
 	raw     *usb.Device
@@ -224,7 +213,7 @@ func (d *device) control(
 }
 
 func (d *device) bulkWrite(ctx context.Context, data []byte) error {
-	count, err := d.bulkTransfer(ctx, bulkOutA, data)
+	count, err := d.raw.BulkWrite(ctx, bulkOutA, data)
 	if err != nil {
 		return err
 	}
@@ -238,7 +227,7 @@ func (d *device) bulkRead(ctx context.Context, payloadBytes int) ([]byte, error)
 	payload := make([]byte, 0, payloadBytes)
 	for len(payload) < payloadBytes {
 		raw := make([]byte, payloadBytes-len(payload)+2)
-		count, err := d.bulkTransfer(ctx, bulkInA, raw)
+		count, err := d.raw.BulkRead(ctx, bulkInA, raw)
 		if err != nil {
 			return nil, err
 		}
@@ -255,34 +244,6 @@ func appendFTDIPacket(payload, packet []byte, count int) ([]byte, error) {
 		return nil, fmt.Errorf("ostiole: short FTDI status packet: %d", count)
 	}
 	return append(payload, packet[2:count]...), nil
-}
-
-func (d *device) bulkTransfer(
-	ctx context.Context,
-	endpoint uint8,
-	data []byte,
-) (int, error) {
-	if err := ctx.Err(); err != nil {
-		return 0, err
-	}
-	transfer := usbBulkTransfer{
-		Endpoint: uint32(endpoint),
-		Length:   uint32(len(data)),
-		Timeout:  uint32(transferTimeout / time.Millisecond),
-	}
-	if len(data) != 0 {
-		transfer.Data = uintptr(unsafe.Pointer(&data[0]))
-	}
-	count, _, errno := syscall.Syscall(
-		syscall.SYS_IOCTL,
-		d.raw.FD(),
-		usbfsBulk,
-		uintptr(unsafe.Pointer(&transfer)),
-	)
-	if errno != 0 {
-		return 0, fmt.Errorf("ostiole: USB bulk endpoint %#02x: %w", endpoint, errno)
-	}
-	return int(count), nil
 }
 
 func (d *device) jtagToSWD(ctx context.Context) error {

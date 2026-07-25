@@ -10,9 +10,6 @@ import (
 )
 
 // Device is one open Linux usbfs attachment.
-//
-// FD exists as a temporary bridge while callers move their remaining raw
-// usbfs operations behind Device methods.
 type Device struct {
 	file      *os.File
 	ioctl     ioctlFunc
@@ -89,14 +86,6 @@ func (e *Enumerator) revalidate(
 		expected.Bus,
 		expected.Address,
 	)
-}
-
-// FD returns the usbfs file descriptor for operations not yet extracted.
-func (d *Device) FD() uintptr {
-	if d == nil || d.file == nil {
-		return 0
-	}
-	return d.file.Fd()
 }
 
 // Close releases the open usbfs attachment.

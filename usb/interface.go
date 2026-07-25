@@ -86,6 +86,8 @@ func usbfsIOCTL(
 		pointer = unsafe.Pointer(value)
 	case *usbControlTransfer:
 		pointer = unsafe.Pointer(value)
+	case *usbBulkTransfer:
+		pointer = unsafe.Pointer(value)
 	default:
 		return 0, fmt.Errorf(
 			"usb: unsupported ioctl argument %T",

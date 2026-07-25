@@ -41,7 +41,7 @@ wire behavior established here.
 
 USB attachment discovery and exact-device opening now live in `usb`;
 the package also owns the selected interface and performs bounded control
-transfers. Bulk transfers remain in the proof.
+and bulk transfers. The proof no longer performs Linux USB operations itself.
 
 ## Design direction
 

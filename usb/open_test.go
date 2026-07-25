@@ -28,9 +28,6 @@ func TestOpenRevalidatesAndOwnsExactUSBDevice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if device.FD() == 0 {
-		t.Fatal("opened device has an invalid file descriptor")
-	}
 	if err := device.Close(); err != nil {
 		t.Fatal(err)
 	}
