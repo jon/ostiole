@@ -107,7 +107,7 @@ func (d *device) enterMPSSE(ctx context.Context) error {
 	if err := d.raw.EnterMPSSE(ctx); err != nil {
 		return err
 	}
-	if err := d.synchronize(ctx); err != nil {
+	if err := d.raw.Synchronize(ctx); err != nil {
 		return err
 	}
 	divisor := uint16(60_000_000/(2*400_000) - 1)
@@ -121,20 +121,6 @@ func (d *device) enterMPSSE(ctx context.Context) error {
 		cmdSetDataHigh, 0, 0,
 	}
 	return d.raw.WriteExact(ctx, commands)
-}
-
-func (d *device) synchronize(ctx context.Context) error {
-	if err := d.raw.WriteExact(ctx, []byte{0xab}); err != nil {
-		return err
-	}
-	payload, err := d.raw.ReadPayload(ctx, 2)
-	if err != nil {
-		return err
-	}
-	if len(payload) != 2 || payload[0] != 0xfa || payload[1] != 0xab {
-		return fmt.Errorf("ostiole: unexpected MPSSE synchronization %x", payload)
-	}
-	return nil
 }
 
 func (d *device) jtagToSWD(ctx context.Context) error {

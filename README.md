@@ -46,7 +46,8 @@ and bulk transfers. The proof no longer performs Linux USB operations itself.
 The proof explicitly binds the selected attachment to FTDI MPSSE port A
 for SWD. The FTDI package also exchanges exact command and response
 payloads, owns the interface, and restores it on close. Protocol framing and
-MPSSE command setup remain visible in `main.go`.
+MPSSE clock setup remain visible in `main.go`; command-stream synchronization
+is handled by the channel.
 
 This initial FTDI path uses the standard H-series MPSSE port and endpoint
 layout. Descriptor-driven port binding is not implemented yet.

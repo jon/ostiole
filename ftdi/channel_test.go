@@ -17,6 +17,7 @@ type fakeUSBDevice struct {
 	writeN   []int
 	readData [][]byte
 	controls []controlRecord
+	writes   [][]byte
 }
 
 type controlRecord struct {
@@ -100,12 +101,35 @@ func (d *fakeUSBDevice) BulkWrite(
 	data []byte,
 ) (int, error) {
 	d.wroteEP = endpoint
+	d.writes = append(d.writes, append([]byte(nil), data...))
 	if len(d.writeN) != 0 {
 		count := d.writeN[0]
 		d.writeN = d.writeN[1:]
 		return count, nil
 	}
 	return len(data), nil
+}
+
+func TestChannelSynchronizesTheMPSSECommandStream(t *testing.T) {
+	raw := &fakeUSBDevice{
+		readData: [][]byte{{0x01, 0x60, 0xfa, 0xab}},
+	}
+	channel, err := newChannel(raw, Config{
+		ProductID: PIDFT232H,
+		Port:      PortA,
+		Interface: SWD,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := channel.Synchronize(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(raw.writes) != 1 ||
+		string(raw.writes[0]) != string([]byte{0xab}) {
+		t.Fatalf("synchronization writes = %x", raw.writes)
+	}
 }
 
 func (d *fakeUSBDevice) BulkRead(
