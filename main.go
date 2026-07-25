@@ -38,11 +38,7 @@ func main() {
 
 func readDPIDR(ctx context.Context) (value uint32, err error) {
 	enumerator := usb.New()
-	attachments, err := enumerator.List(ctx, []usb.DeviceFilter{
-		{VID: ftdi.VID, PID: ftdi.PIDFT2232H},
-		{VID: ftdi.VID, PID: ftdi.PIDFT4232H},
-		{VID: ftdi.VID, PID: ftdi.PIDFT232H},
-	})
+	attachments, err := enumerator.List(ctx, ftdi.SupportedDevices())
 	if err != nil {
 		return 0, err
 	}
