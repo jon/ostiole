@@ -39,7 +39,8 @@ protocol entry and basic DP/AP register transfers against a caller-supplied
 target.
 
 The `dap` package begins the next layer with the debug-port registers and
-identity fields needed for ADIv5 access.
+identity fields needed for ADIv5 access. Its simulator models SW-DP identity,
+sticky status, register selection, and power state.
 
 The first [example](examples/trivial/swd-dpidr) composes those public packages
 to open one supported attachment and read a debug port's identification
