@@ -38,9 +38,10 @@ The `swd/sim` package provides a hardware-free behavioral wire that models SWD
 protocol entry and basic DP/AP register transfers against a caller-supplied
 target.
 
-The `dap` package begins the next layer with ADIv5 debug-port identity and raw
-SW-DP register access. Its simulator models SW-DP identity, sticky status,
-register selection, and power state.
+The `dap` package begins the next layer with ADIv5 debug-port identity, raw
+SW-DP registers, and an explicit connection lifecycle. A connection clears
+sticky status, selects the base register bank, and restores only the power
+requests it acquired. The simulator models the same state changes.
 
 The first [example](examples/trivial/swd-dpidr) composes those public packages
 to open one supported attachment and read a debug port's identification
@@ -70,8 +71,9 @@ introduced as independent pieces once their behavior is specified and tested.
 
 Debug and programming interfaces can reset processors, halt execution, modify
 memory, reconfigure programmable logic, and change persistent device state.
-Early hardware work is deliberately read-only. Operations with broader effects
-should be explicit and separately gated.
+Early hardware work avoids reset, halt, target-memory writes, and persistent
+changes. Establishing an ADIv5 connection does change volatile debug-port
+control state; the connection releases its own power requests before return.
 
 ## SWD DPIDR example
 

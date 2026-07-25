@@ -10,7 +10,11 @@ import (
 
 // DebugPort accesses one SW-DP through an entered SWD connection.
 type DebugPort struct {
-	conn *swd.Conn
+	conn       *swd.Conn
+	identity   DPIDRInfo
+	identified bool
+	connected  bool
+	ownedPower uint32
 }
 
 // NewSWDP returns a debug-port client over conn.

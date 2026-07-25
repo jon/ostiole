@@ -1,0 +1,208 @@
+package dap_test
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/jon/ostiole/dap"
+	"github.com/jon/ostiole/dap/sim"
+	"github.com/jon/ostiole/swd"
+	swdsim "github.com/jon/ostiole/swd/sim"
+)
+
+const (
+	debugRequest  = uint32(1 << 28)
+	debugAck      = uint32(1 << 29)
+	systemRequest = uint32(1 << 30)
+	systemAck     = uint32(1 << 31)
+	allPower      = debugRequest | debugAck | systemRequest | systemAck
+)
+
+func TestConnectAndReleaseSWDP(t *testing.T) {
+	dp := enteredDP(t, sim.New(0x2ba01477))
+	info, err := dp.Connect(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Raw != 0x2ba01477 {
+		t.Fatalf("DPIDR = %#08x, want 0x2ba01477", info.Raw)
+	}
+	assertPower(t, dp, allPower)
+
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	assertPower(t, dp, 0)
+	if got, ok := dp.Identity(); !ok || got != info {
+		t.Fatalf("Identity() = %+v, %t; want %+v, true", got, ok, info)
+	}
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatalf("repeated Release() failed: %v", err)
+	}
+}
+
+func TestConnectPreservesPowerItDidNotAcquire(t *testing.T) {
+	dp := enteredDP(t, sim.New(0x2ba01477))
+	if err := dp.WriteDP(t.Context(), dap.CTRLSTAT, debugRequest); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	assertPower(t, dp, debugRequest|debugAck)
+}
+
+func TestConnectRollsBackAfterAcknowledgementTimeout(t *testing.T) {
+	target := &powerTarget{dpidr: 0x2ba01477, suppressAck: true}
+	dp := enteredDP(t, target)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond)
+	defer cancel()
+	if _, err := dp.Connect(ctx); err == nil {
+		t.Fatal("Connect() succeeded without power acknowledgements")
+	}
+	if target.ctrl&allPower != 0 {
+		t.Fatalf("power state after rollback = %#08x, want 0", target.ctrl)
+	}
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatalf("Release() after failed Connect() failed: %v", err)
+	}
+}
+
+func TestConnectRejectsSecondConnection(t *testing.T) {
+	dp := enteredDP(t, sim.New(0x2ba01477))
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dp.Connect(t.Context()); err == nil {
+		t.Fatal("second Connect() succeeded")
+	}
+}
+
+func TestReleaseCanRetryAfterWriteFailure(t *testing.T) {
+	target := &powerTarget{dpidr: 0x2ba01477, failRelease: true}
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := dp.Release(t.Context()); err == nil {
+		t.Fatal("Release() succeeded despite the injected write failure")
+	}
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatalf("retried Release() failed: %v", err)
+	}
+	if target.ctrl&allPower != 0 {
+		t.Fatalf("power state after retry = %#08x, want 0", target.ctrl)
+	}
+}
+
+func TestConnectClearsStickyStateBeforeSelecting(t *testing.T) {
+	target := &powerTarget{dpidr: 0x2ba01477, sticky: true, ackAfter: 2}
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if target.ackReads < 2 {
+		t.Fatalf("power acknowledgement was not polled: %d reads", target.ackReads)
+	}
+}
+
+func TestConnectReadsIdentityBeforeConfiguration(t *testing.T) {
+	target := &powerTarget{dpidr: 0x2ba01477}
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func enteredDP(t *testing.T, target swdsim.Target) *dap.DebugPort {
+	t.Helper()
+	conn := swd.New(swdsim.New(target))
+	if err := conn.JTAGToSWD(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	return dap.NewSWDP(conn)
+}
+
+func assertPower(t *testing.T, dp *dap.DebugPort, want uint32) {
+	t.Helper()
+	got, err := dp.ReadDP(t.Context(), dap.CTRLSTAT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got&allPower != want {
+		t.Fatalf("power state = %#08x, want %#08x", got&allPower, want)
+	}
+}
+
+type powerTarget struct {
+	dpidr       uint32
+	ctrl        uint32
+	identified  bool
+	sticky      bool
+	suppressAck bool
+	ackAfter    int
+	ackReads    int
+	failRelease bool
+}
+
+func (t *powerTarget) Read(_ context.Context, req swd.Request) (uint32, error) {
+	if req.AP {
+		return 0, errors.New("unexpected AP read")
+	}
+	switch req.Addr {
+	case 0:
+		t.identified = true
+		return t.dpidr, nil
+	case 4:
+		t.ackReads++
+		value := t.ctrl
+		if t.suppressAck || t.ackReads < t.ackAfter {
+			value &^= debugAck | systemAck
+		}
+		return value, nil
+	case 0x0c:
+		return 0, nil
+	default:
+		return 0, errors.New("unexpected DP read")
+	}
+}
+
+func (t *powerTarget) Write(_ context.Context, req swd.Request, value uint32) error {
+	if req.AP {
+		return errors.New("unexpected AP write")
+	}
+	if !t.identified {
+		return errors.New("DP configuration written before DPIDR was read")
+	}
+	switch req.Addr {
+	case 0:
+		if value&0x1e == 0x1e {
+			t.sticky = false
+		}
+	case 4:
+		if value&(debugRequest|systemRequest) == 0 &&
+			t.ctrl&(debugRequest|systemRequest) != 0 && t.failRelease {
+			t.failRelease = false
+			return errors.New("injected release failure")
+		}
+		t.ctrl = value & (debugRequest | systemRequest)
+		if t.ctrl&debugRequest != 0 {
+			t.ctrl |= debugAck
+		}
+		if t.ctrl&systemRequest != 0 {
+			t.ctrl |= systemAck
+		}
+	case 8:
+		if t.sticky {
+			return errors.New("SELECT written before sticky state was cleared")
+		}
+	default:
+		return errors.New("unexpected DP write")
+	}
+	return nil
+}
