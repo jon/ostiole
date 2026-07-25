@@ -49,9 +49,12 @@ func TestWireRejectsInvalidCalls(t *testing.T) {
 		!strings.Contains(err.Error(), "too short") {
 		t.Fatalf("short SWDIO error = %v", err)
 	}
+	if err := swd.New(&w).LineReset(t.Context()); err != nil {
+		t.Fatalf("line reset: %v", err)
+	}
 	if _, err := w.SWDIO(
 		t.Context(), []byte{0xff}, []byte{0}, 8,
-	); err == nil || !strings.Contains(err.Error(), "sequence") {
+	); err == nil || !strings.Contains(err.Error(), "invalid") {
 		t.Fatalf("unknown-sequence SWDIO error = %v", err)
 	}
 }

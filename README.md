@@ -34,8 +34,9 @@ Ostiole is at an early, exploratory stage. The available packages provide
 pure-Go Linux USB access, an explicitly configured FTDI MPSSE path, and
 conservative Serial Wire Debug transactions without automatic retries.
 
-The `swd/sim` package provides a hardware-free behavioral wire that recognizes
-SWD line reset and JTAG-to-SWD protocol entry.
+The `swd/sim` package provides a hardware-free behavioral wire that models SWD
+protocol entry and basic DP/AP register transfers against a caller-supplied
+target.
 
 The first [example](examples/trivial/swd-dpidr) composes those public packages
 to open one supported attachment and read a debug port's identification

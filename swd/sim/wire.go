@@ -5,10 +5,27 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/jon/ostiole/swd"
 )
 
+// Target supplies DP and AP register behavior.
+type Target interface {
+	Read(context.Context, swd.Request) (uint32, error)
+	Write(context.Context, swd.Request, uint32) error
+}
+
 // Wire validates SWD traffic without physical hardware.
-type Wire struct{}
+type Wire struct {
+	target  Target
+	active  bool
+	pending *swd.Request
+}
+
+// New returns a fresh wire backed by target.
+func New(target Target) *Wire {
+	return &Wire{target: target}
+}
 
 // SWDIO implements swd.Wire.
 func (w *Wire) SWDIO(
@@ -37,9 +54,91 @@ func (w *Wire) SWDIO(
 	}
 	if lineReset(direction, output, bits) ||
 		jtagToSWD(direction, output, bits) {
+		w.active = true
+		w.pending = nil
 		return make([]byte, need), nil
 	}
-	return nil, errors.New("swd/sim: unrecognized wire sequence")
+	if !w.active {
+		return nil, errors.New("swd/sim: protocol entry is required")
+	}
+	if w.pending == nil {
+		return w.request(direction, output, bits)
+	}
+	return w.data(ctx, direction, output, bits)
+}
+
+func (w *Wire) request(
+	direction, output []byte,
+	bits int,
+) ([]byte, error) {
+	if bits != 12 ||
+		!allBits(direction, 0, 8, true) ||
+		!allBits(direction, 8, 4, false) {
+		return nil, errors.New("swd/sim: invalid request direction")
+	}
+	req, err := decodeRequest(byteAt(output, 0))
+	if err != nil {
+		return nil, err
+	}
+	if w.target == nil {
+		return nil, errors.New("swd/sim: no target is configured")
+	}
+	w.pending = &req
+	input := make([]byte, 2)
+	setBit(input, 9, true)
+	return input, nil
+}
+
+func (w *Wire) data(
+	ctx context.Context,
+	direction, output []byte,
+	bits int,
+) ([]byte, error) {
+	req := *w.pending
+	w.pending = nil
+	if req.Read {
+		return w.read(ctx, direction, bits, req)
+	}
+	return w.write(ctx, direction, output, bits, req)
+}
+
+func (w *Wire) read(
+	ctx context.Context,
+	direction []byte,
+	bits int,
+	req swd.Request,
+) ([]byte, error) {
+	if bits != 42 ||
+		!allBits(direction, 0, 34, false) ||
+		!allBits(direction, 34, 8, true) {
+		return nil, errors.New("swd/sim: invalid read-data direction")
+	}
+	value, err := w.target.Read(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	input := make([]byte, 6)
+	setUint32(input, value)
+	setBit(input, 32, parity32(value))
+	return input, nil
+}
+
+func (w *Wire) write(
+	ctx context.Context,
+	direction, output []byte,
+	bits int,
+	req swd.Request,
+) ([]byte, error) {
+	if bits != 42 ||
+		bitAt(direction, 0) ||
+		!allBits(direction, 1, 41, true) {
+		return nil, errors.New("swd/sim: invalid write-data direction")
+	}
+	value := uint32At(output, 1)
+	if bitAt(output, 33) != parity32(value) {
+		return nil, errors.New("swd/sim: invalid write-data parity")
+	}
+	return make([]byte, 6), w.target.Write(ctx, req, value)
 }
 
 func lineReset(direction, output []byte, bits int) bool {
@@ -78,6 +177,53 @@ func byteAt(buf []byte, offset int) byte {
 	return value
 }
 
+func decodeRequest(header byte) (swd.Request, error) {
+	fields := header >> 1 & 0x0f
+	if header&0xc1 != 0x81 ||
+		(header>>5&1 != 0) != parity32(uint32(fields)) {
+		return swd.Request{}, fmt.Errorf(
+			"swd/sim: invalid request header %#02x",
+			header,
+		)
+	}
+	return swd.Request{
+		AP:   fields&1 != 0,
+		Read: fields&2 != 0,
+		Addr: uint8(fields>>2) << 2,
+	}, nil
+}
+
 func bitAt(buf []byte, bit int) bool {
 	return buf[bit/8]>>(uint(bit)%8)&1 != 0
+}
+
+func setBit(buf []byte, bit int, value bool) {
+	if value {
+		buf[bit/8] |= 1 << (uint(bit) % 8)
+	}
+}
+
+func setUint32(buf []byte, value uint32) {
+	for bit := range 32 {
+		setBit(buf, bit, value>>uint(bit)&1 != 0)
+	}
+}
+
+func uint32At(buf []byte, offset int) uint32 {
+	var value uint32
+	for bit := range 32 {
+		if bitAt(buf, offset+bit) {
+			value |= 1 << uint(bit)
+		}
+	}
+	return value
+}
+
+func parity32(value uint32) bool {
+	value ^= value >> 16
+	value ^= value >> 8
+	value ^= value >> 4
+	value ^= value >> 2
+	value ^= value >> 1
+	return value&1 != 0
 }
