@@ -7,12 +7,11 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"sort"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 	"unsafe"
+
+	"github.com/jon/ostiole/usb"
 )
 
 const (
@@ -53,11 +52,6 @@ const (
 
 	transferTimeout = 5 * time.Second
 )
-
-type attachment struct {
-	pid          uint16
-	bus, address uint8
-}
 
 type usbControlTransfer struct {
 	RequestType uint8
@@ -103,7 +97,12 @@ func main() {
 }
 
 func readDPIDR(ctx context.Context) (value uint32, err error) {
-	attachments, err := listAttachments(ctx, "/sys/bus/usb/devices")
+	enumerator := usb.New()
+	attachments, err := enumerator.List(ctx, []usb.DeviceFilter{
+		{VID: ftdiVID, PID: ft2232hPID},
+		{VID: ftdiVID, PID: ft4232hPID},
+		{VID: ftdiVID, PID: ft232hPID},
+	})
 	if err != nil {
 		return 0, err
 	}
@@ -136,95 +135,11 @@ func readDPIDR(ctx context.Context) (value uint32, err error) {
 	return value, nil
 }
 
-func listAttachments(ctx context.Context, root string) ([]attachment, error) {
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return nil, fmt.Errorf("ostiole: read USB inventory: %w", err)
-	}
-	var found []attachment
-	for _, entry := range entries {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		item, ok, err := readAttachment(root, entry)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			found = append(found, item)
-		}
-	}
-	sort.Slice(found, func(i, j int) bool {
-		if found[i].bus != found[j].bus {
-			return found[i].bus < found[j].bus
-		}
-		return found[i].address < found[j].address
-	})
-	return found, nil
-}
-
-func readAttachment(
-	root string,
-	entry os.DirEntry,
-) (attachment, bool, error) {
-	path := filepath.Join(root, entry.Name())
-	info, err := os.Stat(path)
-	if err != nil || !info.IsDir() {
-		return attachment{}, false, err
-	}
-	vid, ok, err := readNumber(path, "idVendor", 16, 16)
-	if err != nil || !ok || vid != ftdiVID {
-		return attachment{}, false, err
-	}
-	pid, ok, err := readNumber(path, "idProduct", 16, 16)
-	if err != nil || !ok {
-		return attachment{}, false, err
-	}
-	if pid != ft2232hPID && pid != ft4232hPID && pid != ft232hPID {
-		return attachment{}, false, nil
-	}
-	item, ok, err := readAttachmentLocation(path, uint16(pid))
-	return item, ok, err
-}
-
-func readAttachmentLocation(
-	path string,
-	pid uint16,
-) (attachment, bool, error) {
-	bus, ok, err := readNumber(path, "busnum", 10, 8)
-	if err != nil || !ok {
-		return attachment{}, false, err
-	}
-	address, ok, err := readNumber(path, "devnum", 10, 8)
-	if err != nil || !ok {
-		return attachment{}, false, err
-	}
-	return attachment{pid: pid, bus: uint8(bus), address: uint8(address)}, true, nil
-}
-
-func readNumber(
-	root, name string,
-	base, bits int,
-) (uint64, bool, error) {
-	raw, err := os.ReadFile(filepath.Join(root, name))
-	if errors.Is(err, os.ErrNotExist) {
-		return 0, false, nil
-	}
-	if err != nil {
-		return 0, false, fmt.Errorf("ostiole: read %s: %w", name, err)
-	}
-	value, err := strconv.ParseUint(strings.TrimSpace(string(raw)), base, bits)
-	if err != nil {
-		return 0, true, fmt.Errorf("ostiole: parse %s: %w", name, err)
-	}
-	return value, true, nil
-}
-
-func openAttachment(root string, item attachment) (*device, error) {
+func openAttachment(root string, item usb.DeviceInfo) (*device, error) {
 	path := filepath.Join(
 		root,
-		fmt.Sprintf("%03d", item.bus),
-		fmt.Sprintf("%03d", item.address),
+		fmt.Sprintf("%03d", item.Bus),
+		fmt.Sprintf("%03d", item.Address),
 	)
 	file, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {

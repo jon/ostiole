@@ -1,26 +1,9 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
 )
-
-func TestListAttachmentsFindsSupportedFTDIWithoutStrings(t *testing.T) {
-	root := t.TempDir()
-	writeAttachment(t, root, "1-2", "0403", "6014", "1", "7")
-	writeAttachment(t, root, "2-1", "1234", "5678", "2", "3")
-
-	got, err := listAttachments(t.Context(), root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []attachment{{pid: ft232hPID, bus: 1, address: 7}}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("attachments = %#v, want %#v", got, want)
-	}
-}
 
 func TestSWDCommandsTriStateOutputWhileSampling(t *testing.T) {
 	direction := []byte{0b00000011}
@@ -71,30 +54,5 @@ func TestAppendFTDIPacketIgnoresStatusOnlyPacket(t *testing.T) {
 	}
 	if !reflect.DeepEqual(payload, []byte{0xfa, 0xab}) {
 		t.Fatalf("payload = % x", payload)
-	}
-}
-
-func writeAttachment(
-	t *testing.T,
-	root, name, vendor, product, bus, address string,
-) {
-	t.Helper()
-	path := filepath.Join(root, name)
-	if err := os.Mkdir(path, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for filename, value := range map[string]string{
-		"idVendor":  vendor,
-		"idProduct": product,
-		"busnum":    bus,
-		"devnum":    address,
-	} {
-		if err := os.WriteFile(
-			filepath.Join(path, filename),
-			[]byte(value+"\n"),
-			0o644,
-		); err != nil {
-			t.Fatal(err)
-		}
 	}
 }
