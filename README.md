@@ -46,9 +46,10 @@ and bulk transfers. The proof no longer performs Linux USB operations itself.
 The root program explicitly binds the selected attachment to FTDI MPSSE port A
 for SWD. The FTDI package also exchanges exact command and response payloads,
 opens a ready channel, and restores its USB interface on close. The SWD package
-packs direction-explicit wire sequences, while register transactions and
-protocol entry remain visible in `main.go`. Supported FTDI USB identities are
-declared by the driver and passed to the explicitly constructed USB enumerator.
+packs direction-explicit wire sequences and performs individual register
+transactions without retrying. Protocol entry remains visible in `main.go`.
+Supported FTDI USB identities are declared by the driver and passed to the
+explicitly constructed USB enumerator.
 
 This initial FTDI path uses the standard H-series MPSSE port and endpoint
 layout. Descriptor-driven port binding is not implemented yet.

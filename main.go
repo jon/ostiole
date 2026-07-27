@@ -64,7 +64,11 @@ func readDPIDR(ctx context.Context) (value uint32, err error) {
 	if err := raw.jtagToSWD(ctx); err != nil {
 		return 0, err
 	}
-	value, err = raw.transferRead(ctx, 0xa5)
+	value, err = swd.New(channel).Transfer(
+		ctx,
+		swd.Request{Read: true},
+		0,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -88,73 +92,4 @@ func (d *device) jtagToSWD(ctx context.Context) error {
 		seq.Bits(),
 	)
 	return err
-}
-
-func (d *device) transferRead(
-	ctx context.Context,
-	request byte,
-) (uint32, error) {
-	first := &swd.Sequence{}
-	first.AppendByte(true, request)
-	first.AppendN(4, false, false)
-	input, err := d.raw.SWDIO(
-		ctx,
-		first.Direction(),
-		first.Output(),
-		first.Bits(),
-	)
-	if err != nil {
-		return 0, err
-	}
-	ack := byte(0)
-	for bit := range 3 {
-		if bitAt(input, 9+bit) {
-			ack |= 1 << uint(bit)
-		}
-	}
-	if ack != 0b001 {
-		return 0, fmt.Errorf("ostiole: SWD ACK=%03b", ack)
-	}
-	second := &swd.Sequence{}
-	second.AppendN(33, false, false)
-	second.AppendN(1, false, false)
-	second.AppendN(8, true, false)
-	input, err = d.raw.SWDIO(
-		ctx,
-		second.Direction(),
-		second.Output(),
-		second.Bits(),
-	)
-	if err != nil {
-		return 0, err
-	}
-	value := extractUint32(input)
-	if bitAt(input, 32) != parity32(value) {
-		return 0, errors.New("ostiole: SWD read parity error")
-	}
-	return value, nil
-}
-
-func bitAt(buf []byte, bit int) bool {
-	return buf[bit/8]>>(uint(bit)%8)&1 != 0
-}
-
-func extractUint32(buf []byte) uint32 {
-	var value uint32
-	for bit := range 32 {
-		if bitAt(buf, bit) {
-			value |= 1 << uint(bit)
-		}
-	}
-	return value
-}
-
-func parity32(value uint32) bool {
-	parity := false
-	for bit := range 32 {
-		if value>>uint(bit)&1 != 0 {
-			parity = !parity
-		}
-	}
-	return parity
 }
