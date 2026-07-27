@@ -14,9 +14,9 @@ func (c *Conn) Transfer(
 	if req.Addr&^0x0c != 0 {
 		return 0, fmt.Errorf("swd: invalid register address %#02x", req.Addr)
 	}
-	header := &Sequence{}
-	header.AppendByte(true, requestByte(req))
-	header.AppendN(c.turnaround+3, false, false)
+	header := &sequence{}
+	header.appendByte(true, requestByte(req))
+	header.appendN(c.turnaround+3, false, false)
 	input, err := c.exchange(ctx, header)
 	if err != nil {
 		return 0, err
@@ -55,9 +55,9 @@ func ackError(ack byte) error {
 }
 
 func (c *Conn) finishFailed(ctx context.Context, ackErr error) error {
-	finish := &Sequence{}
-	finish.AppendN(c.turnaround, false, false)
-	finish.AppendN(c.idleCycles, true, false)
+	finish := &sequence{}
+	finish.appendN(c.turnaround, false, false)
+	finish.appendN(c.idleCycles, true, false)
 	if _, err := c.exchange(ctx, finish); err != nil {
 		return err
 	}
@@ -65,9 +65,9 @@ func (c *Conn) finishFailed(ctx context.Context, ackErr error) error {
 }
 
 func (c *Conn) readData(ctx context.Context) (uint32, error) {
-	data := &Sequence{}
-	data.AppendN(33+c.turnaround, false, false)
-	data.AppendN(c.idleCycles, true, false)
+	data := &sequence{}
+	data.appendN(33+c.turnaround, false, false)
+	data.appendN(c.idleCycles, true, false)
 	input, err := c.exchange(ctx, data)
 	if err != nil {
 		return 0, err
@@ -80,13 +80,13 @@ func (c *Conn) readData(ctx context.Context) (uint32, error) {
 }
 
 func (c *Conn) writeData(ctx context.Context, value uint32) error {
-	data := &Sequence{}
-	data.AppendN(c.turnaround, false, false)
+	data := &sequence{}
+	data.appendN(c.turnaround, false, false)
 	for bit := range 32 {
-		data.Append(true, value>>uint(bit)&1 != 0)
+		data.append(true, value>>uint(bit)&1 != 0)
 	}
-	data.Append(true, parity32(value))
-	data.AppendN(c.idleCycles, true, false)
+	data.append(true, parity32(value))
+	data.appendN(c.idleCycles, true, false)
 	_, err := c.exchange(ctx, data)
 	return err
 }

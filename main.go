@@ -17,10 +17,6 @@ const (
 	transferTimeout = 5 * time.Second
 )
 
-type device struct {
-	raw *ftdi.Channel
-}
-
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), transferTimeout)
 	defer cancel()
@@ -57,14 +53,14 @@ func readDPIDR(ctx context.Context) (value uint32, err error) {
 	if err != nil {
 		return 0, err
 	}
-	raw := &device{raw: channel}
 	defer func() {
-		err = errors.Join(err, raw.raw.Close())
+		err = errors.Join(err, channel.Close())
 	}()
-	if err := raw.jtagToSWD(ctx); err != nil {
+	conn := swd.New(channel)
+	if err := conn.JTAGToSWD(ctx); err != nil {
 		return 0, err
 	}
-	value, err = swd.New(channel).Transfer(
+	value, err = conn.Transfer(
 		ctx,
 		swd.Request{Read: true},
 		0,
@@ -76,20 +72,4 @@ func readDPIDR(ctx context.Context) (value uint32, err error) {
 		return 0, fmt.Errorf("ostiole: invalid DPIDR %#08x", value)
 	}
 	return value, nil
-}
-
-func (d *device) jtagToSWD(ctx context.Context) error {
-	seq := &swd.Sequence{}
-	seq.AppendN(56, true, true)
-	seq.AppendByte(true, 0x9e)
-	seq.AppendByte(true, 0xe7)
-	seq.AppendN(56, true, true)
-	seq.AppendN(8, true, false)
-	_, err := d.raw.SWDIO(
-		ctx,
-		seq.Direction(),
-		seq.Output(),
-		seq.Bits(),
-	)
-	return err
 }

@@ -43,24 +43,24 @@ func New(w Wire) *Conn {
 
 func (c *Conn) exchange(
 	ctx context.Context,
-	seq *Sequence,
+	seq *sequence,
 ) ([]byte, error) {
 	if c == nil || c.wire == nil {
 		return nil, errors.New("swd: nil wire")
 	}
 	input, err := c.wire.SWDIO(
 		ctx,
-		seq.Direction(),
-		seq.Output(),
-		seq.Bits(),
+		seq.direction,
+		seq.output,
+		seq.bits,
 	)
 	if err != nil {
 		return nil, err
 	}
-	need := (seq.Bits() + 7) / 8
+	need := (seq.bits + 7) / 8
 	if len(input) < need {
 		return nil, fmt.Errorf("swd: wire returned %d bytes for %d bits; want %d",
-			len(input), seq.Bits(), need)
+			len(input), seq.bits, need)
 	}
 	return input, nil
 }
