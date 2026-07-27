@@ -29,24 +29,24 @@ func main() {
 }
 
 func readDPIDR(ctx context.Context) (value uint32, err error) {
-	enumerator := usb.New()
-	attachments, err := enumerator.List(ctx, ftdi.SupportedDevices())
+	enum := usb.New()
+	devs, err := enum.List(ctx, ftdi.SupportedDevices())
 	if err != nil {
 		return 0, err
 	}
-	if len(attachments) != 1 {
+	if len(devs) != 1 {
 		return 0, fmt.Errorf(
 			"ostiole: require exactly one supported FTDI attachment; found %d",
-			len(attachments),
+			len(devs),
 		)
 	}
-	opened, err := enumerator.Open(ctx, attachments[0])
+	dev, err := enum.Open(ctx, devs[0])
 	if err != nil {
 		return 0, err
 	}
-	channel, err := ftdi.Open(ctx, opened, ftdi.Config{
+	ch, err := ftdi.Open(ctx, dev, ftdi.Config{
 		ClockHz:   400_000,
-		ProductID: attachments[0].PID,
+		ProductID: devs[0].PID,
 		Port:      ftdi.PortA,
 		Interface: ftdi.SWD,
 	})
@@ -54,9 +54,9 @@ func readDPIDR(ctx context.Context) (value uint32, err error) {
 		return 0, err
 	}
 	defer func() {
-		err = errors.Join(err, channel.Close())
+		err = errors.Join(err, ch.Close())
 	}()
-	conn := swd.New(channel)
+	conn := swd.New(ch)
 	if err := conn.JTAGToSWD(ctx); err != nil {
 		return 0, err
 	}

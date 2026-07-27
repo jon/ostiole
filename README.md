@@ -30,27 +30,14 @@ target, inspect a system, or provide a project-specific recovery utility.
 
 ## Status
 
-Ostiole is at an early, exploratory stage. This revision is a deliberately
-small proof of life: one pure-Go Linux program opens a generic FTDI H-series
-attachment, speaks Serial Wire Debug through its MPSSE interface, and reads a
-debug port's identification register.
+Ostiole is at an early, exploratory stage. The available packages provide
+pure-Go Linux USB access, an explicitly configured FTDI MPSSE path, and
+conservative Serial Wire Debug transactions without automatic retries.
 
-The implementation is still contained in the program itself. Later revisions
-will extract its working pieces into reusable packages without changing the
-wire behavior established here.
-
-USB attachment discovery and exact-device opening now live in `usb`;
-the package also owns the selected interface and performs bounded control
-and bulk transfers. The proof no longer performs Linux USB operations itself.
-
-The root program explicitly binds the selected attachment to FTDI MPSSE port A
-for SWD. The FTDI package also exchanges exact command and response payloads,
-opens a ready channel, and restores its USB interface on close. The SWD package
-packs direction-explicit wire sequences and performs individual register
-transactions without retrying, including line reset and protocol entry.
-Supported FTDI USB identities are declared by the driver and passed to the
-explicitly constructed USB enumerator. The root program composes these public
-USB, FTDI, and SWD APIs without constructing wire frames itself.
+The first [example](examples/trivial/swd-dpidr) composes those public packages
+to open one supported attachment and read a debug port's identification
+register. It constructs the USB, FTDI, and SWD layers explicitly without
+duplicating their framing.
 
 This initial FTDI path uses the standard H-series MPSSE port and endpoint
 layout. Descriptor-driven port binding is not implemented yet.
@@ -78,7 +65,7 @@ memory, reconfigure programmable logic, and change persistent device state.
 Early hardware work is deliberately read-only. Operations with broader effects
 should be explicit and separately gated.
 
-## Linux proof of life
+## SWD DPIDR example
 
 The program expects exactly one supported FTDI H-series attachment and uses
 MPSSE port A at 400 kHz. Connect it to a powered SWD target as follows:
@@ -94,7 +81,7 @@ The target supplies its own power. No reset or target-power connection is
 used. On Linux, run:
 
 ```sh
-sudo go run .
+sudo go run ./examples/trivial/swd-dpidr
 ```
 
 A successful read prints only the debug-port identity, for example
