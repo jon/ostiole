@@ -88,6 +88,13 @@ A successful read prints only the debug-port identity, for example
 `DPIDR=0x2ba01477`. The operation does not halt or reset the target and does
 not write target memory.
 
+Maintainers can exercise the same public-library path as an opt-in hardware
+test:
+
+```sh
+sudo OSTIOLE_FTDI_HIL=1 go test -tags integration ./swd
+```
+
 ## License
 
 Ostiole is licensed under the [Apache License 2.0](LICENSE).
