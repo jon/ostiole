@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jon/ostiole/ftdi"
+	"github.com/jon/ostiole/swd"
 	"github.com/jon/ostiole/usb"
 )
 
@@ -18,11 +19,6 @@ const (
 
 type device struct {
 	raw *ftdi.Channel
-}
-
-type frame struct {
-	dir, out []byte
-	bits     int
 }
 
 func main() {
@@ -79,13 +75,18 @@ func readDPIDR(ctx context.Context) (value uint32, err error) {
 }
 
 func (d *device) jtagToSWD(ctx context.Context) error {
-	wire := &frame{}
-	wire.pushN(56, true, true)
-	wire.pushByte(true, 0x9e)
-	wire.pushByte(true, 0xe7)
-	wire.pushN(56, true, true)
-	wire.pushN(8, true, false)
-	_, err := d.raw.SWDIO(ctx, wire.dir, wire.out, wire.bits)
+	seq := &swd.Sequence{}
+	seq.AppendN(56, true, true)
+	seq.AppendByte(true, 0x9e)
+	seq.AppendByte(true, 0xe7)
+	seq.AppendN(56, true, true)
+	seq.AppendN(8, true, false)
+	_, err := d.raw.SWDIO(
+		ctx,
+		seq.Direction(),
+		seq.Output(),
+		seq.Bits(),
+	)
 	return err
 }
 
@@ -93,10 +94,15 @@ func (d *device) transferRead(
 	ctx context.Context,
 	request byte,
 ) (uint32, error) {
-	first := &frame{}
-	first.pushByte(true, request)
-	first.pushN(4, false, false)
-	input, err := d.raw.SWDIO(ctx, first.dir, first.out, first.bits)
+	first := &swd.Sequence{}
+	first.AppendByte(true, request)
+	first.AppendN(4, false, false)
+	input, err := d.raw.SWDIO(
+		ctx,
+		first.Direction(),
+		first.Output(),
+		first.Bits(),
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -109,11 +115,16 @@ func (d *device) transferRead(
 	if ack != 0b001 {
 		return 0, fmt.Errorf("ostiole: SWD ACK=%03b", ack)
 	}
-	second := &frame{}
-	second.pushN(33, false, false)
-	second.pushN(1, false, false)
-	second.pushN(8, true, false)
-	input, err = d.raw.SWDIO(ctx, second.dir, second.out, second.bits)
+	second := &swd.Sequence{}
+	second.AppendN(33, false, false)
+	second.AppendN(1, false, false)
+	second.AppendN(8, true, false)
+	input, err = d.raw.SWDIO(
+		ctx,
+		second.Direction(),
+		second.Output(),
+		second.Bits(),
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -124,42 +135,14 @@ func (d *device) transferRead(
 	return value, nil
 }
 
-func (f *frame) push(driven, value bool) {
-	if f.bits%8 == 0 {
-		f.dir = append(f.dir, 0)
-		f.out = append(f.out, 0)
-	}
-	setBit(f.dir, f.bits, driven)
-	setBit(f.out, f.bits, value)
-	f.bits++
+func bitAt(buf []byte, bit int) bool {
+	return buf[bit/8]>>(uint(bit)%8)&1 != 0
 }
 
-func (f *frame) pushN(bits int, driven, value bool) {
-	for range bits {
-		f.push(driven, value)
-	}
-}
-
-func (f *frame) pushByte(driven bool, value byte) {
-	for bit := range 8 {
-		f.push(driven, value>>uint(bit)&1 != 0)
-	}
-}
-
-func bitAt(buffer []byte, bit int) bool {
-	return buffer[bit/8]>>(uint(bit)%8)&1 != 0
-}
-
-func setBit(buffer []byte, bit int, value bool) {
-	if value {
-		buffer[bit/8] |= 1 << (uint(bit) % 8)
-	}
-}
-
-func extractUint32(buffer []byte) uint32 {
+func extractUint32(buf []byte) uint32 {
 	var value uint32
 	for bit := range 32 {
-		if bitAt(buffer, bit) {
+		if bitAt(buf, bit) {
 			value |= 1 << uint(bit)
 		}
 	}
