@@ -31,11 +31,25 @@ type Target struct {
 	dpidr    uint32
 	ctrlStat uint32
 	selectDP uint32
+	rdbuff   uint32
+	aps      map[uint8]*accessPort
+}
+
+type accessPort struct {
+	regs map[uint8]uint32
 }
 
 // New returns an SW-DP target with the supplied identity.
 func New(dpidr uint32) *Target {
-	return &Target{dpidr: dpidr}
+	return &Target{dpidr: dpidr, aps: make(map[uint8]*accessPort)}
+}
+
+// AddAP adds an access port with the supplied identification register.
+func (t *Target) AddAP(sel uint8, idr uint32) {
+	if t == nil {
+		return
+	}
+	t.aps[sel] = &accessPort{regs: map[uint8]uint32{0xfc: idr}}
 }
 
 // Read implements swd/sim.Target.
@@ -47,7 +61,7 @@ func (t *Target) Read(ctx context.Context, req swd.Request) (uint32, error) {
 		return 0, err
 	}
 	if req.AP {
-		return 0, errors.New("dap/sim: no access port is modeled")
+		return t.readAP(req), nil
 	}
 	switch req.Addr {
 	case 0x00:
@@ -55,7 +69,7 @@ func (t *Target) Read(ctx context.Context, req swd.Request) (uint32, error) {
 	case 0x04:
 		return t.ctrlStat, nil
 	case 0x0c:
-		return 0, nil
+		return t.rdbuff, nil
 	default:
 		return 0, fmt.Errorf("dap/sim: unsupported DP read %#02x", req.Addr)
 	}
@@ -70,7 +84,8 @@ func (t *Target) Write(ctx context.Context, req swd.Request, value uint32) error
 		return err
 	}
 	if req.AP {
-		return errors.New("dap/sim: no access port is modeled")
+		t.writeAP(req, value)
+		return nil
 	}
 	switch req.Addr {
 	case 0x00:
@@ -83,6 +98,29 @@ func (t *Target) Write(ctx context.Context, req swd.Request, value uint32) error
 		return fmt.Errorf("dap/sim: unsupported DP write %#02x", req.Addr)
 	}
 	return nil
+}
+
+func (t *Target) readAP(req swd.Request) uint32 {
+	posted := t.rdbuff
+	ap := t.aps[uint8(t.selectDP>>24)]
+	if ap == nil {
+		t.rdbuff = 0
+		return posted
+	}
+	t.rdbuff = ap.regs[t.apReg(req)]
+	return posted
+}
+
+func (t *Target) writeAP(req swd.Request, value uint32) {
+	ap := t.aps[uint8(t.selectDP>>24)]
+	if ap != nil {
+		ap.regs[t.apReg(req)] = value
+	}
+}
+
+func (t *Target) apReg(req swd.Request) uint8 {
+	bank := uint8(t.selectDP>>4) & 0x0f
+	return bank<<4 | req.Addr
 }
 
 func (t *Target) clearSticky(value uint32) {

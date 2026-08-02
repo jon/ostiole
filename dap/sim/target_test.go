@@ -55,12 +55,16 @@ func TestAbortClearsStickyState(t *testing.T) {
 	}
 }
 
-func TestTargetRejectsAccessPortTransfers(t *testing.T) {
+func TestTargetPostsZeroForAnAbsentAccessPort(t *testing.T) {
 	target := New(0x2ba01477)
-	if _, err := target.Read(
+	value, err := target.Read(
 		context.Background(),
 		swd.Request{AP: true, Read: true},
-	); err == nil {
-		t.Fatal("AP read succeeded before an AP was modeled")
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value != 0 || target.rdbuff != 0 {
+		t.Fatalf("absent AP posted %#08x and buffered %#08x", value, target.rdbuff)
 	}
 }
