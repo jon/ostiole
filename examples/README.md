@@ -19,3 +19,5 @@ an example has been implemented.
 
 - [`trivial/swd-dpidr`](trivial/swd-dpidr) reads the identification register
   of one SWD debug port through an explicitly selected FTDI attachment.
+- [`simple/ap-id`](simple/ap-id) reports the debug-port identity and one
+  explicitly selected access-port identity.

@@ -91,6 +91,17 @@ future maintainer.
 - Keep ordinary identity tests read-only. Gate reset, halt, and memory writes
   explicitly, and restore volatile target state before returning.
 
+## Executable examples and commands
+
+- Keep examples compact and readable as demonstrations of public APIs. Do not
+  add `_test.go` files merely to test example formatting or create artificial
+  seams; build examples and run their exact binaries on HIL when applicable.
+- Add an example-local test only for meaningful behavior owned by the example
+  and not already covered at a library boundary.
+- Keep `cmd/<name>/main.go` thin. Put substantive parsing, dispatch, session,
+  and presentation behavior in a testable package rather than avoiding tests
+  for executable functionality altogether.
+
 ## Library boundaries
 
 - Build diagnostics and examples through the same composable public APIs

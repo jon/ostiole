@@ -45,10 +45,9 @@ requests it acquired. Selected AP registers are read and written through their
 posted `RDBUFF` completion path. The simulator models the same DP and AP state
 changes.
 
-The first [example](examples/trivial/swd-dpidr) composes those public packages
-to open one supported attachment and read a debug port's identification
-register. It constructs the USB, FTDI, and SWD layers explicitly without
-duplicating their framing.
+The [examples](examples) begin with a raw SWD debug-port identity read and then
+add the DAP connection lifecycle and posted access-port reads. They compose the
+public packages explicitly without duplicating their framing.
 
 This initial FTDI path uses the standard H-series MPSSE port and endpoint
 layout. Descriptor-driven port binding is not implemented yet.
@@ -105,6 +104,27 @@ test:
 
 ```sh
 sudo OSTIOLE_FTDI_HIL=1 go test -tags integration ./swd
+```
+
+## Access-port identity example
+
+The simple access-port example uses the same wiring and selects AP0 explicitly.
+It connects through the DAP layer, reads the access-port identification
+register through the posted-read pipeline, and releases the power requests it
+acquired. Run:
+
+```sh
+sudo go run ./examples/simple/ap-id
+```
+
+A successful read prints both identities, for example
+`DPIDR=0x2ba01477 AP0_IDR=0x24770011`. The operation does not reset or halt the
+target and does not access target memory.
+
+Maintainers can exercise the DAP path as an opt-in hardware test:
+
+```sh
+sudo OSTIOLE_FTDI_HIL=1 go test -tags integration ./dap
 ```
 
 ## License
