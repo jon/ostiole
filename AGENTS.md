@@ -26,7 +26,8 @@ describing what the commit does:
 - Use the imperative mood where it reads naturally.
 - Do not add a scope or category prefix such as `feat:`, `fix:`, `ci:`, or
   `usb:`.
-- Keep the sentence concise enough to remain legible in an abbreviated log.
+- Keep the sentence at 72 columns or fewer so it remains legible in an
+  abbreviated log.
 - Describe the resulting change, not the process of creating it.
 
 Examples:
@@ -37,6 +38,11 @@ Examples:
 - `Release debug-port power ownership.`
 
 After the summary, leave a blank line before any commit body.
+
+Wrap prose paragraphs in stored commit bodies at 72 columns. Reflow the text
+before committing rather than relying on a terminal or web interface. Leave
+URLs, command lines, code blocks, trailers, and other text that cannot be
+broken safely intact.
 
 Truly trivial commits may omit the body. Every other commit should include a
 short body explaining information that is not evident from the diff itself.
