@@ -41,9 +41,9 @@ target.
 The `dap` package begins the next layer with ADIv5 debug-port identity, raw
 SW-DP registers, and an explicit connection lifecycle. A connection clears
 sticky status, selects the base register bank, and restores only the power
-requests it acquired. The simulator models the same state changes.
-It also models selected access ports and the posted-read pipeline completed
-through `RDBUFF`.
+requests it acquired. Selected AP registers are read and written through their
+posted `RDBUFF` completion path. The simulator models the same DP and AP state
+changes.
 
 The first [example](examples/trivial/swd-dpidr) composes those public packages
 to open one supported attachment and read a debug port's identification
