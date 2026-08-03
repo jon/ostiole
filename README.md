@@ -145,6 +145,15 @@ for example `DPIDR=0x2ba01477 AP0_IDR=0x24770011 CPUID=0x410fc241`.
 The operation restores CSW, TAR, DP selection, and acquired power state. It
 does not reset or halt the target or write target memory.
 
+## Command
+
+`ost` is a small command-line companion built from the same public packages
+used by the examples. The initial dispatcher exposes its help directly:
+
+```sh
+go run ./cmd/ost help
+```
+
 ## License
 
 Ostiole is licensed under the [Apache License 2.0](LICENSE).
