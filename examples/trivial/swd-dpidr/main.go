@@ -36,15 +36,15 @@ func run() error {
 }
 
 func readDPIDR(ctx context.Context) (value uint32, err error) {
-	enum := usb.New()
-	devs, err := enum.List(ctx, ftdi.SupportedDevices())
+	bus := usb.New()
+	devs, err := bus.List(ctx, ftdi.SupportedDevices())
 	if err != nil {
 		return 0, err
 	}
 	if len(devs) != 1 {
 		return 0, fmt.Errorf("ostiole: require exactly one supported FTDI attachment; found %d", len(devs))
 	}
-	dev, err := enum.Open(ctx, devs[0])
+	dev, err := bus.Open(ctx, devs[0])
 	if err != nil {
 		return 0, err
 	}

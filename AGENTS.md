@@ -18,7 +18,7 @@ compositions.
 - Keep hardware-independent tests deterministic and prefer behavioral fakes
   over canned byte transcripts.
 - Do not find or implement unrelated work while carrying out an approved task.
-- Linux is the only supported host until another platform is introduced
+- Linux and macOS are supported hosts. A new host must be introduced
   explicitly with its implementation and tests.
 
 ## Commit messages

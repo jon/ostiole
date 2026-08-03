@@ -1,4 +1,8 @@
-// Package usb provides pure-Go USB access for Ostiole.
+// Package usb provides native host USB access for Ostiole.
+//
+// Linux uses sysfs and usbfs directly. macOS uses the system IOKit and
+// CoreFoundation frameworks through cgo and requires the macOS SDK at build
+// time.
 package usb
 
 import (

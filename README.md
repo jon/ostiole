@@ -31,8 +31,8 @@ target, inspect a system, or provide a project-specific recovery utility.
 ## Status
 
 Ostiole is at an early, exploratory stage. The available packages provide
-pure-Go Linux USB access, an explicitly configured FTDI MPSSE path, and
-conservative Serial Wire Debug transactions without automatic retries.
+native Linux and macOS USB access, an explicitly configured FTDI MPSSE path,
+and conservative Serial Wire Debug transactions without automatic retries.
 
 The `swd/sim` package provides a hardware-free behavioral wire that models SWD
 protocol entry and basic DP/AP register transfers against a caller-supplied
@@ -98,6 +98,13 @@ used. On Linux, run:
 ```sh
 sudo go run ./examples/trivial/swd-dpidr
 ```
+
+On macOS 12 or newer, install Xcode or the Xcode command-line tools and run the
+same command without `sudo`. The macOS USB implementation uses cgo to call the
+system IOKit and CoreFoundation frameworks; it does not require libusb or a
+third-party USB package. This path is validated with an FT232H (`0403:6014`).
+Claiming it temporarily seizes its USB interface from the Apple FTDI driver;
+closing it releases that ownership.
 
 A successful read prints only the debug-port identity, for example
 `DPIDR=0x2ba01477`. The operation does not halt or reset the target and does
