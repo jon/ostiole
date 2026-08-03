@@ -14,6 +14,7 @@ const (
 		"  ost ftdi list\n" +
 		"  ost swd dpidr\n" +
 		"  ost dap dp id\n" +
+		"  ost dap ap id [--ap N]\n" +
 		"  ost help\n"
 )
 

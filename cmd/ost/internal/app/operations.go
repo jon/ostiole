@@ -11,6 +11,7 @@ type operations struct {
 	listFTDI  func(context.Context) ([]usb.DeviceInfo, error)
 	readDPIDR func(context.Context) (uint32, error)
 	inspectDP func(context.Context) (dap.DPIDRInfo, error)
+	inspectAP func(context.Context, dap.APSel) (apIdentity, error)
 }
 
 func systemOperations() operations {
@@ -18,5 +19,6 @@ func systemOperations() operations {
 		listFTDI:  listFTDI,
 		readDPIDR: readDPIDR,
 		inspectDP: inspectDP,
+		inspectAP: inspectAP,
 	}
 }

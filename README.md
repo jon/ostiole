@@ -170,6 +170,12 @@ decoded identity fields before releasing the power state it acquired:
 sudo go run ./cmd/ost dap dp id
 ```
 
+One access port can be selected explicitly through the same lifecycle:
+
+```sh
+sudo go run ./cmd/ost dap ap id --ap 0
+```
+
 Run `go run ./cmd/ost help` for the available command hierarchy.
 
 ## License
