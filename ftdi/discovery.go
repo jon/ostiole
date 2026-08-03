@@ -2,7 +2,7 @@ package ftdi
 
 import "github.com/jon/ostiole/usb"
 
-// SupportedDevices returns the USB identities accepted by NewChannel.
+// SupportedDevices returns the USB identities accepted by Open.
 func SupportedDevices() []usb.DeviceFilter {
 	return []usb.DeviceFilter{
 		{VID: VID, PID: PIDFT2232H},

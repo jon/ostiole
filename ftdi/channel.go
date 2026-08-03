@@ -11,10 +11,12 @@ const (
 	// VID is FTDI's USB vendor identifier.
 	VID = 0x0403
 
-	// Supported H-series product identifiers.
+	// PIDFT2232H identifies an FT2232H USB attachment.
 	PIDFT2232H = 0x6010
+	// PIDFT4232H identifies an FT4232H USB attachment.
 	PIDFT4232H = 0x6011
-	PIDFT232H  = 0x6014
+	// PIDFT232H identifies an FT232H USB attachment.
+	PIDFT232H = 0x6014
 
 	requestTypeOut = 0x40
 )
@@ -23,8 +25,11 @@ const (
 type Port uint8
 
 const (
+	// PortUnspecified leaves the MPSSE port unselected.
 	PortUnspecified Port = iota
+	// PortA selects the first MPSSE-capable function.
 	PortA
+	// PortB selects the second MPSSE-capable function.
 	PortB
 )
 
@@ -32,7 +37,9 @@ const (
 type Interface uint8
 
 const (
+	// InterfaceUnspecified leaves the wire interface unselected.
 	InterfaceUnspecified Interface = iota
+	// SWD selects the Serial Wire Debug interface.
 	SWD
 )
 
