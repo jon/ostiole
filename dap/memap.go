@@ -22,12 +22,16 @@ const (
 
 // MemAP reads aligned target words through one memory access port.
 type MemAP struct {
-	dp  *DebugPort
-	sel APSel
-	csw uint32
+	dp         *DebugPort
+	sel        APSel
+	csw        uint32
+	savedCSW   uint32
+	savedTAR   uint32
+	restoreCSW bool
+	restoreTAR bool
 }
 
-// NewMemAP validates sel and prepares its 32-bit, non-incrementing CSW value.
+// NewMemAP validates sel and saves the state changed by target reads.
 func NewMemAP(ctx context.Context, dp *DebugPort, sel APSel) (*MemAP, error) {
 	idr, err := dp.ReadAP(ctx, sel, APIDR)
 	if err != nil {
@@ -43,9 +47,19 @@ func NewMemAP(ctx context.Context, dp *DebugPort, sel APSel) (*MemAP, error) {
 	if err != nil {
 		return nil, err
 	}
-	csw &^= cswSize | cswAddrInc
-	csw |= cswSize32
-	return &MemAP{dp: dp, sel: sel, csw: csw}, nil
+	tar, err := dp.ReadAP(ctx, sel, APTAR)
+	if err != nil {
+		return nil, err
+	}
+	configuredCSW := csw &^ (cswSize | cswAddrInc)
+	configuredCSW |= cswSize32
+	return &MemAP{
+		dp:       dp,
+		sel:      sel,
+		csw:      configuredCSW,
+		savedCSW: csw,
+		savedTAR: tar,
+	}, nil
 }
 
 // ReadWord reads one aligned 32-bit target word.
@@ -56,11 +70,41 @@ func (m *MemAP) ReadWord(ctx context.Context, addr uint32) (uint32, error) {
 	if addr&3 != 0 {
 		return 0, fmt.Errorf("dap: unaligned target word address %#08x", addr)
 	}
+	m.restoreCSW = true
 	if err := m.dp.WriteAP(ctx, m.sel, APCSW, m.csw); err != nil {
 		return 0, err
 	}
+	m.restoreTAR = true
 	if err := m.dp.WriteAP(ctx, m.sel, APTAR, addr); err != nil {
 		return 0, err
 	}
 	return m.dp.ReadAP(ctx, m.sel, APDRW)
+}
+
+// Release restores the CSW and TAR values changed by target reads.
+//
+// Failed restoration remains pending so Release can be retried. The debug port
+// must remain connected until Release succeeds.
+func (m *MemAP) Release(ctx context.Context) error {
+	if m == nil || m.dp == nil {
+		return nil
+	}
+	var tarErr, cswErr error
+	if m.restoreTAR {
+		tarErr = m.dp.WriteAP(ctx, m.sel, APTAR, m.savedTAR)
+		if tarErr != nil {
+			tarErr = fmt.Errorf("dap: restore MEM-AP TAR: %w", tarErr)
+		} else {
+			m.restoreTAR = false
+		}
+	}
+	if m.restoreCSW {
+		cswErr = m.dp.WriteAP(ctx, m.sel, APCSW, m.savedCSW)
+		if cswErr != nil {
+			cswErr = fmt.Errorf("dap: restore MEM-AP CSW: %w", cswErr)
+		} else {
+			m.restoreCSW = false
+		}
+	}
+	return errors.Join(tarErr, cswErr)
 }

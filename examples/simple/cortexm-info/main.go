@@ -27,13 +27,6 @@ type identity struct {
 	cpuid uint32
 }
 
-type savedAPState struct {
-	csw       uint32
-	tar       uint32
-	saved     bool
-	connected bool
-}
-
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
 	defer cancel()
@@ -59,33 +52,29 @@ func readIdentity(ctx context.Context) (_ identity, err error) {
 		return identity{}, errors.Join(err, ch.Close())
 	}
 	dp := dap.NewSWDP(conn)
-	state := &savedAPState{}
+	var mem *dap.MemAP
 	defer func() {
-		err = errors.Join(err, restoreState(dp, state), ch.Close())
+		cleanupCtx, cancel := context.WithTimeout(
+			context.Background(),
+			cleanupTimeout,
+		)
+		defer cancel()
+		err = errors.Join(err, mem.Release(cleanupCtx))
+		err = errors.Join(err, dp.Release(cleanupCtx), ch.Close())
 	}()
 
 	dpidr, err := dp.Connect(ctx)
 	if err != nil {
 		return identity{}, err
 	}
-	state.connected = true
 	apidr, err := dp.ReadAP(ctx, accessPort, dap.APIDR)
 	if err != nil {
 		return identity{}, err
 	}
-	mem, err := dap.NewMemAP(ctx, dp, accessPort)
+	mem, err = dap.NewMemAP(ctx, dp, accessPort)
 	if err != nil {
 		return identity{}, err
 	}
-	state.csw, err = dp.ReadAP(ctx, accessPort, dap.APCSW)
-	if err != nil {
-		return identity{}, err
-	}
-	state.tar, err = dp.ReadAP(ctx, accessPort, dap.APTAR)
-	if err != nil {
-		return identity{}, err
-	}
-	state.saved = true
 	cpuid, err := mem.ReadWord(ctx, cpuidAddress)
 	if err != nil {
 		return identity{}, err
@@ -121,23 +110,6 @@ func openChannel(ctx context.Context) (*ftdi.Channel, error) {
 		Port:      ftdi.PortA,
 		Interface: ftdi.SWD,
 	})
-}
-
-func restoreState(dp *dap.DebugPort, state *savedAPState) error {
-	ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
-	defer cancel()
-	var err error
-	if state.saved {
-		err = errors.Join(
-			err,
-			dp.WriteAP(ctx, accessPort, dap.APTAR, state.tar),
-			dp.WriteAP(ctx, accessPort, dap.APCSW, state.csw),
-		)
-	}
-	if state.connected {
-		err = errors.Join(err, dp.WriteDP(ctx, dap.SELECT, 0))
-	}
-	return errors.Join(err, dp.Release(ctx))
 }
 
 func printIdentity(w io.Writer, info identity) error {

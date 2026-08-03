@@ -44,7 +44,8 @@ sticky status, selects the base register bank, and restores only the power
 requests it acquired. Selected AP registers are read and written through their
 posted `RDBUFF` completion path. The simulator models the same DP and AP state
 changes. A minimal MEM-AP client and its model can read one aligned 32-bit
-target word without address incrementing.
+target word without address incrementing, then restore the CSW and TAR values
+changed by that read.
 
 The [examples](examples) begin with a raw SWD debug-port identity read, then
 add posted access-port reads and a Cortex-M identity read through a MEM-AP.

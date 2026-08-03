@@ -17,27 +17,15 @@ func TestReadMEMAPWordOverFTDI(t *testing.T) {
 	defer cancel()
 
 	dp := openHardwareDebugPort(t, ctx)
-	var (
-		savedCSW uint32
-		savedTAR uint32
-		saved    bool
-	)
+	var mem *dap.MemAP
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(
 			context.Background(),
 			time.Second,
 		)
 		defer cleanupCancel()
-		if saved {
-			if err := dp.WriteAP(cleanupCtx, hardwareAP, dap.APTAR, savedTAR); err != nil {
-				t.Errorf("restore AP0 TAR: %v", err)
-			}
-			if err := dp.WriteAP(cleanupCtx, hardwareAP, dap.APCSW, savedCSW); err != nil {
-				t.Errorf("restore AP0 CSW: %v", err)
-			}
-			if err := dp.WriteDP(cleanupCtx, dap.SELECT, 0); err != nil {
-				t.Errorf("restore DP SELECT: %v", err)
-			}
+		if err := mem.Release(cleanupCtx); err != nil {
+			t.Errorf("release MEM-AP: %v", err)
 		}
 		if err := dp.Release(cleanupCtx); err != nil {
 			t.Errorf("release SW-DP: %v", err)
@@ -48,17 +36,15 @@ func TestReadMEMAPWordOverFTDI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	savedCSW, err = dp.ReadAP(ctx, hardwareAP, dap.APCSW)
+	savedCSW, err := dp.ReadAP(ctx, hardwareAP, dap.APCSW)
 	if err != nil {
 		t.Fatal(err)
 	}
-	savedTAR, err = dp.ReadAP(ctx, hardwareAP, dap.APTAR)
+	savedTAR, err := dp.ReadAP(ctx, hardwareAP, dap.APTAR)
 	if err != nil {
 		t.Fatal(err)
 	}
-	saved = true
-
-	mem, err := dap.NewMemAP(ctx, dp, hardwareAP)
+	mem, err = dap.NewMemAP(ctx, dp, hardwareAP)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,5 +55,27 @@ func TestReadMEMAPWordOverFTDI(t *testing.T) {
 	if cpuid>>24 != 0x41 || cpuid>>4&0x0fff == 0 {
 		t.Fatalf("CPUID = %#08x, want a plausible Cortex-M identity", cpuid)
 	}
+	if err := mem.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertHardwareAPRegister(t, ctx, dp, dap.APCSW, savedCSW)
+	assertHardwareAPRegister(t, ctx, dp, dap.APTAR, savedTAR)
 	t.Logf("DPIDR=%#08x CPUID=%#08x", info.Raw, cpuid)
+}
+
+func assertHardwareAPRegister(
+	t *testing.T,
+	ctx context.Context,
+	dp *dap.DebugPort,
+	reg dap.APReg,
+	want uint32,
+) {
+	t.Helper()
+	got, err := dp.ReadAP(ctx, hardwareAP, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("AP0 register %#02x = %#08x, want %#08x", reg, got, want)
+	}
 }
