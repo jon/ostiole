@@ -9,18 +9,8 @@ import (
 
 var errDarwinUSBUnsupported = errors.New("usb: macOS host access is not implemented")
 
-// ClaimInterface claims one interface for this device.
-func (d *Device) ClaimInterface(uint8) error {
-	return errDarwinUSBUnsupported
-}
-
 // SetAltSetting selects an alternate setting on the claimed interface.
 func (d *Device) SetAltSetting(uint8, uint8) error {
-	return errDarwinUSBUnsupported
-}
-
-// ReleaseInterface releases the claimed interface.
-func (d *Device) ReleaseInterface(uint8) error {
 	return errDarwinUSBUnsupported
 }
 

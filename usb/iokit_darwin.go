@@ -19,6 +19,10 @@ type iokitDevice struct {
 	native *C.ostiole_usb_device
 }
 
+type iokitInterface struct {
+	native *C.ostiole_usb_interface
+}
+
 func (iokitInventory) snapshot() ([]darwinAttachment, error) {
 	var iterator C.io_iterator_t
 	result := C.ostiole_usb_iterator(&iterator)
@@ -26,7 +30,6 @@ func (iokitInventory) snapshot() ([]darwinAttachment, error) {
 		return nil, fmt.Errorf("IOKit result %#x", uint32(result))
 	}
 	defer C.IOObjectRelease(C.io_object_t(iterator))
-
 	attachments := make([]darwinAttachment, 0)
 	for {
 		service := C.IOIteratorNext(iterator)
@@ -91,10 +94,54 @@ func (d *iokitDevice) identity() (darwinAttachment, error) {
 
 func (d *iokitDevice) close() error {
 	results := C.ostiole_usb_device_close(d.native)
-	return joinIOKitCleanupCodes(
-		uint32(results.device_close),
-		uint32(results.service_release),
-	)
+	return joinIOKitCleanupCodes(uint32(results.device_close), uint32(results.service_release))
+}
+
+func (d *iokitDevice) interfaceHandle(iface uint8) (darwinInterfaceHandle, error) {
+	var result C.kern_return_t
+	native := C.ostiole_usb_find_interface(d.native, C.uint8_t(iface), &result)
+	if native == nil {
+		return nil, iokitError(result)
+	}
+	return &iokitInterface{native: native}, nil
+}
+
+func (i *iokitInterface) openSeize() error {
+	result := C.ostiole_usb_interface_open_seize(i.native)
+	if result != C.kIOReturnSuccess {
+		return iokitError(result)
+	}
+	return nil
+}
+
+func (i *iokitInterface) pipes() ([]darwinPipe, error) {
+	var count C.uint8_t
+	result := C.ostiole_usb_interface_pipe_count(i.native, &count)
+	if result != C.kIOReturnSuccess {
+		return nil, iokitError(result)
+	}
+	pipes := make([]darwinPipe, 0, int(count))
+	for ref := uint8(1); ref <= uint8(count); ref++ {
+		var native C.ostiole_usb_pipe
+		result = C.ostiole_usb_interface_pipe(i.native, C.uint8_t(ref), &native)
+		if result != C.kIOReturnSuccess {
+			return nil, iokitError(result)
+		}
+		pipes = append(pipes, darwinPipe{
+			endpoint:     uint8(native.endpoint),
+			ref:          uint8(native.ref),
+			transferType: uint8(native.transfer_type),
+		})
+	}
+	return pipes, nil
+}
+
+func (i *iokitInterface) close() error {
+	result := C.ostiole_usb_interface_close(i.native)
+	if result != C.kIOReturnSuccess {
+		return iokitError(result)
+	}
+	return nil
 }
 
 func iokitError(result C.kern_return_t) error {

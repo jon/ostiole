@@ -21,6 +21,10 @@ type darwinOpener interface {
 // Device is one open macOS USB attachment.
 type Device struct {
 	handle    darwinDeviceHandle
+	iface     darwinInterfaceHandle
+	routes    map[uint8]darwinPipe
+	claimed   uint8
+	hasClaim  bool
 	closeOnce sync.Once
 	closeErr  error
 }
@@ -104,8 +108,14 @@ func (d *Device) Close() error {
 	d.closeOnce.Do(func() {
 		handle := d.handle
 		d.handle = nil
+		var releaseErr error
+		if d.hasClaim {
+			releaseErr = d.ReleaseInterface(d.claimed)
+		}
 		if handle != nil {
-			d.closeErr = handle.close()
+			d.closeErr = errors.Join(releaseErr, handle.close())
+		} else {
+			d.closeErr = releaseErr
 		}
 	})
 	return d.closeErr

@@ -88,3 +88,100 @@ ostiole_usb_device_close_results ostiole_usb_device_close(
   free(opened);
   return results;
 }
+
+static IOUSBInterfaceInterface300** ostiole_usb_query_interface(
+    io_service_t service) {
+  IOCFPlugInInterface** plugin = NULL;
+  IOUSBInterfaceInterface300** interface = NULL;
+  SInt32 score = 0;
+  if (IOCreatePlugInInterfaceForService(
+          service, kIOUSBInterfaceUserClientTypeID, kIOCFPlugInInterfaceID,
+          &plugin, &score) != kIOReturnSuccess) {
+    return NULL;
+  }
+  HRESULT query = (*plugin)->QueryInterface(
+      plugin, CFUUIDGetUUIDBytes(kIOUSBInterfaceInterfaceID300),
+      (LPVOID*)&interface);
+  (*plugin)->Release(plugin);
+  if (query != S_OK || interface == NULL) {
+    if (interface != NULL) {
+      (*interface)->Release(interface);
+    }
+    return NULL;
+  }
+  return interface;
+}
+
+ostiole_usb_interface* ostiole_usb_find_interface(ostiole_usb_device* opened,
+                                                  uint8_t wanted,
+                                                  kern_return_t* result) {
+  IOUSBFindInterfaceRequest request = {
+      kIOUSBFindInterfaceDontCare, kIOUSBFindInterfaceDontCare,
+      kIOUSBFindInterfaceDontCare, kIOUSBFindInterfaceDontCare};
+  io_iterator_t iterator = 0;
+  *result = (*opened->device)
+                ->CreateInterfaceIterator(opened->device, &request, &iterator);
+  if (*result != kIOReturnSuccess) {
+    return NULL;
+  }
+  io_service_t service;
+  while ((service = IOIteratorNext(iterator)) != 0) {
+    IOUSBInterfaceInterface300** interface =
+        ostiole_usb_query_interface(service);
+    IOObjectRelease(service);
+    if (interface == NULL) {
+      continue;
+    }
+    UInt8 number = 0;
+    *result = (*interface)->GetInterfaceNumber(interface, &number);
+    if (*result == kIOReturnSuccess && number == wanted) {
+      IOObjectRelease(iterator);
+      ostiole_usb_interface* found = calloc(1, sizeof(*found));
+      if (found == NULL) {
+        (*interface)->Release(interface);
+        *result = kIOReturnNoMemory;
+        return NULL;
+      }
+      found->interface = interface;
+      return found;
+    }
+    (*interface)->Release(interface);
+  }
+  IOObjectRelease(iterator);
+  *result = kIOReturnNotFound;
+  return NULL;
+}
+
+kern_return_t ostiole_usb_interface_open_seize(
+    ostiole_usb_interface* interface) {
+  return (*interface->interface)->USBInterfaceOpenSeize(interface->interface);
+}
+
+kern_return_t ostiole_usb_interface_pipe_count(ostiole_usb_interface* interface,
+                                               uint8_t* count) {
+  return (*interface->interface)->GetNumEndpoints(interface->interface, count);
+}
+
+kern_return_t ostiole_usb_interface_pipe(ostiole_usb_interface* interface,
+                                         uint8_t ref, ostiole_usb_pipe* pipe) {
+  UInt8 direction, number, interval;
+  UInt16 max_packet;
+  kern_return_t result =
+      (*interface->interface)
+          ->GetPipeProperties(interface->interface, ref, &direction, &number,
+                              &pipe->transfer_type, &max_packet, &interval);
+  if (result != kIOReturnSuccess) {
+    return result;
+  }
+  pipe->endpoint = number | (direction == kUSBIn ? 0x80 : 0);
+  pipe->ref = ref;
+  return kIOReturnSuccess;
+}
+
+kern_return_t ostiole_usb_interface_close(ostiole_usb_interface* interface) {
+  kern_return_t result =
+      (*interface->interface)->USBInterfaceClose(interface->interface);
+  (*interface->interface)->Release(interface->interface);
+  free(interface);
+  return result;
+}
