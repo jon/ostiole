@@ -27,10 +27,7 @@ func newEnumerator(sysfsRoot, devRoot string) *Enumerator {
 }
 
 // List returns devices matching one of the supplied filters.
-func (e *Enumerator) List(
-	ctx context.Context,
-	filters []DeviceFilter,
-) ([]DeviceInfo, error) {
+func (e *Enumerator) List(ctx context.Context, filters []DeviceFilter) ([]DeviceInfo, error) {
 	if ctx == nil {
 		return nil, errors.New("usb: nil enumeration context")
 	}
@@ -66,19 +63,14 @@ func (e *Enumerator) List(
 	return devices, nil
 }
 
-func (e *Enumerator) readDevice(
-	entry os.DirEntry,
-) (DeviceInfo, bool, error) {
+func (e *Enumerator) readDevice(entry os.DirEntry) (DeviceInfo, bool, error) {
 	root := filepath.Join(e.sysfsRoot, entry.Name())
 	info, err := os.Stat(root)
 	if errors.Is(err, os.ErrNotExist) {
 		return DeviceInfo{}, false, nil
 	}
 	if err != nil {
-		return DeviceInfo{}, false, fmt.Errorf(
-			"usb: inspect USB entry: %w",
-			err,
-		)
+		return DeviceInfo{}, false, fmt.Errorf("usb: inspect USB entry: %w", err)
 	}
 	if !info.IsDir() {
 		return DeviceInfo{}, false, nil
@@ -107,10 +99,7 @@ func (e *Enumerator) readDevice(
 	}, true, nil
 }
 
-func readNumber(
-	root, name string,
-	base, bits int,
-) (uint64, bool, error) {
+func readNumber(root, name string, base, bits int) (uint64, bool, error) {
 	value, err := os.ReadFile(filepath.Join(root, name))
 	if errors.Is(err, os.ErrNotExist) {
 		return 0, false, nil

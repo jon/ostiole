@@ -20,10 +20,7 @@ type Device struct {
 }
 
 // Open opens the exact attachment selected during enumeration.
-func (e *Enumerator) Open(
-	ctx context.Context,
-	info DeviceInfo,
-) (*Device, error) {
+func (e *Enumerator) Open(ctx context.Context, info DeviceInfo) (*Device, error) {
 	if ctx == nil {
 		return nil, errors.New("usb: nil open context")
 	}
@@ -36,11 +33,7 @@ func (e *Enumerator) Open(
 	if err := e.revalidate(ctx, info); err != nil {
 		return nil, err
 	}
-	path := filepath.Join(
-		e.devRoot,
-		fmt.Sprintf("%03d", info.Bus),
-		fmt.Sprintf("%03d", info.Address),
-	)
+	path := filepath.Join(e.devRoot, fmt.Sprintf("%03d", info.Bus), fmt.Sprintf("%03d", info.Address))
 	file, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		return nil, fmt.Errorf("usb: open USB attachment: %w", err)
@@ -51,10 +44,7 @@ func (e *Enumerator) Open(
 	return &Device{file: file}, nil
 }
 
-func (e *Enumerator) revalidate(
-	ctx context.Context,
-	expected DeviceInfo,
-) error {
+func (e *Enumerator) revalidate(ctx context.Context, expected DeviceInfo) error {
 	entries, err := os.ReadDir(e.sysfsRoot)
 	if err != nil {
 		return fmt.Errorf("usb: read USB inventory: %w", err)
@@ -71,21 +61,11 @@ func (e *Enumerator) revalidate(
 			continue
 		}
 		if info.VID != expected.VID || info.PID != expected.PID {
-			return fmt.Errorf(
-				"%w: bus %d address %d changed identity",
-				ErrStaleCandidate,
-				expected.Bus,
-				expected.Address,
-			)
+			return fmt.Errorf("%w: bus %d address %d changed identity", ErrStaleCandidate, expected.Bus, expected.Address)
 		}
 		return nil
 	}
-	return fmt.Errorf(
-		"%w: bus %d address %d disappeared",
-		ErrStaleCandidate,
-		expected.Bus,
-		expected.Address,
-	)
+	return fmt.Errorf("%w: bus %d address %d disappeared", ErrStaleCandidate, expected.Bus, expected.Address)
 }
 
 // Close releases the open usbfs attachment.

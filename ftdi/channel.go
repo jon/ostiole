@@ -47,12 +47,7 @@ type Config struct {
 type usbDevice interface {
 	ClaimInterface(iface uint8) error
 	ReleaseInterface(iface uint8) error
-	ControlTransfer(
-		ctx context.Context,
-		requestType, request uint8,
-		value, index uint16,
-		data []byte,
-	) (int, error)
+	ControlTransfer(ctx context.Context, requestType, request uint8, value, index uint16, data []byte) (int, error)
 	BulkWrite(ctx context.Context, endpoint uint8, data []byte) (int, error)
 	BulkRead(ctx context.Context, endpoint uint8, data []byte) (int, error)
 	Close() error
@@ -118,31 +113,14 @@ func (c *Channel) release() error {
 	return c.device.ReleaseInterface(c.iface)
 }
 
-func (c *Channel) control(
-	ctx context.Context,
-	request uint8,
-	value uint16,
-) (int, error) {
-	return c.device.ControlTransfer(
-		ctx,
-		requestTypeOut,
-		request,
-		value,
-		c.index,
-		nil,
-	)
+func (c *Channel) control(ctx context.Context, request uint8, value uint16) (int, error) {
+	return c.device.ControlTransfer(ctx, requestTypeOut, request, value, c.index, nil)
 }
 
-func (c *Channel) bulkWrite(
-	ctx context.Context,
-	data []byte,
-) (int, error) {
+func (c *Channel) bulkWrite(ctx context.Context, data []byte) (int, error) {
 	return c.device.BulkWrite(ctx, c.bulkOut, data)
 }
 
-func (c *Channel) bulkRead(
-	ctx context.Context,
-	data []byte,
-) (int, error) {
+func (c *Channel) bulkRead(ctx context.Context, data []byte) (int, error) {
 	return c.device.BulkRead(ctx, c.bulkIn, data)
 }

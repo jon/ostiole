@@ -45,13 +45,7 @@ func (d *fakeUSBDevice) ReleaseInterface(iface uint8) error {
 	return nil
 }
 
-func (d *fakeUSBDevice) ControlTransfer(
-	_ context.Context,
-	_ uint8,
-	request uint8,
-	value, index uint16,
-	_ []byte,
-) (int, error) {
+func (d *fakeUSBDevice) ControlTransfer(_ context.Context, _ uint8, request uint8, value, index uint16, _ []byte) (int, error) {
 	d.request, d.value, d.index = request, value, index
 	d.controls = append(d.controls, controlRecord{
 		request: request,
@@ -104,11 +98,7 @@ func TestChannelOwnsAndRestoresMPSSEMode(t *testing.T) {
 	}
 }
 
-func (d *fakeUSBDevice) BulkWrite(
-	_ context.Context,
-	endpoint uint8,
-	data []byte,
-) (int, error) {
+func (d *fakeUSBDevice) BulkWrite(_ context.Context, endpoint uint8, data []byte) (int, error) {
 	d.writesN++
 	if d.writeErr == d.writesN {
 		return 0, errors.New("injected write failure")
@@ -175,11 +165,7 @@ func TestChannelConfiguresAConservativeMPSSEClock(t *testing.T) {
 	}
 }
 
-func (d *fakeUSBDevice) BulkRead(
-	_ context.Context,
-	endpoint uint8,
-	data []byte,
-) (int, error) {
+func (d *fakeUSBDevice) BulkRead(_ context.Context, endpoint uint8, data []byte) (int, error) {
 	d.readEP = endpoint
 	if len(d.readData) != 0 {
 		payload := d.readData[0]
@@ -207,10 +193,7 @@ func TestChannelExchangesExactMPSSEPayloads(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := channel.writeExact(
-		context.Background(),
-		[]byte{1, 2, 3, 4},
-	); err != nil {
+	if err := channel.writeExact(context.Background(), []byte{1, 2, 3, 4}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := channel.readPayload(context.Background(), 3)
@@ -241,23 +224,13 @@ func TestChannelBindsOneExplicitMPSSEPort(t *testing.T) {
 	if err := channel.claim(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := channel.control(
-		context.Background(),
-		0x0b,
-		0x0200,
-	); err != nil {
+	if _, err := channel.control(context.Background(), 0x0b, 0x0200); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := channel.bulkWrite(
-		context.Background(),
-		[]byte{1},
-	); err != nil {
+	if _, err := channel.bulkWrite(context.Background(), []byte{1}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := channel.bulkRead(
-		context.Background(),
-		make([]byte, 1),
-	); err != nil {
+	if _, err := channel.bulkRead(context.Background(), make([]byte, 1)); err != nil {
 		t.Fatal(err)
 	}
 	if err := channel.release(); err != nil {

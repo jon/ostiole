@@ -18,11 +18,7 @@ type swdRead struct {
 }
 
 // SWDIO executes one direction-explicit SWD bit stream.
-func (c *Channel) SWDIO(
-	ctx context.Context,
-	direction, output []byte,
-	bits int,
-) ([]byte, error) {
+func (c *Channel) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
 	if bits < 0 || len(direction)*8 < bits || len(output)*8 < bits {
 		return nil, fmt.Errorf("ftdi: invalid %d-bit SWD stream", bits)
 	}
@@ -41,10 +37,7 @@ func (c *Channel) SWDIO(
 	return decodeSWD(response, reads, bits), nil
 }
 
-func swdCommands(
-	direction, output []byte,
-	bits int,
-) ([]byte, []swdRead) {
+func swdCommands(direction, output []byte, bits int) ([]byte, []swdRead) {
 	commands := make([]byte, 0, bits)
 	var reads []swdRead
 	for offset := 0; offset < bits; {
@@ -74,11 +67,7 @@ func swdCommands(
 	return commands, reads
 }
 
-func swdRunWidth(
-	direction []byte,
-	offset, bits int,
-	hostDrives bool,
-) int {
+func swdRunWidth(direction []byte, offset, bits int, hostDrives bool) int {
 	width := 1
 	for width < 8 &&
 		offset+width < bits &&
@@ -98,11 +87,7 @@ func swdRunData(output []byte, offset, bits int) byte {
 	return data
 }
 
-func decodeSWD(
-	response []byte,
-	reads []swdRead,
-	bits int,
-) []byte {
+func decodeSWD(response []byte, reads []swdRead, bits int) []byte {
 	input := make([]byte, (bits+7)/8)
 	for index, read := range reads {
 		samples := response[index] >> uint(8-read.bits)

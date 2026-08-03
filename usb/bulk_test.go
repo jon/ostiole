@@ -25,14 +25,10 @@ func TestDevicePerformsBoundedBulkTransfers(t *testing.T) {
 		return uintptr(transfer.Length), nil
 	}
 
-	if count, err := device.BulkWrite(
-		context.Background(), 0x02, []byte{1, 2, 3, 4},
-	); err != nil || count != 4 {
+	if count, err := device.BulkWrite(context.Background(), 0x02, []byte{1, 2, 3, 4}); err != nil || count != 4 {
 		t.Fatalf("BulkWrite() = %d, %v", count, err)
 	}
-	if count, err := device.BulkRead(
-		context.Background(), 0x81, make([]byte, 4),
-	); err != nil || count != 4 {
+	if count, err := device.BulkRead(context.Background(), 0x81, make([]byte, 4)); err != nil || count != 4 {
 		t.Fatalf("BulkRead() = %d, %v", count, err)
 	}
 	if len(endpoints) != 2 || endpoints[0] != 0x02 || endpoints[1] != 0x81 {
@@ -48,14 +44,10 @@ func TestDeviceRejectsWrongBulkDirectionBeforeIO(t *testing.T) {
 		return 0, nil
 	}
 
-	if _, err := device.BulkWrite(
-		context.Background(), 0x81, []byte{1},
-	); err == nil {
+	if _, err := device.BulkWrite(context.Background(), 0x81, []byte{1}); err == nil {
 		t.Fatal("BulkWrite accepted an IN endpoint")
 	}
-	if _, err := device.BulkRead(
-		context.Background(), 0x02, make([]byte, 1),
-	); err == nil {
+	if _, err := device.BulkRead(context.Background(), 0x02, make([]byte, 1)); err == nil {
 		t.Fatal("BulkRead accepted an OUT endpoint")
 	}
 	if called {

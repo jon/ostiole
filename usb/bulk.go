@@ -18,40 +18,22 @@ type usbBulkTransfer struct {
 }
 
 // BulkWrite writes to one OUT endpoint.
-func (d *Device) BulkWrite(
-	ctx context.Context,
-	endpoint uint8,
-	data []byte,
-) (int, error) {
+func (d *Device) BulkWrite(ctx context.Context, endpoint uint8, data []byte) (int, error) {
 	if endpoint&0x80 != 0 {
-		return 0, fmt.Errorf(
-			"usb: bulk-write endpoint %#02x is an IN endpoint",
-			endpoint,
-		)
+		return 0, fmt.Errorf("usb: bulk-write endpoint %#02x is an IN endpoint", endpoint)
 	}
 	return d.bulkTransfer(ctx, endpoint, data)
 }
 
 // BulkRead reads from one IN endpoint.
-func (d *Device) BulkRead(
-	ctx context.Context,
-	endpoint uint8,
-	data []byte,
-) (int, error) {
+func (d *Device) BulkRead(ctx context.Context, endpoint uint8, data []byte) (int, error) {
 	if endpoint&0x80 == 0 {
-		return 0, fmt.Errorf(
-			"usb: bulk-read endpoint %#02x is an OUT endpoint",
-			endpoint,
-		)
+		return 0, fmt.Errorf("usb: bulk-read endpoint %#02x is an OUT endpoint", endpoint)
 	}
 	return d.bulkTransfer(ctx, endpoint, data)
 }
 
-func (d *Device) bulkTransfer(
-	ctx context.Context,
-	endpoint uint8,
-	data []byte,
-) (int, error) {
+func (d *Device) bulkTransfer(ctx context.Context, endpoint uint8, data []byte) (int, error) {
 	if uint64(len(data)) > math.MaxUint32 {
 		return 0, errors.New("usb: bulk buffer exceeds usbfs limit")
 	}

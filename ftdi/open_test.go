@@ -21,11 +21,7 @@ func TestOpenClosesAnInvalidSelection(t *testing.T) {
 }
 
 func TestOpenRejectsANilUSBDevice(t *testing.T) {
-	if channel, err := Open(
-		context.Background(),
-		nil,
-		Config{},
-	); channel != nil || err == nil {
+	if channel, err := Open(context.Background(), nil, Config{}); channel != nil || err == nil {
 		t.Fatalf("Open(nil) = (%T, %v)", channel, err)
 	}
 }
@@ -70,12 +66,7 @@ func TestOpenCleansUpEveryFailedPreparationStage(t *testing.T) {
 
 			ready, err := prepareChannel(context.Background(), channel)
 			if ready != nil || err == nil || !test.raw.closed {
-				t.Fatalf(
-					"prepareChannel() = (%T, %v), raw = %#v",
-					ready,
-					err,
-					test.raw,
-				)
+				t.Fatalf("prepareChannel() = (%T, %v), raw = %#v", ready, err, test.raw)
 			}
 			if test.name != "mode entry" && test.raw.releases != 1 {
 				t.Fatalf("release count = %d, want 1", test.raw.releases)

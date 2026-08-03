@@ -16,10 +16,7 @@ func TestClockDivisorNeverExceedsTheRequestedRate(t *testing.T) {
 		}
 		denominator := uint64(2) * uint64(divisor+1)
 		if uint64(baseClockHz) > uint64(requested)*denominator {
-			t.Fatalf(
-				"clockDivisor(%d) configures more than requested",
-				requested,
-			)
+			t.Fatalf("clockDivisor(%d) configures more than requested", requested)
 		}
 	}
 }

@@ -37,10 +37,7 @@ func (c *Channel) configure(ctx context.Context) error {
 
 func clockDivisor(clockHz uint32) (uint16, error) {
 	if clockHz < minClockHz {
-		return 0, fmt.Errorf(
-			"ftdi: clock %d Hz is below the attainable minimum",
-			clockHz,
-		)
+		return 0, fmt.Errorf("ftdi: clock %d Hz is below the attainable minimum", clockHz)
 	}
 	denominator := 2 * uint64(clockHz)
 	ratio := (uint64(baseClockHz) + denominator - 1) / denominator
@@ -48,10 +45,7 @@ func clockDivisor(clockHz uint32) (uint16, error) {
 		return 0, nil
 	}
 	if ratio > 1<<16 {
-		return 0, fmt.Errorf(
-			"ftdi: clock %d Hz is below the attainable minimum",
-			clockHz,
-		)
+		return 0, fmt.Errorf("ftdi: clock %d Hz is below the attainable minimum", clockHz)
 	}
 	return uint16(ratio - 1), nil
 }

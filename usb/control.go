@@ -22,12 +22,7 @@ type usbControlTransfer struct {
 }
 
 // ControlTransfer performs one deadline-bounded endpoint-zero transfer.
-func (d *Device) ControlTransfer(
-	ctx context.Context,
-	requestType, request uint8,
-	value, index uint16,
-	data []byte,
-) (int, error) {
+func (d *Device) ControlTransfer(ctx context.Context, requestType, request uint8, value, index uint16, data []byte) (int, error) {
 	timeout, err := transferTimeout(ctx)
 	if err != nil {
 		return 0, err

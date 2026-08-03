@@ -9,22 +9,14 @@ import (
 
 // Open takes ownership of device and returns a ready FTDI SWD channel.
 // It closes the USB device before returning any error.
-func Open(
-	ctx context.Context,
-	device *usb.Device,
-	config Config,
-) (*Channel, error) {
+func Open(ctx context.Context, device *usb.Device, config Config) (*Channel, error) {
 	if device == nil {
 		return nil, errors.New("ftdi: nil USB device")
 	}
 	return openChannel(ctx, device, config)
 }
 
-func openChannel(
-	ctx context.Context,
-	device usbDevice,
-	config Config,
-) (*Channel, error) {
+func openChannel(ctx context.Context, device usbDevice, config Config) (*Channel, error) {
 	channel, err := newChannel(device, config)
 	if err != nil {
 		if device != nil {
@@ -35,10 +27,7 @@ func openChannel(
 	return prepareChannel(ctx, channel)
 }
 
-func prepareChannel(
-	ctx context.Context,
-	channel *Channel,
-) (_ *Channel, err error) {
+func prepareChannel(ctx context.Context, channel *Channel) (_ *Channel, err error) {
 	defer func() {
 		if err != nil {
 			err = errors.Join(err, channel.Close())

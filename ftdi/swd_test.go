@@ -19,12 +19,7 @@ func TestChannelExecutesDirectionSafeSWDRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	input, err := channel.SWDIO(
-		context.Background(),
-		[]byte{0b00000011},
-		[]byte{0b00000001},
-		5,
-	)
+	input, err := channel.SWDIO(context.Background(), []byte{0b00000011}, []byte{0b00000001}, 5)
 	if err != nil {
 		t.Fatal(err)
 	}

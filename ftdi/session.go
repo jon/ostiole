@@ -38,17 +38,9 @@ func (c *Channel) enterMPSSE(ctx context.Context) error {
 	return c.settle(ctx)
 }
 
-func (c *Channel) runControl(
-	ctx context.Context,
-	step controlStep,
-) error {
+func (c *Channel) runControl(ctx context.Context, step controlStep) error {
 	if _, err := c.control(ctx, step.request, step.value); err != nil {
-		return fmt.Errorf(
-			"ftdi: request %#02x value %#04x: %w",
-			step.request,
-			step.value,
-			err,
-		)
+		return fmt.Errorf("ftdi: request %#02x value %#04x: %w", step.request, step.value, err)
 	}
 	return nil
 }

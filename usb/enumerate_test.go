@@ -38,10 +38,7 @@ func TestEnumeratorHonorsCancellationBeforeReadingSysfs(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := newEnumerator(t.TempDir(), "/dev/bus/usb").List(
-		ctx,
-		[]DeviceFilter{{VID: 0x0403}},
-	)
+	_, err := newEnumerator(t.TempDir(), "/dev/bus/usb").List(ctx, []DeviceFilter{{VID: 0x0403}})
 	if err != context.Canceled {
 		t.Fatalf("List() error = %v, want context.Canceled", err)
 	}
@@ -51,17 +48,14 @@ func TestEnumeratorFollowsSysfsDeviceSymlinks(t *testing.T) {
 	inventory := t.TempDir()
 	backing := t.TempDir()
 	writeSysfsDevice(t, backing, "device", "0403", "6014", "1", "3")
-	if err := os.Symlink(
-		filepath.Join(backing, "device"),
-		filepath.Join(inventory, "1-1.2"),
-	); err != nil {
+	if err := os.Symlink(filepath.Join(backing, "device"), filepath.Join(inventory, "1-1.2")); err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := newEnumerator(inventory, "/dev/bus/usb").List(
-		context.Background(),
-		[]DeviceFilter{{VID: 0x0403, PID: 0x6014}},
-	)
+	got, err := newEnumerator(inventory, "/dev/bus/usb").List(context.Background(), []DeviceFilter{{
+		VID: 0x0403,
+		PID: 0x6014,
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,10 +64,7 @@ func TestEnumeratorFollowsSysfsDeviceSymlinks(t *testing.T) {
 	}
 }
 
-func writeSysfsDevice(
-	t *testing.T,
-	root, name, vendor, product, bus, address string,
-) {
+func writeSysfsDevice(t *testing.T, root, name, vendor, product, bus, address string) {
 	t.Helper()
 	directory := filepath.Join(root, name)
 	if err := os.Mkdir(directory, 0o755); err != nil {
@@ -85,11 +76,7 @@ func writeSysfsDevice(
 		"busnum":    bus,
 		"devnum":    address,
 	} {
-		if err := os.WriteFile(
-			filepath.Join(directory, filename),
-			[]byte(value+"\n"),
-			0o644,
-		); err != nil {
+		if err := os.WriteFile(filepath.Join(directory, filename), []byte(value+"\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
