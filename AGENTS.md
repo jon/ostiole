@@ -1,7 +1,14 @@
 # AI Agent Guidelines
 
 Ostiole is routinely developed with coding agents. Treat this file as the
-repository-specific contribution contract.
+repository-specific contribution contract for agents enhancing Ostiole
+itself.
+
+This is not a guide for programs that consume Ostiole as a library. Agents
+building such programs should begin with `README.md` and the user-facing
+documentation under `docs/` when present. Repository workflow, history, and
+maintainer constraints in this file do not automatically apply to downstream
+compositions.
 
 ## Workflow
 
@@ -101,6 +108,24 @@ future maintainer.
 - Keep `cmd/<name>/main.go` thin. Put substantive parsing, dispatch, session,
   and presentation behavior in a testable package rather than avoiding tests
   for executable functionality altogether.
+
+## Command boundaries
+
+- Keep commands minimal. They own argument parsing, user-facing selection and
+  defaults, output formatting, exit status, and composition of public library
+  APIs.
+- Put reusable hardware, protocol, lifecycle, restoration, inspection, and
+  target semantics in the appropriate public library package. Do not hide
+  these behaviors in `cmd/ost` or its internal packages.
+- Treat substantial command implementation as evidence of a missing library
+  boundary. Add and test the smallest reusable API first, then make the
+  command call it.
+- Use command-internal packages only for application policy and testable
+  process orchestration. They must not become a second, command-only hardware
+  stack.
+- Expose safe semantic operations rather than mirroring every low-level
+  mechanism as a command. A public library primitive does not automatically
+  require a corresponding CLI surface.
 
 ## Library boundaries
 
