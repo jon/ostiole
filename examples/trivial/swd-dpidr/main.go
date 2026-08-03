@@ -18,14 +18,21 @@ const (
 )
 
 func main() {
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	ctx, cancel := context.WithTimeout(context.Background(), transferTimeout)
 	defer cancel()
 	dpidr, err := readDPIDR(ctx)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
 	fmt.Printf("DPIDR=%#08x\n", dpidr)
+	return nil
 }
 
 func readDPIDR(ctx context.Context) (value uint32, err error) {

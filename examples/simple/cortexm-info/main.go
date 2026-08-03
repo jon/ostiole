@@ -28,18 +28,21 @@ type identity struct {
 }
 
 func main() {
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
 	defer cancel()
 
 	info, err := readIdentity(ctx)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
-	if err := printIdentity(os.Stdout, info); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	return printIdentity(os.Stdout, info)
 }
 
 func readIdentity(ctx context.Context) (_ identity, err error) {
