@@ -21,3 +21,5 @@ an example has been implemented.
   of one SWD debug port through an explicitly selected FTDI attachment.
 - [`simple/ap-id`](simple/ap-id) reports the debug-port identity and one
   explicitly selected access-port identity.
+- [`simple/cortexm-info`](simple/cortexm-info) reads a Cortex-M processor
+  identity through an explicitly selected memory access port.

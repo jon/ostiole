@@ -46,9 +46,9 @@ posted `RDBUFF` completion path. The simulator models the same DP and AP state
 changes. A minimal MEM-AP client and its model can read one aligned 32-bit
 target word without address incrementing.
 
-The [examples](examples) begin with a raw SWD debug-port identity read and then
-add the DAP connection lifecycle and posted access-port reads. They compose the
-public packages explicitly without duplicating their framing.
+The [examples](examples) begin with a raw SWD debug-port identity read, then
+add posted access-port reads and a Cortex-M identity read through a MEM-AP.
+They compose the public packages explicitly without duplicating their framing.
 
 This initial FTDI path uses the standard H-series MPSSE port and endpoint
 layout. Descriptor-driven port binding is not implemented yet.
@@ -127,6 +127,20 @@ Maintainers can exercise the DAP path as an opt-in hardware test:
 ```sh
 sudo OSTIOLE_FTDI_HIL=1 go test -tags integration ./dap
 ```
+
+## Cortex-M identity example
+
+The Cortex-M example selects AP0 explicitly, requires it to be a MEM-AP, and
+reads the architectural CPUID register. Run:
+
+```sh
+sudo go run ./examples/simple/cortexm-info
+```
+
+A successful read prints the debug port, access port, and processor identities,
+for example `DPIDR=0x2ba01477 AP0_IDR=0x24770011 CPUID=0x410fc241`.
+The operation restores CSW, TAR, DP selection, and acquired power state. It
+does not reset or halt the target or write target memory.
 
 ## License
 
