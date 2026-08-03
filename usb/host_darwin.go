@@ -9,19 +9,6 @@ import (
 
 var errDarwinUSBUnsupported = errors.New("usb: macOS host access is not implemented")
 
-// Enumerator reads one explicit snapshot of the macOS USB inventory.
-type Enumerator struct{}
-
-// New constructs an enumerator for the host USB inventory.
-func New() *Enumerator {
-	return &Enumerator{}
-}
-
-// List returns devices matching one of the supplied filters.
-func (e *Enumerator) List(context.Context, []DeviceFilter) ([]DeviceInfo, error) {
-	return nil, errDarwinUSBUnsupported
-}
-
 // Open opens the exact attachment selected during enumeration.
 func (e *Enumerator) Open(context.Context, DeviceInfo) (*Device, error) {
 	return nil, errDarwinUSBUnsupported
