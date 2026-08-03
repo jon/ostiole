@@ -156,7 +156,14 @@ go run ./cmd/ost ftdi list
 ```
 
 Each result reports the USB bus and address followed by its vendor and product
-identifiers. Run `go run ./cmd/ost help` for the available command hierarchy.
+identifiers. A supported attachment can perform the same raw DPIDR read as the
+trivial example:
+
+```sh
+sudo go run ./cmd/ost swd dpidr
+```
+
+Run `go run ./cmd/ost help` for the available command hierarchy.
 
 ## License
 

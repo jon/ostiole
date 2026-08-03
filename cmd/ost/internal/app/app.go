@@ -10,7 +10,10 @@ import (
 
 const (
 	operationTimeout = 5 * time.Second
-	usage            = "Usage:\n  ost ftdi list\n  ost help\n"
+	usage            = "Usage:\n" +
+		"  ost ftdi list\n" +
+		"  ost swd dpidr\n" +
+		"  ost help\n"
 )
 
 type usageError struct {
@@ -49,6 +52,9 @@ func run(ctx context.Context, args []string, stdout io.Writer, ops operations) e
 	}
 	if args[0] == "ftdi" {
 		return runFTDI(ctx, args[1:], stdout, ops)
+	}
+	if args[0] == "swd" {
+		return runSWD(ctx, args[1:], stdout, ops)
 	}
 	return &usageError{message: fmt.Sprintf("unknown command %q", args[0])}
 }

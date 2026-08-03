@@ -14,7 +14,8 @@ func TestRunShowsHelp(t *testing.T) {
 		if status := Run(t.Context(), args, &stdout, &stderr); status != 0 {
 			t.Fatalf("Run(%q) status = %d", args, status)
 		}
-		if got, want := stdout.String(), "Usage:\n  ost ftdi list\n  ost help\n"; got != want {
+		want := "Usage:\n  ost ftdi list\n  ost swd dpidr\n  ost help\n"
+		if got := stdout.String(); got != want {
 			t.Fatalf("Run(%q) stdout = %q, want %q", args, got, want)
 		}
 		if stderr.Len() != 0 {
@@ -32,9 +33,25 @@ func TestRunRejectsUnknownCommand(t *testing.T) {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 	want := "ost: unknown command \"unknown\"\n\n" +
-		"Usage:\n  ost ftdi list\n  ost help\n"
+		"Usage:\n  ost ftdi list\n  ost swd dpidr\n  ost help\n"
 	if stderr.String() != want {
 		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
+	}
+}
+
+func TestRunReadsSWDIdentity(t *testing.T) {
+	var stdout bytes.Buffer
+	ops := operations{
+		readDPIDR: func(context.Context) (uint32, error) {
+			return 0x2ba01477, nil
+		},
+	}
+	err := run(t.Context(), []string{"swd", "dpidr"}, &stdout, ops)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := stdout.String(), "DPIDR=0x2ba01477\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
 	}
 }
 

@@ -9,14 +9,6 @@ import (
 	"github.com/jon/ostiole/usb"
 )
 
-type operations struct {
-	listFTDI func(context.Context) ([]usb.DeviceInfo, error)
-}
-
-func systemOperations() operations {
-	return operations{listFTDI: listFTDI}
-}
-
 func listFTDI(ctx context.Context) ([]usb.DeviceInfo, error) {
 	return usb.New().List(ctx, ftdi.SupportedDevices())
 }
