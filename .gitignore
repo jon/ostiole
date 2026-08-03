@@ -1,19 +1,4 @@
-# Allowlist: ignore everything at the repo root except source-controlled files.
-/*
-!/*/
-!/.gitignore
-!/.golangci.yml
-!/.golangci.tests.yml
-!/AGENTS.md
-!/CHANGELOG.md
-!/CONTRIBUTING.md
-!/LICENSE
-!/README.md
-!/THIRD_PARTY_NOTICES
-!/go.mod
-!/go.sum
-
-# Build and test artifacts, anywhere.
+# Build and test artifacts.
 /bin/
 *.test
 *.exe
