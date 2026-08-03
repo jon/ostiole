@@ -148,11 +148,15 @@ does not reset or halt the target or write target memory.
 ## Command
 
 `ost` is a small command-line companion built from the same public packages
-used by the examples. The initial dispatcher exposes its help directly:
+used by the examples. It can list supported FTDI attachments without opening
+them:
 
 ```sh
-go run ./cmd/ost help
+go run ./cmd/ost ftdi list
 ```
+
+Each result reports the USB bus and address followed by its vendor and product
+identifiers. Run `go run ./cmd/ost help` for the available command hierarchy.
 
 ## License
 

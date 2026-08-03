@@ -5,9 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 )
 
-const usage = "Usage:\n  ost help\n"
+const (
+	operationTimeout = 5 * time.Second
+	usage            = "Usage:\n  ost ftdi list\n  ost help\n"
+)
 
 type usageError struct {
 	message string
@@ -23,7 +27,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintln(stderr, "ost: nil context")
 		return 1
 	}
-	err := run(args, stdout)
+	operationCtx, cancel := context.WithTimeout(ctx, operationTimeout)
+	defer cancel()
+	err := run(operationCtx, args, stdout, systemOperations())
 	if err == nil {
 		return 0
 	}
@@ -36,10 +42,13 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	return 1
 }
 
-func run(args []string, stdout io.Writer) error {
+func run(ctx context.Context, args []string, stdout io.Writer, ops operations) error {
 	if len(args) == 0 || len(args) == 1 && isHelp(args[0]) {
 		_, err := io.WriteString(stdout, usage)
 		return err
+	}
+	if args[0] == "ftdi" {
+		return runFTDI(ctx, args[1:], stdout, ops)
 	}
 	return &usageError{message: fmt.Sprintf("unknown command %q", args[0])}
 }
