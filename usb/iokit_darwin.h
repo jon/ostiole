@@ -57,6 +57,12 @@ kern_return_t ostiole_usb_interface_pipe_count(ostiole_usb_interface* interface,
                                                uint8_t* count);
 kern_return_t ostiole_usb_interface_pipe(ostiole_usb_interface* interface,
                                          uint8_t ref, ostiole_usb_pipe* pipe);
+kern_return_t ostiole_usb_interface_read(ostiole_usb_interface* interface,
+                                         uint8_t ref, void* data,
+                                         uint32_t* size, uint32_t timeout);
+kern_return_t ostiole_usb_interface_write(ostiole_usb_interface* interface,
+                                          uint8_t ref, void* data,
+                                          uint32_t size, uint32_t timeout);
 kern_return_t ostiole_usb_interface_close(ostiole_usb_interface* interface);
 
 #endif

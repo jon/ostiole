@@ -163,6 +163,35 @@ func (i *iokitInterface) pipes() ([]darwinPipe, error) {
 	return pipes, nil
 }
 
+func (i *iokitInterface) readPipe(ref uint8, data []byte, timeout uint32) (uint32, error) {
+	pointer := bytePointer(data)
+	size := C.uint32_t(len(data))
+	result := C.ostiole_usb_interface_read(i.native, C.uint8_t(ref), pointer,
+		&size, C.uint32_t(timeout))
+	runtime.KeepAlive(data)
+	if result != C.kIOReturnSuccess {
+		return 0, iokitError(result)
+	}
+	return uint32(size), nil
+}
+
+func (i *iokitInterface) writePipe(ref uint8, data []byte, timeout uint32) error {
+	result := C.ostiole_usb_interface_write(i.native, C.uint8_t(ref),
+		bytePointer(data), C.uint32_t(len(data)), C.uint32_t(timeout))
+	runtime.KeepAlive(data)
+	if result != C.kIOReturnSuccess {
+		return iokitError(result)
+	}
+	return nil
+}
+
+func bytePointer(data []byte) unsafe.Pointer {
+	if len(data) == 0 {
+		return nil
+	}
+	return unsafe.Pointer(&data[0])
+}
+
 func (i *iokitInterface) close() error {
 	result := C.ostiole_usb_interface_close(i.native)
 	if result != C.kIOReturnSuccess {

@@ -205,6 +205,20 @@ kern_return_t ostiole_usb_interface_pipe(ostiole_usb_interface* interface,
   return kIOReturnSuccess;
 }
 
+kern_return_t ostiole_usb_interface_read(ostiole_usb_interface* interface,
+                                         uint8_t ref, void* data,
+                                         uint32_t* size, uint32_t timeout) {
+  return (*interface->interface)
+      ->ReadPipeTO(interface->interface, ref, data, size, timeout, timeout);
+}
+
+kern_return_t ostiole_usb_interface_write(ostiole_usb_interface* interface,
+                                          uint8_t ref, void* data,
+                                          uint32_t size, uint32_t timeout) {
+  return (*interface->interface)
+      ->WritePipeTO(interface->interface, ref, data, size, timeout, timeout);
+}
+
 kern_return_t ostiole_usb_interface_close(ostiole_usb_interface* interface) {
   kern_return_t result =
       (*interface->interface)->USBInterfaceClose(interface->interface);
