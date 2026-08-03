@@ -9,14 +9,6 @@ import (
 
 var errDarwinUSBUnsupported = errors.New("usb: macOS host access is not implemented")
 
-// Open opens the exact attachment selected during enumeration.
-func (e *Enumerator) Open(context.Context, DeviceInfo) (*Device, error) {
-	return nil, errDarwinUSBUnsupported
-}
-
-// Device is one open macOS USB attachment.
-type Device struct{}
-
 // ClaimInterface claims one interface for this device.
 func (d *Device) ClaimInterface(uint8) error {
 	return errDarwinUSBUnsupported
@@ -45,9 +37,4 @@ func (d *Device) BulkWrite(context.Context, uint8, []byte) (int, error) {
 // BulkRead reads from one IN endpoint.
 func (d *Device) BulkRead(context.Context, uint8, []byte) (int, error) {
 	return 0, errDarwinUSBUnsupported
-}
-
-// Close releases the open macOS USB attachment.
-func (d *Device) Close() error {
-	return nil
 }
