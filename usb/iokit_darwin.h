@@ -46,6 +46,8 @@ ostiole_usb_interface* ostiole_usb_find_interface(ostiole_usb_device* opened,
                                                   kern_return_t* result);
 kern_return_t ostiole_usb_interface_open_seize(
     ostiole_usb_interface* interface);
+kern_return_t ostiole_usb_interface_set_alternate(
+    ostiole_usb_interface* interface, uint8_t alternate);
 kern_return_t ostiole_usb_interface_pipe_count(ostiole_usb_interface* interface,
                                                uint8_t* count);
 kern_return_t ostiole_usb_interface_pipe(ostiole_usb_interface* interface,

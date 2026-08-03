@@ -9,11 +9,6 @@ import (
 
 var errDarwinUSBUnsupported = errors.New("usb: macOS host access is not implemented")
 
-// SetAltSetting selects an alternate setting on the claimed interface.
-func (d *Device) SetAltSetting(uint8, uint8) error {
-	return errDarwinUSBUnsupported
-}
-
 // ControlTransfer performs one deadline-bounded endpoint-zero transfer.
 func (d *Device) ControlTransfer(context.Context, uint8, uint8, uint16, uint16, []byte) (int, error) {
 	return 0, errDarwinUSBUnsupported

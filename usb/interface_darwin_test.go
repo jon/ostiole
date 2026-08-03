@@ -24,7 +24,9 @@ type fakeDarwinInterface struct {
 	pipesValue []darwinPipe
 	openErr    error
 	pipesErr   error
+	setAltErr  error
 	closeErr   error
+	alternates []uint8
 	seizes     int
 	closes     int
 }
@@ -36,6 +38,11 @@ func (f *fakeDarwinInterface) openSeize() error {
 
 func (f *fakeDarwinInterface) pipes() ([]darwinPipe, error) {
 	return f.pipesValue, f.pipesErr
+}
+
+func (f *fakeDarwinInterface) setAlternate(alternate uint8) error {
+	f.alternates = append(f.alternates, alternate)
+	return f.setAltErr
 }
 
 func (f *fakeDarwinInterface) close() error {
@@ -150,5 +157,82 @@ func TestDarwinClaimRejectsAClosedDevice(t *testing.T) {
 	}
 	if len(native.interfaces) != 0 {
 		t.Fatalf("native interface selections = %#v, want none", native.interfaces)
+	}
+}
+
+func TestDarwinAlternateSettingReplacesPipeRoutes(t *testing.T) {
+	nativeInterface := &fakeDarwinInterface{pipesValue: []darwinPipe{
+		{
+			endpoint:     0x01,
+			ref:          1,
+			transferType: darwinBulkPipe,
+		},
+	}}
+	native := &fakeDarwinInterfaceDevice{iface: nativeInterface}
+	device := &Device{handle: native}
+	if err := device.ClaimInterface(0); err != nil {
+		t.Fatalf("ClaimInterface: %v", err)
+	}
+	nativeInterface.pipesValue = []darwinPipe{
+		{
+			endpoint:     0x82,
+			ref:          3,
+			transferType: darwinBulkPipe,
+		},
+	}
+	if err := device.SetAltSetting(0, 2); err != nil {
+		t.Fatalf("SetAltSetting: %v", err)
+	}
+	if !reflect.DeepEqual(nativeInterface.alternates, []uint8{2}) {
+		t.Fatalf("alternate selections = %#v", nativeInterface.alternates)
+	}
+	if _, ok := device.routes[0x01]; ok {
+		t.Fatal("old endpoint route remained")
+	}
+	if got := device.routes[0x82]; got.ref != 3 {
+		t.Fatalf("new endpoint route = %#v", got)
+	}
+}
+
+func TestDarwinAlternateSettingInvalidatesRoutesOnFailure(t *testing.T) {
+	want := errors.New("alternate failed")
+	nativeInterface := &fakeDarwinInterface{pipesValue: []darwinPipe{
+		{
+			endpoint:     0x01,
+			ref:          1,
+			transferType: darwinBulkPipe,
+		},
+	}}
+	native := &fakeDarwinInterfaceDevice{iface: nativeInterface}
+	device := &Device{handle: native}
+	if err := device.ClaimInterface(0); err != nil {
+		t.Fatalf("ClaimInterface: %v", err)
+	}
+	nativeInterface.setAltErr = want
+	if err := device.SetAltSetting(0, 1); !errors.Is(err, want) {
+		t.Fatalf("SetAltSetting error = %v, want %v", err, want)
+	}
+	if device.routes != nil {
+		t.Fatalf("routes after failure = %#v", device.routes)
+	}
+	if err := device.SetAltSetting(1, 0); err == nil {
+		t.Fatal("SetAltSetting for unclaimed interface succeeded")
+	}
+}
+
+func TestDarwinAlternateSettingInvalidatesRoutesWhenPipesFail(t *testing.T) {
+	want := errors.New("pipe discovery failed")
+	nativeInterface := &fakeDarwinInterface{}
+	native := &fakeDarwinInterfaceDevice{iface: nativeInterface}
+	device := &Device{handle: native}
+	if err := device.ClaimInterface(0); err != nil {
+		t.Fatalf("ClaimInterface: %v", err)
+	}
+	nativeInterface.pipesErr = want
+	if err := device.SetAltSetting(0, 1); !errors.Is(err, want) {
+		t.Fatalf("SetAltSetting error = %v, want %v", err, want)
+	}
+	if device.routes != nil {
+		t.Fatalf("routes after failure = %#v", device.routes)
 	}
 }

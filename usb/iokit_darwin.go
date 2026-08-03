@@ -114,6 +114,14 @@ func (i *iokitInterface) openSeize() error {
 	return nil
 }
 
+func (i *iokitInterface) setAlternate(alternate uint8) error {
+	result := C.ostiole_usb_interface_set_alternate(i.native, C.uint8_t(alternate))
+	if result != C.kIOReturnSuccess {
+		return iokitError(result)
+	}
+	return nil
+}
+
 func (i *iokitInterface) pipes() ([]darwinPipe, error) {
 	var count C.uint8_t
 	result := C.ostiole_usb_interface_pipe_count(i.native, &count)

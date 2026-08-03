@@ -17,6 +17,7 @@ type darwinPipe struct {
 
 type darwinInterfaceHandle interface {
 	openSeize() error
+	setAlternate(uint8) error
 	pipes() ([]darwinPipe, error)
 	close() error
 }
@@ -51,11 +52,33 @@ func (d *Device) ClaimInterface(iface uint8) error {
 		return errors.Join(pipesErr, handle.close())
 	}
 	d.iface, d.claimed, d.hasClaim = handle, iface, true
+	d.replaceRoutes(pipes)
+	return nil
+}
+
+// SetAltSetting selects an alternate setting on the claimed interface.
+func (d *Device) SetAltSetting(iface, alternate uint8) error {
+	if !d.hasClaim || d.claimed != iface {
+		return fmt.Errorf("usb: interface %d is not claimed", iface)
+	}
+	d.routes = nil
+	if err := d.iface.setAlternate(alternate); err != nil {
+		return fmt.Errorf("usb: select interface %d alternate %d: %w",
+			iface, alternate, err)
+	}
+	pipes, err := d.iface.pipes()
+	if err != nil {
+		return fmt.Errorf("usb: enumerate interface %d pipes: %w", iface, err)
+	}
+	d.replaceRoutes(pipes)
+	return nil
+}
+
+func (d *Device) replaceRoutes(pipes []darwinPipe) {
 	d.routes = make(map[uint8]darwinPipe, len(pipes))
 	for _, pipe := range pipes {
 		d.routes[pipe.endpoint] = pipe
 	}
-	return nil
 }
 
 // ReleaseInterface releases the claimed interface.

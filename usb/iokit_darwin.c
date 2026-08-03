@@ -157,6 +157,12 @@ kern_return_t ostiole_usb_interface_open_seize(
   return (*interface->interface)->USBInterfaceOpenSeize(interface->interface);
 }
 
+kern_return_t ostiole_usb_interface_set_alternate(
+    ostiole_usb_interface* interface, uint8_t alternate) {
+  return (*interface->interface)
+      ->SetAlternateInterface(interface->interface, alternate);
+}
+
 kern_return_t ostiole_usb_interface_pipe_count(ostiole_usb_interface* interface,
                                                uint8_t* count) {
   return (*interface->interface)->GetNumEndpoints(interface->interface, count);
