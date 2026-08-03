@@ -5,6 +5,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jon/ostiole/dap"
 	"github.com/jon/ostiole/usb"
 )
 
@@ -14,7 +15,8 @@ func TestRunShowsHelp(t *testing.T) {
 		if status := Run(t.Context(), args, &stdout, &stderr); status != 0 {
 			t.Fatalf("Run(%q) status = %d", args, status)
 		}
-		want := "Usage:\n  ost ftdi list\n  ost swd dpidr\n  ost help\n"
+		want := "Usage:\n  ost ftdi list\n  ost swd dpidr\n" +
+			"  ost dap dp id\n  ost help\n"
 		if got := stdout.String(); got != want {
 			t.Fatalf("Run(%q) stdout = %q, want %q", args, got, want)
 		}
@@ -33,9 +35,32 @@ func TestRunRejectsUnknownCommand(t *testing.T) {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 	want := "ost: unknown command \"unknown\"\n\n" +
-		"Usage:\n  ost ftdi list\n  ost swd dpidr\n  ost help\n"
+		"Usage:\n  ost ftdi list\n  ost swd dpidr\n" +
+		"  ost dap dp id\n  ost help\n"
 	if stderr.String() != want {
 		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
+	}
+}
+
+func TestRunInspectsDebugPort(t *testing.T) {
+	info, err := dap.DecodeDPIDR(0x2ba01477)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	ops := operations{
+		inspectDP: func(context.Context) (dap.DPIDRInfo, error) {
+			return info, nil
+		},
+	}
+	err = run(t.Context(), []string{"dap", "dp", "id"}, &stdout, ops)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "DPIDR=0x2ba01477 REVISION=2 PART=0xba " +
+		"MINIMAL=false VERSION=1 DESIGNER=0x23b\n"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
 }
 

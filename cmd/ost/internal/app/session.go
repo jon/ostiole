@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
+	"github.com/jon/ostiole/dap"
 	"github.com/jon/ostiole/ftdi"
 	"github.com/jon/ostiole/swd"
 	"github.com/jon/ostiole/usb"
@@ -13,6 +15,13 @@ import (
 type swdSession struct {
 	channel    *ftdi.Channel
 	connection *swd.Conn
+}
+
+type dapSession struct {
+	wire     *swdSession
+	port     *dap.DebugPort
+	identity dap.DPIDRInfo
+	memory   *dap.MemAP
 }
 
 func openSWD(ctx context.Context) (*swdSession, error) {
@@ -49,4 +58,26 @@ func (s *swdSession) close() error {
 		return nil
 	}
 	return s.channel.Close()
+}
+
+func openDAP(ctx context.Context) (*dapSession, error) {
+	wire, err := openSWD(ctx)
+	if err != nil {
+		return nil, err
+	}
+	session := &dapSession{wire: wire, port: dap.NewSWDP(wire.connection)}
+	session.identity, err = session.port.Connect(ctx)
+	if err != nil {
+		return nil, errors.Join(err, session.close())
+	}
+	return session, nil
+}
+
+func (s *dapSession) close() error {
+	if s == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	return errors.Join(s.memory.Release(ctx), s.port.Release(ctx), s.wire.close())
 }

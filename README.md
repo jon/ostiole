@@ -163,6 +163,13 @@ trivial example:
 sudo go run ./cmd/ost swd dpidr
 ```
 
+The DAP form establishes the explicit debug-port lifecycle and reports the
+decoded identity fields before releasing the power state it acquired:
+
+```sh
+sudo go run ./cmd/ost dap dp id
+```
+
 Run `go run ./cmd/ost help` for the available command hierarchy.
 
 ## License
