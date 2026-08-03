@@ -20,15 +20,15 @@ func TestReadDPIDROverFTDI(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
-	enum := usb.New()
-	devs, err := enum.List(ctx, ftdi.SupportedDevices())
+	bus := usb.New()
+	devs, err := bus.List(ctx, ftdi.SupportedDevices())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(devs) != 1 {
 		t.Skipf("require exactly one supported FTDI attachment; found %d", len(devs))
 	}
-	dev, err := enum.Open(ctx, devs[0])
+	dev, err := bus.Open(ctx, devs[0])
 	if err != nil {
 		t.Fatal(err)
 	}

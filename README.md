@@ -117,6 +117,20 @@ test:
 sudo OSTIOLE_FTDI_HIL=1 go test -tags integration ./swd
 ```
 
+On macOS, maintainers can validate FT232H interface ownership and the FTDI
+control and bulk path without touching a downstream target:
+
+```sh
+OSTIOLE_FT232H_DARWIN_HIL=1 \
+  go test -tags integration ./ftdi \
+  -run '^TestHILDarwinFT232HMPSSEHandshake$' -v
+```
+
+This test selects exactly one FT232H (`0403:6014`), opens it once, and performs
+only MPSSE setup and synchronization on port A at 400 kHz. It does not
+construct an SWD connection, clock JTAG, reset a target, or access downstream
+devices.
+
 ## Access-port identity example
 
 The simple access-port example uses the same wiring and selects AP0 explicitly.
