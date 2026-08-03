@@ -83,6 +83,11 @@ future maintainer.
 
 - Except for the initial hardware proof, add no more than 200 lines of
   non-test Go in one commit.
+- Format declarations and calls naturally before measuring that limit. Do not
+  put every parameter or argument on its own line merely for symmetry or to
+  influence the line count.
+- Pure code movement and formatting do not need to be split to satisfy the
+  line limit, but must not conceal functional changes.
 - Introduce exactly one capability per commit, together with its tests and
   documentation.
 - Keep production functions within cognitive complexity 20, cyclomatic
