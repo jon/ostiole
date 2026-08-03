@@ -11,6 +11,7 @@ import (
 	"github.com/jon/ostiole/dap"
 	"github.com/jon/ostiole/ftdi"
 	"github.com/jon/ostiole/swd"
+	"github.com/jon/ostiole/target/cortexm"
 	"github.com/jon/ostiole/usb"
 )
 
@@ -18,13 +19,12 @@ const (
 	operationTimeout = 5 * time.Second
 	cleanupTimeout   = time.Second
 	accessPort       = dap.APSel(0)
-	cpuidAddress     = uint32(0xe000ed00)
 )
 
 type identity struct {
-	dpidr dap.DPIDRInfo
-	apidr uint32
-	cpuid uint32
+	dpidr     dap.DPIDRInfo
+	apidr     uint32
+	processor cortexm.Identity
 }
 
 func main() {
@@ -75,17 +75,11 @@ func readIdentity(ctx context.Context) (_ identity, err error) {
 	if err != nil {
 		return identity{}, err
 	}
-	cpuid, err := mem.ReadWord(ctx, cpuidAddress)
+	processor, err := cortexm.Identify(ctx, mem)
 	if err != nil {
 		return identity{}, err
 	}
-	if cpuid>>24 != 0x41 || cpuid>>4&0x0fff == 0 {
-		return identity{}, fmt.Errorf(
-			"ostiole: CPUID %#08x is not a plausible Cortex-M identity",
-			cpuid,
-		)
-	}
-	return identity{dpidr: dpidr, apidr: apidr, cpuid: cpuid}, nil
+	return identity{dpidr: dpidr, apidr: apidr, processor: processor}, nil
 }
 
 func openChannel(ctx context.Context) (*ftdi.Channel, error) {
@@ -118,7 +112,7 @@ func printIdentity(w io.Writer, info identity) error {
 		"DPIDR=%#08x AP0_IDR=%#08x CPUID=%#08x\n",
 		info.dpidr.Raw,
 		info.apidr,
-		info.cpuid,
+		info.processor.Raw,
 	)
 	return err
 }
