@@ -15,6 +15,7 @@ const (
 		"  ost swd dpidr\n" +
 		"  ost dap dp id\n" +
 		"  ost dap ap id [--ap N]\n" +
+		"  ost target cortex-m id [--ap N]\n" +
 		"  ost help\n"
 )
 
@@ -60,6 +61,9 @@ func run(ctx context.Context, args []string, stdout io.Writer, ops operations) e
 	}
 	if args[0] == "dap" {
 		return runDAP(ctx, args[1:], stdout, ops)
+	}
+	if args[0] == "target" {
+		return runTarget(ctx, args[1:], stdout, ops)
 	}
 	return &usageError{message: fmt.Sprintf("unknown command %q", args[0])}
 }

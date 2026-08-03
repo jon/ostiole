@@ -176,6 +176,17 @@ One access port can be selected explicitly through the same lifecycle:
 sudo go run ./cmd/ost dap ap id --ap 0
 ```
 
+The first target-level command identifies a Cortex-M processor through one
+explicitly selected MEM-AP:
+
+```sh
+sudo go run ./cmd/ost target cortex-m id --ap 0
+```
+
+It reports DPIDR, the selected AP IDR, and CPUID while restoring MEM-AP and
+debug-port state. None of these commands reset or halt the target, write target
+memory, or change persistent state.
+
 Run `go run ./cmd/ost help` for the available command hierarchy.
 
 ## License

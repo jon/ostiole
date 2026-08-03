@@ -39,7 +39,7 @@ func runDP(ctx context.Context, stdout io.Writer, ops operations) error {
 }
 
 func runAP(ctx context.Context, args []string, stdout io.Writer, ops operations) error {
-	selection, err := parseAP(args)
+	selection, err := parseAP("dap ap id", args)
 	if err != nil {
 		return err
 	}
@@ -52,18 +52,18 @@ func runAP(ctx context.Context, args []string, stdout io.Writer, ops operations)
 	return err
 }
 
-func parseAP(args []string) (dap.APSel, error) {
-	flags := flag.NewFlagSet("dap ap id", flag.ContinueOnError)
+func parseAP(command string, args []string) (dap.APSel, error) {
+	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	selection := flags.Uint("ap", 0, "access-port number")
 	if err := flags.Parse(args); err != nil {
-		return 0, &usageError{message: fmt.Sprintf("dap ap id: %v", err)}
+		return 0, &usageError{message: fmt.Sprintf("%s: %v", command, err)}
 	}
 	if flags.NArg() != 0 {
-		return 0, &usageError{message: "dap ap id accepts no arguments"}
+		return 0, &usageError{message: command + " accepts no arguments"}
 	}
 	if *selection > 255 {
-		return 0, &usageError{message: "dap ap id: --ap exceeds 255"}
+		return 0, &usageError{message: command + ": --ap exceeds 255"}
 	}
 	return dap.APSel(*selection), nil
 }
