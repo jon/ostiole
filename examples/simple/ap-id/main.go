@@ -47,10 +47,7 @@ func readIdentity(ctx context.Context) (_ identity, err error) {
 		return identity{}, err
 	}
 	if len(devs) != 1 {
-		return identity{}, fmt.Errorf(
-			"ostiole: require exactly one supported FTDI attachment; found %d",
-			len(devs),
-		)
+		return identity{}, fmt.Errorf("ostiole: require exactly one supported FTDI attachment; found %d", len(devs))
 	}
 	dev, err := enum.Open(ctx, devs[0])
 	if err != nil {
@@ -71,10 +68,7 @@ func readIdentity(ctx context.Context) (_ identity, err error) {
 	}
 	dp := dap.NewSWDP(conn)
 	defer func() {
-		cleanupCtx, cancel := context.WithTimeout(
-			context.Background(),
-			cleanupTimeout,
-		)
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
 		defer cancel()
 		err = errors.Join(err, dp.Release(cleanupCtx), ch.Close())
 	}()
@@ -94,11 +88,6 @@ func readIdentity(ctx context.Context) (_ identity, err error) {
 }
 
 func printIdentity(w io.Writer, info identity) error {
-	_, err := fmt.Fprintf(
-		w,
-		"DPIDR=%#08x AP0_IDR=%#08x\n",
-		info.dpidr.Raw,
-		info.apidr,
-	)
+	_, err := fmt.Fprintf(w, "DPIDR=%#08x AP0_IDR=%#08x\n", info.dpidr.Raw, info.apidr)
 	return err
 }

@@ -54,10 +54,7 @@ func readIdentity(ctx context.Context) (_ identity, err error) {
 	dp := dap.NewSWDP(conn)
 	var mem *dap.MemAP
 	defer func() {
-		cleanupCtx, cancel := context.WithTimeout(
-			context.Background(),
-			cleanupTimeout,
-		)
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
 		defer cancel()
 		err = errors.Join(err, mem.Release(cleanupCtx))
 		err = errors.Join(err, dp.Release(cleanupCtx), ch.Close())
@@ -89,10 +86,7 @@ func openChannel(ctx context.Context) (*ftdi.Channel, error) {
 		return nil, err
 	}
 	if len(devs) != 1 {
-		return nil, fmt.Errorf(
-			"ostiole: require exactly one supported FTDI attachment; found %d",
-			len(devs),
-		)
+		return nil, fmt.Errorf("ostiole: require exactly one supported FTDI attachment; found %d", len(devs))
 	}
 	dev, err := enum.Open(ctx, devs[0])
 	if err != nil {
@@ -107,12 +101,7 @@ func openChannel(ctx context.Context) (*ftdi.Channel, error) {
 }
 
 func printIdentity(w io.Writer, info identity) error {
-	_, err := fmt.Fprintf(
-		w,
-		"DPIDR=%#08x AP0_IDR=%#08x CPUID=%#08x\n",
-		info.dpidr.Raw,
-		info.apidr,
-		info.processor.Raw,
-	)
+	_, err := fmt.Fprintf(w, "DPIDR=%#08x AP0_IDR=%#08x CPUID=%#08x\n",
+		info.dpidr.Raw, info.apidr, info.processor.Raw)
 	return err
 }

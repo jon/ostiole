@@ -35,10 +35,7 @@ func readDPIDR(ctx context.Context) (value uint32, err error) {
 		return 0, err
 	}
 	if len(devs) != 1 {
-		return 0, fmt.Errorf(
-			"ostiole: require exactly one supported FTDI attachment; found %d",
-			len(devs),
-		)
+		return 0, fmt.Errorf("ostiole: require exactly one supported FTDI attachment; found %d", len(devs))
 	}
 	dev, err := enum.Open(ctx, devs[0])
 	if err != nil {
@@ -60,11 +57,7 @@ func readDPIDR(ctx context.Context) (value uint32, err error) {
 	if err := conn.JTAGToSWD(ctx); err != nil {
 		return 0, err
 	}
-	value, err = conn.Transfer(
-		ctx,
-		swd.Request{Read: true},
-		0,
-	)
+	value, err = conn.Transfer(ctx, swd.Request{Read: true}, 0)
 	if err != nil {
 		return 0, err
 	}
