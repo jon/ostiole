@@ -89,6 +89,27 @@ ostiole_usb_device_close_results ostiole_usb_device_close(
   return results;
 }
 
+kern_return_t ostiole_usb_device_control(ostiole_usb_device* opened,
+                                         uint8_t request_type, uint8_t request,
+                                         uint16_t value, uint16_t index,
+                                         void* data, uint16_t length,
+                                         uint32_t timeout, uint16_t* done) {
+  IOUSBDevRequestTO transfer = {
+      .bmRequestType = request_type,
+      .bRequest = request,
+      .wValue = value,
+      .wIndex = index,
+      .wLength = length,
+      .pData = data,
+      .noDataTimeout = timeout,
+      .completionTimeout = timeout,
+  };
+  kern_return_t result =
+      (*opened->device)->DeviceRequestTO(opened->device, &transfer);
+  *done = (uint16_t)transfer.wLenDone;
+  return result;
+}
+
 static IOUSBInterfaceInterface300** ostiole_usb_query_interface(
     io_service_t service) {
   IOCFPlugInInterface** plugin = NULL;

@@ -41,6 +41,11 @@ ostiole_usb_device* ostiole_usb_device_open(io_service_t service,
                                             kern_return_t* result);
 ostiole_usb_device_close_results ostiole_usb_device_close(
     ostiole_usb_device* opened);
+kern_return_t ostiole_usb_device_control(ostiole_usb_device* opened,
+                                         uint8_t request_type, uint8_t request,
+                                         uint16_t value, uint16_t index,
+                                         void* data, uint16_t length,
+                                         uint32_t timeout, uint16_t* done);
 ostiole_usb_interface* ostiole_usb_find_interface(ostiole_usb_device* opened,
                                                   uint8_t wanted,
                                                   kern_return_t* result);

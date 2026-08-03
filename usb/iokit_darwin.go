@@ -11,6 +11,8 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"runtime"
+	"unsafe"
 )
 
 type iokitInventory struct{}
@@ -95,6 +97,23 @@ func (d *iokitDevice) identity() (darwinAttachment, error) {
 func (d *iokitDevice) close() error {
 	results := C.ostiole_usb_device_close(d.native)
 	return joinIOKitCleanupCodes(uint32(results.device_close), uint32(results.service_release))
+}
+
+func (d *iokitDevice) control(request darwinControlRequest, data []byte) (uint16, error) {
+	var pointer unsafe.Pointer
+	if len(data) > 0 {
+		pointer = unsafe.Pointer(&data[0])
+	}
+	var done C.uint16_t
+	result := C.ostiole_usb_device_control(d.native,
+		C.uint8_t(request.requestType), C.uint8_t(request.request),
+		C.uint16_t(request.value), C.uint16_t(request.index), pointer,
+		C.uint16_t(len(data)), C.uint32_t(request.timeout), &done)
+	runtime.KeepAlive(data)
+	if result != C.kIOReturnSuccess {
+		return 0, iokitError(result)
+	}
+	return uint16(done), nil
 }
 
 func (d *iokitDevice) interfaceHandle(iface uint8) (darwinInterfaceHandle, error) {
