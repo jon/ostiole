@@ -26,10 +26,7 @@ func TestReadDPIDROverFTDI(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(devs) != 1 {
-		t.Skipf(
-			"require exactly one supported FTDI attachment; found %d",
-			len(devs),
-		)
+		t.Skipf("require exactly one supported FTDI attachment; found %d", len(devs))
 	}
 	dev, err := enum.Open(ctx, devs[0])
 	if err != nil {
@@ -54,11 +51,7 @@ func TestReadDPIDROverFTDI(t *testing.T) {
 	if err := conn.JTAGToSWD(ctx); err != nil {
 		t.Fatal(err)
 	}
-	dpidr, err := conn.Transfer(
-		ctx,
-		swd.Request{Read: true},
-		0,
-	)
+	dpidr, err := conn.Transfer(ctx, swd.Request{Read: true}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

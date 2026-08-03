@@ -6,11 +6,7 @@ import (
 )
 
 // Transfer performs one SWD register transaction without retrying.
-func (c *Conn) Transfer(
-	ctx context.Context,
-	req Request,
-	data uint32,
-) (uint32, error) {
+func (c *Conn) Transfer(ctx context.Context, req Request, data uint32) (uint32, error) {
 	if req.Addr&^0x0c != 0 {
 		return 0, fmt.Errorf("swd: invalid register address %#02x", req.Addr)
 	}

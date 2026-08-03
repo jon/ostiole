@@ -14,22 +14,14 @@ func TestPostedAccessPortReads(t *testing.T) {
 	conn := enteredConn(t, target)
 	selectAP(t, conn, 0, 0x0f)
 
-	posted, err := conn.Transfer(
-		t.Context(),
-		swd.Request{AP: true, Read: true, Addr: 0x0c},
-		0,
-	)
+	posted, err := conn.Transfer(t.Context(), swd.Request{AP: true, Read: true, Addr: 0x0c}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if posted != 0 {
 		t.Fatalf("posted response = %#08x, want 0", posted)
 	}
-	value, err := conn.Transfer(
-		t.Context(),
-		swd.Request{Read: true, Addr: 0x0c},
-		0,
-	)
+	value, err := conn.Transfer(t.Context(), swd.Request{Read: true, Addr: 0x0c}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,11 +36,7 @@ func TestSelectedAccessPortsRemainIndependent(t *testing.T) {
 	conn := enteredConn(t, target)
 
 	selectAP(t, conn, 1, 0)
-	if _, err := conn.Transfer(
-		t.Context(),
-		swd.Request{AP: true, Addr: 0},
-		0x12345678,
-	); err != nil {
+	if _, err := conn.Transfer(t.Context(), swd.Request{AP: true, Addr: 0}, 0x12345678); err != nil {
 		t.Fatal(err)
 	}
 	if got := readPosted(t, conn, 1, 0, 0); got != 0x12345678 {
@@ -71,11 +59,7 @@ func enteredConn(t *testing.T, target swdsim.Target) *swd.Conn {
 func selectAP(t *testing.T, conn *swd.Conn, ap, bank uint8) {
 	t.Helper()
 	value := uint32(ap)<<24 | uint32(bank)<<4
-	if _, err := conn.Transfer(
-		t.Context(),
-		swd.Request{Addr: 8},
-		value,
-	); err != nil {
+	if _, err := conn.Transfer(t.Context(), swd.Request{Addr: 8}, value); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -83,18 +67,10 @@ func selectAP(t *testing.T, conn *swd.Conn, ap, bank uint8) {
 func readPosted(t *testing.T, conn *swd.Conn, ap, bank, addr uint8) uint32 {
 	t.Helper()
 	selectAP(t, conn, ap, bank)
-	if _, err := conn.Transfer(
-		t.Context(),
-		swd.Request{AP: true, Read: true, Addr: addr},
-		0,
-	); err != nil {
+	if _, err := conn.Transfer(t.Context(), swd.Request{AP: true, Read: true, Addr: addr}, 0); err != nil {
 		t.Fatal(err)
 	}
-	value, err := conn.Transfer(
-		t.Context(),
-		swd.Request{Read: true, Addr: 0x0c},
-		0,
-	)
+	value, err := conn.Transfer(t.Context(), swd.Request{Read: true, Addr: 0x0c}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

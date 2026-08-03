@@ -15,11 +15,7 @@ type targetWire struct {
 	calls         int
 }
 
-func (w *targetWire) SWDIO(
-	_ context.Context,
-	direction, output []byte,
-	bits int,
-) ([]byte, error) {
+func (w *targetWire) SWDIO(_ context.Context, direction, output []byte, bits int) ([]byte, error) {
 	w.calls++
 	if w.calls == 1 {
 		return w.requestPhase(direction, output, bits)
@@ -30,10 +26,7 @@ func (w *targetWire) SWDIO(
 	return nil, errors.New("unexpected SWD phase")
 }
 
-func (w *targetWire) requestPhase(
-	direction, output []byte,
-	bits int,
-) ([]byte, error) {
+func (w *targetWire) requestPhase(direction, output []byte, bits int) ([]byte, error) {
 	if bits != 12 || !allTestBits(direction, 0, 8, true) ||
 		!allTestBits(direction, 8, 12, false) {
 		return nil, errors.New("invalid request direction")
@@ -58,10 +51,7 @@ func (w *targetWire) requestPhase(
 	return input, nil
 }
 
-func (w *targetWire) dataPhase(
-	direction, output []byte,
-	bits int,
-) ([]byte, error) {
+func (w *targetWire) dataPhase(direction, output []byte, bits int) ([]byte, error) {
 	if w.ack != 0b001 {
 		if bits != 9 || !allTestBits(direction, 1, 9, true) {
 			return nil, errors.New("invalid failed-ACK cleanup")
@@ -77,10 +67,7 @@ func (w *targetWire) dataPhase(
 	return w.writePhase(direction, output, bits)
 }
 
-func (w *targetWire) readPhase(
-	direction []byte,
-	bits int,
-) ([]byte, error) {
+func (w *targetWire) readPhase(direction []byte, bits int) ([]byte, error) {
 	if !allTestBits(direction, 0, 34, false) ||
 		!allTestBits(direction, 34, bits, true) {
 		return nil, errors.New("invalid read direction")
@@ -94,10 +81,7 @@ func (w *targetWire) readPhase(
 	return input, nil
 }
 
-func (w *targetWire) writePhase(
-	direction, output []byte,
-	bits int,
-) ([]byte, error) {
+func (w *targetWire) writePhase(direction, output []byte, bits int) ([]byte, error) {
 	if testBit(direction, 0) ||
 		!allTestBits(direction, 1, bits, true) {
 		return nil, errors.New("invalid write direction")
@@ -115,11 +99,7 @@ func (w *targetWire) writePhase(
 
 func TestTransferReadsAndWritesOneRegister(t *testing.T) {
 	readWire := &targetWire{ack: 0b001, readValue: 0x2ba01477}
-	got, err := New(readWire).Transfer(
-		t.Context(),
-		Request{Read: true},
-		0,
-	)
+	got, err := New(readWire).Transfer(t.Context(), Request{Read: true}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,19 +109,11 @@ func TestTransferReadsAndWritesOneRegister(t *testing.T) {
 
 	writeWire := &targetWire{ack: 0b001}
 	const written = 0x12345678
-	if _, err := New(writeWire).Transfer(
-		t.Context(),
-		Request{AP: true, Addr: 0x0c},
-		written,
-	); err != nil {
+	if _, err := New(writeWire).Transfer(t.Context(), Request{AP: true, Addr: 0x0c}, written); err != nil {
 		t.Fatal(err)
 	}
 	if writeWire.written != written || writeWire.calls != 2 {
-		t.Fatalf(
-			"write = %#08x after %d calls",
-			writeWire.written,
-			writeWire.calls,
-		)
+		t.Fatalf("write = %#08x after %d calls", writeWire.written, writeWire.calls)
 	}
 }
 
@@ -156,11 +128,7 @@ func TestTransferClassifiesAcknowledgements(t *testing.T) {
 	}
 	for _, test := range tests {
 		w := &targetWire{ack: test.ack}
-		_, err := New(w).Transfer(
-			t.Context(),
-			Request{Read: true},
-			0,
-		)
+		_, err := New(w).Transfer(t.Context(), Request{Read: true}, 0)
 		if !errors.Is(err, test.want) {
 			t.Fatalf("ACK %03b error = %v", test.ack, err)
 		}
@@ -173,40 +141,23 @@ func TestTransferRejectsInvalidReadParity(t *testing.T) {
 		readValue:     0x2ba01477,
 		corruptParity: true,
 	}
-	if _, err := New(w).Transfer(
-		t.Context(),
-		Request{Read: true},
-		0,
-	); !errors.Is(err, ErrParity) {
+	if _, err := New(w).Transfer(t.Context(), Request{Read: true}, 0); !errors.Is(err, ErrParity) {
 		t.Fatalf("parity error = %v", err)
 	}
 }
 
 type shortWire struct{}
 
-func (shortWire) SWDIO(
-	context.Context,
-	[]byte,
-	[]byte,
-	int,
-) ([]byte, error) {
+func (shortWire) SWDIO(context.Context, []byte, []byte, int) ([]byte, error) {
 	return nil, nil
 }
 
 func TestTransferRejectsInvalidInputs(t *testing.T) {
 	w := &targetWire{ack: 0b001}
-	if _, err := New(w).Transfer(
-		t.Context(),
-		Request{Read: true, Addr: 1},
-		0,
-	); err == nil || w.calls != 0 {
+	if _, err := New(w).Transfer(t.Context(), Request{Read: true, Addr: 1}, 0); err == nil || w.calls != 0 {
 		t.Fatalf("invalid address error = %v after %d calls", err, w.calls)
 	}
-	if _, err := New(shortWire{}).Transfer(
-		t.Context(),
-		Request{Read: true},
-		0,
-	); err == nil {
+	if _, err := New(shortWire{}).Transfer(t.Context(), Request{Read: true}, 0); err == nil {
 		t.Fatal("short lower-layer response succeeded")
 	}
 }
@@ -237,11 +188,7 @@ func setTestBit(buf []byte, bit int, value bool) {
 	}
 }
 
-func allTestBits(
-	buf []byte,
-	start, end int,
-	value bool,
-) bool {
+func allTestBits(buf []byte, start, end int, value bool) bool {
 	for bit := start; bit < end; bit++ {
 		if testBit(buf, bit) != value {
 			return false

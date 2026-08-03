@@ -41,19 +41,11 @@ func New(w Wire) *Conn {
 	return &Conn{wire: w, turnaround: 1, idleCycles: 8}
 }
 
-func (c *Conn) exchange(
-	ctx context.Context,
-	seq *sequence,
-) ([]byte, error) {
+func (c *Conn) exchange(ctx context.Context, seq *sequence) ([]byte, error) {
 	if c == nil || c.wire == nil {
 		return nil, errors.New("swd: nil wire")
 	}
-	input, err := c.wire.SWDIO(
-		ctx,
-		seq.direction,
-		seq.output,
-		seq.bits,
-	)
+	input, err := c.wire.SWDIO(ctx, seq.direction, seq.output, seq.bits)
 	if err != nil {
 		return nil, err
 	}

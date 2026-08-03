@@ -125,12 +125,7 @@ func TestNilMEMAPClient(t *testing.T) {
 	}
 }
 
-func assertAPRegister(
-	t *testing.T,
-	dp *dap.DebugPort,
-	reg dap.APReg,
-	want uint32,
-) {
+func assertAPRegister(t *testing.T, dp *dap.DebugPort, reg dap.APReg, want uint32) {
 	t.Helper()
 	got, err := dp.ReadAP(t.Context(), 0, reg)
 	if err != nil {

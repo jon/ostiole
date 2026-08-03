@@ -26,18 +26,10 @@ func TestAccessAPOverFTDI(t *testing.T) {
 		saved    bool
 	)
 	t.Cleanup(func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(
-			context.Background(),
-			time.Second,
-		)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Second)
 		defer cleanupCancel()
 		if saved {
-			if err := dp.WriteAP(
-				cleanupCtx,
-				hardwareAP,
-				hardwareAPCSW,
-				savedCSW,
-			); err != nil {
+			if err := dp.WriteAP(cleanupCtx, hardwareAP, hardwareAPCSW, savedCSW); err != nil {
 				t.Errorf("restore AP0 CSW: %v", err)
 			}
 		}

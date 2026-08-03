@@ -42,11 +42,8 @@ func TestAbortClearsStickyState(t *testing.T) {
 	target := New(0x2ba01477)
 	target.ctrlStat = stickyCompare | stickyError | writeDataError | stickyOverrun
 
-	err := target.Write(
-		context.Background(),
-		swd.Request{},
-		clearStickyCompare|clearStickyError|clearWriteDataError|clearStickyOverrun,
-	)
+	err := target.Write(context.Background(), swd.Request{},
+		clearStickyCompare|clearStickyError|clearWriteDataError|clearStickyOverrun)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,10 +54,7 @@ func TestAbortClearsStickyState(t *testing.T) {
 
 func TestTargetPostsZeroForAnAbsentAccessPort(t *testing.T) {
 	target := New(0x2ba01477)
-	value, err := target.Read(
-		context.Background(),
-		swd.Request{AP: true, Read: true},
-	)
+	value, err := target.Read(context.Background(), swd.Request{AP: true, Read: true})
 	if err != nil {
 		t.Fatal(err)
 	}

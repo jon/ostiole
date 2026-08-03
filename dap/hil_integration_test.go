@@ -25,10 +25,7 @@ func openHardwareDebugPort(t *testing.T, ctx context.Context) *dap.DebugPort {
 		t.Fatal(err)
 	}
 	if len(devs) != 1 {
-		t.Skipf(
-			"require exactly one supported FTDI attachment; found %d",
-			len(devs),
-		)
+		t.Skipf("require exactly one supported FTDI attachment; found %d", len(devs))
 	}
 	dev, err := enum.Open(ctx, devs[0])
 	if err != nil {

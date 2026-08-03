@@ -28,10 +28,7 @@ type DPIDRInfo struct {
 // DecodeDPIDR validates and decodes a debug-port identification register.
 func DecodeDPIDR(value uint32) (DPIDRInfo, error) {
 	if value&1 == 0 {
-		return DPIDRInfo{}, fmt.Errorf(
-			"dap: DPIDR %#08x does not have its constant-one bit set",
-			value,
-		)
+		return DPIDRInfo{}, fmt.Errorf("dap: DPIDR %#08x does not have its constant-one bit set", value)
 	}
 	return DPIDRInfo{
 		Raw:      value,

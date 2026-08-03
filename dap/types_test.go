@@ -48,11 +48,7 @@ func TestDebugPortRegisterAddresses(t *testing.T) {
 	}
 	for _, test := range tests {
 		if uint8(test.reg) != test.want {
-			t.Errorf(
-				"register address = %#02x, want %#02x",
-				test.reg,
-				test.want,
-			)
+			t.Errorf("register address = %#02x, want %#02x", test.reg, test.want)
 		}
 	}
 }

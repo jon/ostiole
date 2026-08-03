@@ -18,11 +18,7 @@ type APReg uint8
 const APIDR APReg = 0xfc
 
 // ReadAP reads one selected access-port register through the posted pipeline.
-func (dp *DebugPort) ReadAP(
-	ctx context.Context,
-	sel APSel,
-	reg APReg,
-) (uint32, error) {
+func (dp *DebugPort) ReadAP(ctx context.Context, sel APSel, reg APReg) (uint32, error) {
 	if err := dp.requireConnected(); err != nil {
 		return 0, err
 	}
@@ -44,12 +40,7 @@ func (dp *DebugPort) ReadAP(
 }
 
 // WriteAP writes one selected access-port register and waits for completion.
-func (dp *DebugPort) WriteAP(
-	ctx context.Context,
-	sel APSel,
-	reg APReg,
-	value uint32,
-) error {
+func (dp *DebugPort) WriteAP(ctx context.Context, sel APSel, reg APReg, value uint32) error {
 	if err := dp.requireConnected(); err != nil {
 		return err
 	}

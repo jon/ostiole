@@ -14,11 +14,7 @@ type recordedWire struct {
 	bits      int
 }
 
-func (w *recordedWire) SWDIO(
-	_ context.Context,
-	direction, output []byte,
-	bits int,
-) ([]byte, error) {
+func (w *recordedWire) SWDIO(_ context.Context, direction, output []byte, bits int) ([]byte, error) {
 	w.direction = append([]byte(nil), direction...)
 	w.output = append([]byte(nil), output...)
 	w.bits = bits
@@ -36,12 +32,7 @@ func TestJTAGToSWDSelectsTheSWDInterface(t *testing.T) {
 	if w.bits != 136 ||
 		!bytes.Equal(w.direction, bytes.Repeat([]byte{0xff}, 17)) ||
 		!bytes.Equal(w.output, want) {
-		t.Fatalf(
-			"JTAGToSWD() = %d bits, direction % x, output % x",
-			w.bits,
-			w.direction,
-			w.output,
-		)
+		t.Fatalf("JTAGToSWD() = %d bits, direction % x, output % x", w.bits, w.direction, w.output)
 	}
 }
 
@@ -56,11 +47,6 @@ func TestLineResetEndsWithIdleCycles(t *testing.T) {
 	if w.bits != 64 ||
 		!bytes.Equal(w.direction, bytes.Repeat([]byte{0xff}, 8)) ||
 		!bytes.Equal(w.output, want) {
-		t.Fatalf(
-			"LineReset() = %d bits, direction % x, output % x",
-			w.bits,
-			w.direction,
-			w.output,
-		)
+		t.Fatalf("LineReset() = %d bits, direction % x, output % x", w.bits, w.direction, w.output)
 	}
 }

@@ -42,10 +42,7 @@ func Identify(ctx context.Context, reader WordReader) (Identity, error) {
 		Revision:     uint8(raw & 0x0f),
 	}
 	if info.Implementer != 0x41 || info.Part == 0 {
-		return Identity{}, fmt.Errorf(
-			"cortexm: CPUID %#08x is not a plausible Cortex-M identity",
-			raw,
-		)
+		return Identity{}, fmt.Errorf("cortexm: CPUID %#08x is not a plausible Cortex-M identity", raw)
 	}
 	return info, nil
 }

@@ -101,11 +101,7 @@ func (t *barrierTarget) Read(ctx context.Context, req swd.Request) (uint32, erro
 	return t.Target.Read(ctx, req)
 }
 
-func (t *barrierTarget) Write(
-	ctx context.Context,
-	req swd.Request,
-	value uint32,
-) error {
+func (t *barrierTarget) Write(ctx context.Context, req swd.Request, value uint32) error {
 	if req.AP {
 		t.postedWrite = true
 	}

@@ -28,12 +28,7 @@ func TestReadDPIDROverFTDI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf(
-		"DPIDR=%#08x version=%d designer=%#03x",
-		info.Raw,
-		info.Version,
-		info.Designer,
-	)
+	t.Logf("DPIDR=%#08x version=%d designer=%#03x", info.Raw, info.Version, info.Designer)
 }
 
 func TestConnectAndReleaseOverFTDI(t *testing.T) {
@@ -42,10 +37,7 @@ func TestConnectAndReleaseOverFTDI(t *testing.T) {
 
 	dp := openHardwareDebugPort(t, ctx)
 	t.Cleanup(func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(
-			context.Background(),
-			time.Second,
-		)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Second)
 		defer cleanupCancel()
 		if err := dp.Release(cleanupCtx); err != nil {
 			t.Errorf("release SW-DP: %v", err)
@@ -71,15 +63,7 @@ func TestConnectAndReleaseOverFTDI(t *testing.T) {
 		t.Fatal(err)
 	}
 	if before&hardwarePowerRequests != after&hardwarePowerRequests {
-		t.Fatalf(
-			"power requests changed from %#08x to %#08x",
-			before&hardwarePowerRequests,
-			after&hardwarePowerRequests,
-		)
+		t.Fatalf("power requests changed from %#08x to %#08x", before&hardwarePowerRequests, after&hardwarePowerRequests)
 	}
-	t.Logf(
-		"DPIDR=%#08x power_requests=%#08x",
-		info.Raw,
-		after&hardwarePowerRequests,
-	)
+	t.Logf("DPIDR=%#08x power_requests=%#08x", info.Raw, after&hardwarePowerRequests)
 }

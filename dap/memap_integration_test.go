@@ -19,10 +19,7 @@ func TestReadMEMAPWordOverFTDI(t *testing.T) {
 	dp := openHardwareDebugPort(t, ctx)
 	var mem *dap.MemAP
 	t.Cleanup(func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(
-			context.Background(),
-			time.Second,
-		)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Second)
 		defer cleanupCancel()
 		if err := mem.Release(cleanupCtx); err != nil {
 			t.Errorf("release MEM-AP: %v", err)
@@ -63,13 +60,7 @@ func TestReadMEMAPWordOverFTDI(t *testing.T) {
 	t.Logf("DPIDR=%#08x CPUID=%#08x", info.Raw, cpuid)
 }
 
-func assertHardwareAPRegister(
-	t *testing.T,
-	ctx context.Context,
-	dp *dap.DebugPort,
-	reg dap.APReg,
-	want uint32,
-) {
+func assertHardwareAPRegister(t *testing.T, ctx context.Context, dp *dap.DebugPort, reg dap.APReg, want uint32) {
 	t.Helper()
 	got, err := dp.ReadAP(ctx, hardwareAP, reg)
 	if err != nil {

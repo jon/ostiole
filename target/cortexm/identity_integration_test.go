@@ -53,10 +53,7 @@ func TestIdentifyCortexMOverFTDI(t *testing.T) {
 	debugPort := dap.NewSWDP(connection)
 	var memory *dap.MemAP
 	t.Cleanup(func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(
-			context.Background(),
-			time.Second,
-		)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Second)
 		defer cleanupCancel()
 		if err := memory.Release(cleanupCtx); err != nil {
 			t.Errorf("release MEM-AP: %v", err)

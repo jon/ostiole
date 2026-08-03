@@ -14,18 +14,11 @@ type registerTarget struct {
 	writes map[swd.Request]uint32
 }
 
-func (t *registerTarget) Read(
-	_ context.Context,
-	req swd.Request,
-) (uint32, error) {
+func (t *registerTarget) Read(_ context.Context, req swd.Request) (uint32, error) {
 	return t.values[req], nil
 }
 
-func (t *registerTarget) Write(
-	_ context.Context,
-	req swd.Request,
-	value uint32,
-) error {
+func (t *registerTarget) Write(_ context.Context, req swd.Request, value uint32) error {
 	t.writes[req] = value
 	return nil
 }

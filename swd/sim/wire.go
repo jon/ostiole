@@ -28,11 +28,7 @@ func New(target Target) *Wire {
 }
 
 // SWDIO implements swd.Wire.
-func (w *Wire) SWDIO(
-	ctx context.Context,
-	direction, output []byte,
-	bits int,
-) ([]byte, error) {
+func (w *Wire) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
 	if w == nil {
 		return nil, errors.New("swd/sim: nil wire")
 	}
@@ -44,10 +40,7 @@ func (w *Wire) SWDIO(
 	}
 	need := (bits + 7) / 8
 	if len(direction) < need || len(output) < need {
-		return nil, fmt.Errorf(
-			"swd/sim: direction or output is too short for %d bits",
-			bits,
-		)
+		return nil, fmt.Errorf("swd/sim: direction or output is too short for %d bits", bits)
 	}
 	if bits == 0 {
 		return nil, nil
@@ -67,10 +60,7 @@ func (w *Wire) SWDIO(
 	return w.data(ctx, direction, output, bits)
 }
 
-func (w *Wire) request(
-	direction, output []byte,
-	bits int,
-) ([]byte, error) {
+func (w *Wire) request(direction, output []byte, bits int) ([]byte, error) {
 	if bits != 12 ||
 		!allBits(direction, 0, 8, true) ||
 		!allBits(direction, 8, 4, false) {
@@ -89,11 +79,7 @@ func (w *Wire) request(
 	return input, nil
 }
 
-func (w *Wire) data(
-	ctx context.Context,
-	direction, output []byte,
-	bits int,
-) ([]byte, error) {
+func (w *Wire) data(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
 	req := *w.pending
 	w.pending = nil
 	if req.Read {
@@ -102,12 +88,7 @@ func (w *Wire) data(
 	return w.write(ctx, direction, output, bits, req)
 }
 
-func (w *Wire) read(
-	ctx context.Context,
-	direction []byte,
-	bits int,
-	req swd.Request,
-) ([]byte, error) {
+func (w *Wire) read(ctx context.Context, direction []byte, bits int, req swd.Request) ([]byte, error) {
 	if bits != 42 ||
 		!allBits(direction, 0, 34, false) ||
 		!allBits(direction, 34, 8, true) {
@@ -123,12 +104,7 @@ func (w *Wire) read(
 	return input, nil
 }
 
-func (w *Wire) write(
-	ctx context.Context,
-	direction, output []byte,
-	bits int,
-	req swd.Request,
-) ([]byte, error) {
+func (w *Wire) write(ctx context.Context, direction, output []byte, bits int, req swd.Request) ([]byte, error) {
 	if bits != 42 ||
 		bitAt(direction, 0) ||
 		!allBits(direction, 1, 41, true) {
@@ -181,15 +157,12 @@ func decodeRequest(header byte) (swd.Request, error) {
 	fields := header >> 1 & 0x0f
 	if header&0xc1 != 0x81 ||
 		(header>>5&1 != 0) != parity32(uint32(fields)) {
-		return swd.Request{}, fmt.Errorf(
-			"swd/sim: invalid request header %#02x",
-			header,
-		)
+		return swd.Request{}, fmt.Errorf("swd/sim: invalid request header %#02x", header)
 	}
 	return swd.Request{
 		AP:   fields&1 != 0,
 		Read: fields&2 != 0,
-		Addr: uint8(fields>>2) << 2,
+		Addr: fields >> 2 << 2,
 	}, nil
 }
 
