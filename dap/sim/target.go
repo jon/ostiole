@@ -36,7 +36,9 @@ type Target struct {
 }
 
 type accessPort struct {
-	regs map[uint8]uint32
+	regs   map[uint8]uint32
+	memory map[uint32]uint32
+	memAP  bool
 }
 
 // New returns an SW-DP target with the supplied identity.
@@ -52,6 +54,22 @@ func (t *Target) AddAP(sel uint8, idr uint32) {
 	t.aps[sel] = &accessPort{regs: map[uint8]uint32{0xfc: idr}}
 }
 
+// AddMEMAP adds a word-readable memory access port.
+func (t *Target) AddMEMAP(sel uint8, idr uint32, words map[uint32]uint32) {
+	if t == nil {
+		return
+	}
+	memory := make(map[uint32]uint32, len(words))
+	for addr, value := range words {
+		memory[addr] = value
+	}
+	t.aps[sel] = &accessPort{
+		regs:   map[uint8]uint32{0xfc: idr},
+		memory: memory,
+		memAP:  true,
+	}
+}
+
 // Read implements swd/sim.Target.
 func (t *Target) Read(ctx context.Context, req swd.Request) (uint32, error) {
 	if t == nil {
@@ -61,7 +79,7 @@ func (t *Target) Read(ctx context.Context, req swd.Request) (uint32, error) {
 		return 0, err
 	}
 	if req.AP {
-		return t.readAP(req), nil
+		return t.readAP(req)
 	}
 	switch req.Addr {
 	case 0x00:
@@ -84,8 +102,7 @@ func (t *Target) Write(ctx context.Context, req swd.Request, value uint32) error
 		return err
 	}
 	if req.AP {
-		t.writeAP(req, value)
-		return nil
+		return t.writeAP(req, value)
 	}
 	switch req.Addr {
 	case 0x00:
@@ -100,22 +117,37 @@ func (t *Target) Write(ctx context.Context, req swd.Request, value uint32) error
 	return nil
 }
 
-func (t *Target) readAP(req swd.Request) uint32 {
+func (t *Target) readAP(req swd.Request) (uint32, error) {
 	posted := t.rdbuff
 	ap := t.aps[uint8(t.selectDP>>24)]
 	if ap == nil {
 		t.rdbuff = 0
-		return posted
+		return posted, nil
 	}
-	t.rdbuff = ap.regs[t.apReg(req)]
-	return posted
+	reg := t.apReg(req)
+	if ap.memAP && reg == 0x0c {
+		csw := ap.regs[0x00]
+		if csw&0x07 != 2 || csw&0x30 != 0 {
+			return 0, errors.New("dap/sim: DRW read requires 32-bit, non-incrementing CSW")
+		}
+		t.rdbuff = ap.memory[ap.regs[0x04]]
+	} else {
+		t.rdbuff = ap.regs[reg]
+	}
+	return posted, nil
 }
 
-func (t *Target) writeAP(req swd.Request, value uint32) {
+func (t *Target) writeAP(req swd.Request, value uint32) error {
 	ap := t.aps[uint8(t.selectDP>>24)]
-	if ap != nil {
-		ap.regs[t.apReg(req)] = value
+	if ap == nil {
+		return nil
 	}
+	reg := t.apReg(req)
+	if ap.memAP && reg == 0x0c {
+		return errors.New("dap/sim: target-memory writes are not modeled")
+	}
+	ap.regs[reg] = value
+	return nil
 }
 
 func (t *Target) apReg(req swd.Request) uint8 {

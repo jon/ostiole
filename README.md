@@ -43,7 +43,7 @@ SW-DP registers, and an explicit connection lifecycle. A connection clears
 sticky status, selects the base register bank, and restores only the power
 requests it acquired. Selected AP registers are read and written through their
 posted `RDBUFF` completion path. The simulator models the same DP and AP state
-changes.
+changes, including one 32-bit, non-incrementing MEM-AP target-word read path.
 
 The [examples](examples) begin with a raw SWD debug-port identity read and then
 add the DAP connection lifecycle and posted access-port reads. They compose the
