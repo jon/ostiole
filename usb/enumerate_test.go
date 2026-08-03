@@ -2,6 +2,7 @@ package usb
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -39,7 +40,7 @@ func TestEnumeratorHonorsCancellationBeforeReadingSysfs(t *testing.T) {
 	cancel()
 
 	_, err := newEnumerator(t.TempDir(), "/dev/bus/usb").List(ctx, []DeviceFilter{{VID: 0x0403}})
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("List() error = %v, want context.Canceled", err)
 	}
 }

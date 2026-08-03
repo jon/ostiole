@@ -2,6 +2,7 @@ package usb
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 )
@@ -47,7 +48,7 @@ func TestControlTransferHonorsPreCanceledContext(t *testing.T) {
 		return 0, nil
 	}
 
-	if _, err := device.ControlTransfer(ctx, 0x40, 0x0b, 0x0200, 1, nil); err != context.Canceled {
+	if _, err := device.ControlTransfer(ctx, 0x40, 0x0b, 0x0200, 1, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("ControlTransfer() error = %v, want context.Canceled", err)
 	}
 	if called {
