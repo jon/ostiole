@@ -1,4 +1,19 @@
-# Build and test artifacts.
-/bin/
+# Personal agent settings.
+/CLAUDE.local.md
+/.claude/settings.local.json
+/.claude/worktrees/
+
+# Local Go workspace.
+/go.work
+/go.work.sum
+
+# Go build and test artifacts.
 *.test
-*.exe
+*.out
+*.coverprofile
+/coverage.*
+/profile.cov
+/ost
+
+# Local environment.
+/.env
