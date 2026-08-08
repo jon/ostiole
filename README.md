@@ -72,6 +72,12 @@ The initial implementation favors a small, understandable path over broad
 device support. Additional transports, adapters, protocols, and targets can be
 introduced as independent pieces once their behavior is specified and tested.
 
+## Documentation
+
+The [documentation](docs) describes the current package architecture,
+ownership rules, composition paths, capability boundaries, and safety effects.
+It is written for people and tools building applications with Ostiole.
+
 ## Safety
 
 Debug and programming interfaces can reset processors, halt execution, modify
