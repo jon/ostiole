@@ -78,6 +78,9 @@ The [documentation](docs) describes the current package architecture,
 ownership rules, composition paths, capability boundaries, and safety effects.
 It is written for people and tools building applications with Ostiole.
 
+People and coding agents changing Ostiole itself should follow the shared
+[contribution guide](CONTRIBUTING.md).
+
 ## Safety
 
 Debug and programming interfaces can reset processors, halt execution, modify
