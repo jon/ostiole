@@ -132,6 +132,21 @@ future maintainer.
   mechanism as a command. A public library primitive does not automatically
   require a corresponding CLI surface.
 
+## Public documentation
+
+- Read `docs/architecture.md` and `docs/capabilities.md` before adding a public
+  package, composition, example, or command.
+- Update the relevant user documentation in the same commit as a change to an
+  exported API, package responsibility, ownership or cleanup rule, safety
+  effect, supported host, or validation claim.
+- Keep `docs/composition.md` aligned with the highest reusable public layer.
+  Do not direct consumers to command-internal code or duplicate framing.
+- Describe only behavior present in the same commit. Keep private plans,
+  implementation donors, future package names, and publication sequencing out
+  of public documentation.
+- Distinguish implemented behavior, simulation, CI coverage, and physical HIL
+  evidence. Do not use one as a claim for another.
+
 ## Library boundaries
 
 - Build diagnostics and examples through the same composable public APIs
