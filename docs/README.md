@@ -8,6 +8,9 @@ today and how to assemble them without duplicating lower-level behavior.
   ownership, cleanup, and safety effects.
 - [Composition](composition.md) maps common tasks to the narrowest public
   package that implements them and gives coding agents a selection checklist.
+- [Capabilities](capabilities.md) distinguishes implemented behavior from
+  simulated, CI-tested, and HIL-validated configurations and explicit
+  limitations.
 - [Examples](../examples) contains executable compositions that progress from
   direct protocol demonstrations to focused inspection tools.
 

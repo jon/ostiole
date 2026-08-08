@@ -104,8 +104,8 @@ example, an `ost` subcommand, or another application's command package.
 
 Before writing a hardware composition:
 
-1. Confirm the behavior appears in the task table or matching package
-   documentation.
+1. Read the [capability boundaries](capabilities.md) and confirm the behavior
+   exists.
 2. Select the highest package in the task table that owns the desired result.
 3. Follow the matching executable example for acquisition and cleanup.
 4. Import public packages only; do not import `cmd/ost/internal/...`.
