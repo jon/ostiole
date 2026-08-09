@@ -78,6 +78,11 @@ func checkRange(repo, base, head string) ([]finding, error) {
 		}
 		findings = append(findings, changeFindings...)
 	}
+	markdownFindings, err := checkMarkdown(repo, head)
+	if err != nil {
+		return nil, err
+	}
+	findings = append(findings, markdownFindings...)
 	return findings, nil
 }
 
