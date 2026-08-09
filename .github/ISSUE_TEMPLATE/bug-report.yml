@@ -1,6 +1,5 @@
 name: Bug report
 description: Tell us about something that did not work as expected.
-title: ""
 labels:
   - bug
 body:
