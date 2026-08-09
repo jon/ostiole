@@ -46,3 +46,58 @@ Before forming each commit:
 
 The threshold is a review prompt, not a quota. Pure movement and formatting do
 not justify artificial commits and must not conceal behavioral changes.
+
+## Code Review Rules
+
+### Correctness and ownership
+
+- Report concrete, consequential defects rather than general praise or style
+  preferences. Explain the failure mode and point to the narrowest relevant
+  code.
+- Check behavior, error paths, bounds, timeouts, cancellation, concurrency,
+  and cleanup. Trace resource ownership from USB through adapters, wire
+  protocols, DAP, targets, examples, and commands.
+- Ensure deadlines and cancellation cover blocking host and protocol
+  operations without preventing bounded cleanup; cleanup must not depend on
+  an operation context that is already canceled.
+- Flag leaks, double ownership, discarded primary or cleanup errors, unsafe
+  effects, and restoration that cannot be retried. Cleanup that may be retried
+  must retain enough state to do so safely.
+- Check slice bounds, integer widths, byte order, parity, bit fields, protocol
+  state transitions, data races, shared state, and goroutine lifetime at trust
+  boundaries.
+
+### Architecture, Go, and tests
+
+- Keep reusable hardware, protocol, lifecycle, restoration, inspection, and
+  target behavior in the public package that owns it. Reject duplicated
+  lower-layer framing in examples, commands, or tests.
+- Require idiomatic, naturally formatted Go beyond mechanical `gofmt`
+  acceptance. Prefer conventional local and receiver names and straightforward
+  control flow; do not suggest formatting tricks that influence lint or line
+  counts.
+- Require focused deterministic tests for success, failure, cleanup, and retry
+  behavior at the owning package boundary. Keep production packages
+  independent of simulators and command-internal policy.
+- For integration tests, require the `integration` build tag, skip absent or
+  ambiguous hardware before selection, open a selected adapter exactly once,
+  gate effectful operations explicitly, and restore volatile state with
+  bounded cleanup.
+
+### Claims and review integrity
+
+- Compare documentation and pull-request claims with the implemented tree.
+  Distinguish ordinary tests, behavioral simulation, CI compilation, and
+  physical HIL; none is evidence for another.
+- Keep architecture ownership, cleanup, safety effects, composition guidance,
+  examples, commands, and capability tables consistent with code. For
+  Markdown changes, verify relative links, headings, commands, package names,
+  examples, and stated limitations against the current tree.
+- Require documentation in the same commit as exported API, ownership,
+  lifecycle, safety, platform, composition, or validation-claim changes.
+- Require physical HIL claims to identify the exercised path and bench.
+- When commit context is available, flag unrelated changes, non-bisectable
+  commits, weak messages, missing same-commit tests or documentation, and
+  artificial splits made only to influence line counts.
+- Treat changes to contribution rules, agent review guidance, CODEOWNERS,
+  policy tooling, or workflows as security-sensitive review-policy changes.

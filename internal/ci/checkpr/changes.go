@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bufio"
+	"bytes"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -17,9 +17,10 @@ var publicGoDeclaration = regexp.MustCompile(
 )
 
 type changedFile struct {
-	path  string
-	added int
-	lines int
+	path         string
+	added        int
+	lines        int
+	renameSource bool
 }
 
 type changeSummary struct {
@@ -53,7 +54,7 @@ func summarizeChanges(files []changedFile) changeSummary {
 			summary.addedProductionGo += file.added
 		}
 		summary.topLevels[topLevel(file.path)] = true
-		summary.tests = summary.tests || isTestFile(file.path)
+		summary.tests = summary.tests || (!file.renameSource && isTestFile(file.path))
 		summary.docs = summary.docs || strings.HasSuffix(file.path, ".md")
 		summary.productionGo = summary.productionGo || isProductionGo(file.path)
 		summary.policy = summary.policy || isReviewPolicy(file.path)
@@ -103,14 +104,14 @@ func changeFindings(summary changeSummary, publicAPI bool, commit, message strin
 }
 
 func readChangedFiles(repo, commit string) ([]changedFile, error) {
-	output, err := gitOutput(repo, "diff", "--numstat", commit+"^", commit, "--")
+	output, err := gitOutput(repo, "diff", "--numstat", "-z", commit+"^", commit, "--")
 	if err != nil {
 		return nil, err
 	}
 	var files []changedFile
-	scanner := bufio.NewScanner(strings.NewReader(string(output)))
-	for scanner.Scan() {
-		fields := strings.SplitN(scanner.Text(), "\t", 3)
+	records := bytes.Split(output, []byte{0})
+	for index := 0; index < len(records)-1; index++ {
+		fields := strings.SplitN(string(records[index]), "\t", 3)
 		if len(fields) != 3 {
 			return nil, fmt.Errorf("parse diff statistics for %s", commit)
 		}
@@ -120,10 +121,19 @@ func readChangedFiles(repo, commit string) ([]changedFile, error) {
 		if addedErr == nil && deletedErr == nil {
 			lines = added + deleted
 		}
-		files = append(files, changedFile{path: fields[2], added: added, lines: lines})
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
+		path := fields[2]
+		if path == "" {
+			if index+2 >= len(records)-1 {
+				return nil, fmt.Errorf("parse renamed paths for %s", commit)
+			}
+			files = append(files, changedFile{
+				path:         string(records[index+1]),
+				renameSource: true,
+			})
+			path = string(records[index+2])
+			index += 2
+		}
+		files = append(files, changedFile{path: path, added: added, lines: lines})
 	}
 	return files, nil
 }
@@ -160,9 +170,9 @@ func isTestFile(path string) bool {
 func isReviewPolicy(path string) bool {
 	return path == "CONTRIBUTING.md" ||
 		path == ".github/CODEOWNERS" ||
-		path == ".github/copilot-instructions.md" ||
 		path == ".github/pull_request_template.md" ||
-		strings.HasPrefix(path, ".github/instructions/") ||
+		path == "AGENTS.md" ||
+		strings.HasSuffix(path, "/AGENTS.md") ||
 		strings.HasPrefix(path, ".github/workflows/") ||
 		strings.HasPrefix(path, "internal/ci/")
 }

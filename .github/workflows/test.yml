@@ -189,32 +189,119 @@ jobs:
           clang -std=c11 -Wall -Wextra -Wpedantic -Werror -fsyntax-only
           usb/iokit_darwin.c
 
-  copilot-reviewed:
+  codex-reviewed:
     if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.draft }}
-    name: copilot-reviewed
+    name: codex-reviewed
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
+      actions: read
+      contents: read
+      issues: read
       pull-requests: read
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
+      RUN_ID: ${{ github.run_id }}
     steps:
-      - name: Wait for Copilot to review the current head
+      - name: Wait for Codex to review the current head
         shell: bash
         run: |
+          post_head_timeline() {
+            gh api \
+              --paginate \
+              --slurp \
+              -H "Accept: application/vnd.github+json" \
+              "repos/${GH_REPO}/issues/${PR_NUMBER}/timeline?per_page=100" | \
+              jq -c '
+                add
+                | to_entries as $timeline
+                | ($timeline | map(select(
+                    (.value.event == "head_ref_force_pushed" and .value.commit_id == env.HEAD_SHA)
+                    or (.value.event == "committed" and .value.sha == env.HEAD_SHA)
+                  )) | last | .key) as $head_index
+                | if $head_index == null then []
+                  else [$timeline[] | select(.key > $head_index) | .value]
+                  end
+              '
+          }
+
+          clean_review_prefixes() {
+            jq -r '.[] | select(
+              .event == "commented"
+              and .user.login == "chatgpt-codex-connector[bot]"
+              and (.body // "" | startswith("Codex Review: Didn\u0027t find any major issues."))
+            ) | try (.body | capture("\\*\\*Reviewed commit:\\*\\* `(?\u003cprefix\u003e[0-9a-f]{7,40})`").prefix) catch empty' \
+              <<< "$post_head_entries"
+          }
+
+          clean_comment_review() {
+            while read -r reviewed_commit; do
+              if [[ ! "$reviewed_commit" =~ ^[0-9a-f]{7,40}$ ]]; then
+                continue
+              fi
+              resolved_sha=$(gh api \
+                "repos/${GH_REPO}/commits/${reviewed_commit}" \
+                --jq '.sha' 2>/dev/null || true)
+              if [[ "$resolved_sha" == "$HEAD_SHA" ]]; then
+                return 0
+              fi
+            done < <(clean_review_prefixes)
+            return 1
+          }
+
+          previous_gate() {
+            while read -r candidate_run_id; do
+              if [[ ! "$candidate_run_id" =~ ^[0-9]+$ ]]; then
+                continue
+              fi
+              gate_count=$(gh api \
+                --paginate \
+                --slurp \
+                "repos/${GH_REPO}/actions/runs/${candidate_run_id}/jobs?filter=all&per_page=100" | \
+                jq '[.[] | .jobs[] | select(.name == "codex-reviewed" and .conclusion == "success")] | length')
+              if [[ "$gate_count" -gt 0 ]]; then
+                return 0
+              fi
+            done < <(gh api \
+              --paginate \
+              "repos/${GH_REPO}/actions/workflows/test.yml/runs?event=pull_request&head_sha=${HEAD_SHA}&per_page=100" | \
+              jq -r ".workflow_runs[] | select(
+                .id != (${RUN_ID} | tonumber) and
+                .path == \".github/workflows/test.yml\" and
+                .event == \"pull_request\" and
+                .head_sha == \"${HEAD_SHA}\" and
+                any(.pull_requests[]?; .number == (${PR_NUMBER} | tonumber))
+              ) | .id")
+            return 1
+          }
+
           for attempt in {1..60}; do
-            review_count=$(gh api \
-              "repos/${GH_REPO}/pulls/${PR_NUMBER}/reviews?per_page=100" \
-              --jq "[.[] | select(.user.login == \"copilot-pull-request-reviewer[bot]\" and .commit_id == \"${HEAD_SHA}\" and .state != \"PENDING\" and .state != \"DISMISSED\")] | length")
-            if [[ "$review_count" -gt 0 ]]; then
-              echo "Copilot completed a review of ${HEAD_SHA}."
+            if previous_gate; then
+              echo "A prior Codex gate already validated ${HEAD_SHA}."
               exit 0
             fi
-            echo "Waiting for Copilot review of ${HEAD_SHA} (${attempt}/60)."
+
+            review_count=$(gh api \
+              --paginate \
+              --slurp \
+              "repos/${GH_REPO}/pulls/${PR_NUMBER}/reviews?per_page=100" | \
+              jq "add | [.[] | select(.user.login == \"chatgpt-codex-connector[bot]\" and .commit_id == \"${HEAD_SHA}\" and .state != \"PENDING\" and .state != \"DISMISSED\" and (.body // \"\" | contains(\"Codex Security Review\") | not))] | length")
+            if [[ "$review_count" -gt 0 ]]; then
+              echo "Codex completed a review of ${HEAD_SHA}."
+              exit 0
+            fi
+
+            post_head_entries=$(post_head_timeline)
+            if clean_comment_review; then
+              echo "Codex completed a clean review of ${HEAD_SHA}."
+              exit 0
+            fi
+
+            echo "Waiting for Codex review of ${HEAD_SHA} (${attempt}/60)."
             sleep 20
           done
-          echo "Copilot did not complete a review of ${HEAD_SHA}."
+          echo "Codex did not complete a review of ${HEAD_SHA}."
           exit 1

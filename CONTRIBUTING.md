@@ -101,12 +101,18 @@ native C checks applicable to their hosts.
 Policy annotations remain advisory when judgment is required. These include
 73- through 120-column subjects, ambiguous imperative mood, weak bodies,
 commits near the 200-line review checkpoint, likely missing tests or docs,
-mixed capabilities, and changes to review-policy files. Copilot and the
+mixed capabilities, and changes to review-policy files. Codex and the
 maintainer assess correctness, ownership, cleanup, hardware safety,
 architecture, behavioral coverage, and documentation claims. A completed
-Copilot review must match the current pull-request head, but its opinion does
-not count as an approval. Resolve its actionable conversations or explain the
-disposition before merging.
+standard Codex review must match the current pull-request head. On the final
+head, comment `@codex review`; a clean review may instead complete with a
+SHA-labeled Codex result comment. Automatic review begins when a pull request
+becomes ready, but only a formal review or SHA-labeled clean result for the
+exact head satisfies the gate. A Codex opinion does not count as an approval.
+Resolve its actionable conversations or explain the disposition before
+merging.
+If Codex completes after the gate's polling window, rerun the failed
+`codex-reviewed` job to evaluate the completed result.
 
 Untrusted pull-request workflows receive no secrets and never run HIL.
 
