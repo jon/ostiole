@@ -81,6 +81,19 @@ It is written for people and tools building applications with Ostiole.
 People and coding agents changing Ostiole itself should follow the shared
 [contribution guide](CONTRIBUTING.md).
 
+## Requirements
+
+Ostiole requires Go 1.25.12 or newer. On macOS 12 or newer, install Xcode or
+the Xcode command-line tools. The native USB implementation uses cgo to call
+the system IOKit and CoreFoundation frameworks; it does not require libusb or
+a third-party USB package.
+
+On Linux, grant the interactive user access to the exact USB product and
+release any kernel driver bound to the interface before running a hardware
+command. Never work around device permissions by running repository code as
+root. See [Linux USB access](docs/linux-usb.md) for udev rules and a bounded
+`ftdi_sio` release and restoration procedure.
+
 ## Safety
 
 Debug and programming interfaces can reset processors, halt execution, modify
@@ -102,18 +115,17 @@ MPSSE port A at 400 kHz. Connect it to a powered SWD target as follows:
 | GND | GND |
 
 The target supplies its own power. No reset or target-power connection is
-used. On Linux, run:
+used. After configuring [Linux USB access](docs/linux-usb.md), when applicable,
+run:
 
 ```sh
-sudo go run ./examples/trivial/swd-dpidr
+go run ./examples/trivial/swd-dpidr
 ```
 
-On macOS 12 or newer, install Xcode or the Xcode command-line tools and run the
-same command without `sudo`. The macOS USB implementation uses cgo to call the
-system IOKit and CoreFoundation frameworks; it does not require libusb or a
-third-party USB package. This path is validated with an FT232H (`0403:6014`).
-Claiming it temporarily seizes its USB interface from the Apple FTDI driver;
-closing it releases that ownership.
+This path is validated with an FT232H (`0403:6014`) on Linux and macOS. On
+Linux, the current implementation requires an explicit driver release and
+restoration. On macOS, claiming the device temporarily seizes its USB
+interface from the Apple FTDI driver; closing it releases that ownership.
 
 A successful read prints only the debug-port identity, for example
 `DPIDR=0x2ba01477`. The operation does not halt or reset the target and does
@@ -123,7 +135,7 @@ Maintainers can exercise the same public-library path as an opt-in hardware
 test:
 
 ```sh
-sudo OSTIOLE_FTDI_HIL=1 go test -tags integration ./swd
+OSTIOLE_FTDI_HIL=1 go test -tags integration ./swd
 ```
 
 On macOS, maintainers can validate FT232H interface ownership and the FTDI
@@ -148,7 +160,7 @@ register through the posted-read pipeline, and releases the power requests it
 acquired. Run:
 
 ```sh
-sudo go run ./examples/simple/ap-id
+go run ./examples/simple/ap-id
 ```
 
 A successful read prints both identities, for example
@@ -158,7 +170,7 @@ target and does not access target memory.
 Maintainers can exercise the DAP path as an opt-in hardware test:
 
 ```sh
-sudo OSTIOLE_FTDI_HIL=1 go test -tags integration ./dap
+OSTIOLE_FTDI_HIL=1 go test -tags integration ./dap
 ```
 
 ## Cortex-M identity example
@@ -167,7 +179,7 @@ The Cortex-M example selects AP0 explicitly, requires it to be a MEM-AP, and
 reads the architectural CPUID register. Run:
 
 ```sh
-sudo go run ./examples/simple/cortexm-info
+go run ./examples/simple/cortexm-info
 ```
 
 A successful read prints the debug port, access port, and processor identities,
@@ -190,27 +202,27 @@ identifiers. A supported attachment can perform the same raw DPIDR read as the
 trivial example:
 
 ```sh
-sudo go run ./cmd/ost swd dpidr
+go run ./cmd/ost swd dpidr
 ```
 
 The DAP form establishes the explicit debug-port lifecycle and reports the
 decoded identity fields before releasing the power state it acquired:
 
 ```sh
-sudo go run ./cmd/ost dap dp id
+go run ./cmd/ost dap dp id
 ```
 
 One access port can be selected explicitly through the same lifecycle:
 
 ```sh
-sudo go run ./cmd/ost dap ap id --ap 0
+go run ./cmd/ost dap ap id --ap 0
 ```
 
 The first target-level command identifies a Cortex-M processor through one
 explicitly selected MEM-AP:
 
 ```sh
-sudo go run ./cmd/ost target cortex-m id --ap 0
+go run ./cmd/ost target cortex-m id --ap 0
 ```
 
 It reports DPIDR, the selected AP IDR, and CPUID while restoring MEM-AP and

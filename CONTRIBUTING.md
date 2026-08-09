@@ -5,6 +5,10 @@ same repository standards. This document covers changes to Ostiole itself;
 programs that consume the library should begin with [`README.md`](README.md)
 and the user guides under [`docs/`](docs/).
 
+Participation is also subject to the short, common-sense
+[`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md). Report suspected vulnerabilities
+privately as described in [`SECURITY.md`](SECURITY.md), not in a public issue.
+
 Ostiole is an experimental hardware-access library. Small changes can affect
 USB ownership, protocol state, and a connected target, so contributions should
 be narrow, explicit, and tested at the layer that owns the behavior.
