@@ -100,7 +100,9 @@ incomplete pull-request metadata, and broken local Markdown links or anchors.
 The `commits` check runs formatting, build, vet, and race tests independently
 at every commit. The `quality` and macOS checks validate the final tip with
 the additional linters, vulnerability scan, integration-tag compilation, and
-native C checks applicable to their hosts.
+native C checks applicable to their hosts. The `CodeQL` workflow analyzes Go
+and native C/C++ with the security-extended query suite on every pull request,
+including pull requests from forks.
 
 Policy annotations remain advisory when judgment is required. These include
 73- through 120-column subjects, ambiguous imperative mood, weak bodies,
@@ -118,7 +120,10 @@ merging.
 If Codex completes after the gate's polling window, rerun the failed
 `codex-reviewed` job to evaluate the completed result.
 
-Untrusted pull-request workflows receive no secrets and never run HIL.
+Untrusted pull-request workflows receive no secrets or write-capable checkout
+credentials and never run HIL. CodeQL uses the ordinary `pull_request` event
+and GitHub's built-in token; it does not use `pull_request_target` or a
+maintainer credential.
 
 When changing the native macOS USB bridge, also verify its formatting and
 warning-clean C build with the commands used by `.github/workflows/test.yml`.
