@@ -2,47 +2,219 @@ name: test
 
 on:
   push:
+    branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
 
+concurrency:
+  group: test-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  ACTIONLINT_VERSION: v1.7.7
+  GOLANGCI_LINT_VERSION: v2.12.2
+  GOVULNCHECK_VERSION: v1.6.0
+  MARKDOWNLINT_VERSION: 0.23.2
+  STATICCHECK_VERSION: v0.7.0
+
 jobs:
-  linux:
+  policy:
+    if: ${{ github.event_name == 'pull_request' }}
+    name: policy
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - name: Check out the proposed head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
           cache: false
-      - run: go build ./...
-      - run: go vet ./...
-      - run: go test -race ./...
+      - name: Check commits and pull-request metadata
+        run: >-
+          go run ./internal/ci/checkpr
+          -base "$BASE_SHA"
+          -head "$HEAD_SHA"
+          -event "$GITHUB_EVENT_PATH"
+
+  commits:
+    if: ${{ github.event_name == 'pull_request' }}
+    name: commits
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - name: Check out the proposed head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Test every pull-request commit
+        shell: bash
+        run: |
+          temporary_root=$(mktemp -d)
+          worktree="${temporary_root}/commit"
+          cleanup() {
+            cd "$GITHUB_WORKSPACE"
+            git worktree remove --force "$worktree" 2>/dev/null || true
+            rmdir "$temporary_root" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          while read -r commit; do
+            echo "Testing ${commit}"
+            git worktree add --detach "$worktree" "$commit"
+            (
+              cd "$worktree"
+              unformatted=$(gofmt -l .)
+              if [[ -n "$unformatted" ]]; then
+                echo "Files require gofmt:"
+                echo "$unformatted"
+                exit 1
+              fi
+              go build ./...
+              go vet ./...
+              go test -race ./...
+            )
+            git worktree remove --force "$worktree"
+          done < <(git rev-list --reverse "${BASE_SHA}..${HEAD_SHA}")
+
+  quality:
+    name: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out the final tip
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Check Go formatting
+        shell: bash
+        run: |
+          unformatted=$(gofmt -l .)
+          if [[ -n "$unformatted" ]]; then
+            echo "Files require gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Run race tests
+        run: go test -race ./...
+      - name: Run Staticcheck
+        run: |
+          go install "honnef.co/go/tools/cmd/staticcheck@${STATICCHECK_VERSION}"
+          staticcheck ./...
+      - name: Run production-code lint
+        run: |
+          go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
+          golangci-lint run --config .golangci.yml ./...
+      - name: Run test-code lint
+        run: golangci-lint run --config .golangci.tests.yml ./...
+      - name: Lint tracked Markdown
+        shell: bash
+        run: |
+          markdown_files=()
+          while IFS= read -r -d '' file; do
+            markdown_files+=("$file")
+          done < <(git ls-files -z '*.md')
+          npx --yes "markdownlint-cli2@${MARKDOWNLINT_VERSION}" -- "${markdown_files[@]}"
+      - name: Lint workflows
+        run: |
+          go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
+          actionlint
+      - name: Scan Go dependencies for vulnerabilities
+        run: |
+          go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
+          govulncheck ./...
 
   macos:
+    name: macos (${{ matrix.runner }})
     strategy:
       fail-fast: false
       matrix:
         runner: [macos-26, macos-26-intel]
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     env:
-      GOLANGCI_LINT_VERSION: v2.12.2
       MACOSX_DEPLOYMENT_TARGET: "12.0"
-      STATICCHECK_VERSION: v0.7.0
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - name: Check out the final tip
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
           cache: false
-      - run: go build ./...
-      - run: go vet ./...
-      - run: go test -race ./...
-      - run: go install honnef.co/go/tools/cmd/staticcheck@${STATICCHECK_VERSION}
-      - run: staticcheck ./...
-      - run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}
-      - run: golangci-lint run --config .golangci.yml ./...
-      - run: golangci-lint run --config .golangci.tests.yml ./...
-      - run: xcrun clang-format --dry-run --Werror usb/iokit_darwin.c usb/iokit_darwin.h
-      - run: clang -std=c11 -Wall -Wextra -Wpedantic -Werror -fsyntax-only usb/iokit_darwin.c
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Run race tests
+        run: go test -race ./...
+      - name: Compile integration tests
+        run: go test -tags=integration -run '^$' ./...
+      - name: Check native C formatting
+        run: >-
+          xcrun clang-format --dry-run --Werror
+          usb/iokit_darwin.c usb/iokit_darwin.h
+      - name: Check native C diagnostics
+        run: >-
+          clang -std=c11 -Wall -Wextra -Wpedantic -Werror -fsyntax-only
+          usb/iokit_darwin.c
+
+  copilot-reviewed:
+    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+    name: copilot-reviewed
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      pull-requests: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Wait for Copilot to review the current head
+        shell: bash
+        run: |
+          for attempt in {1..60}; do
+            review_count=$(gh api \
+              "repos/${GH_REPO}/pulls/${PR_NUMBER}/reviews?per_page=100" \
+              --jq "[.[] | select(.user.login == \"copilot-pull-request-reviewer[bot]\" and .commit_id == \"${HEAD_SHA}\" and .state != \"PENDING\" and .state != \"DISMISSED\")] | length")
+            if [[ "$review_count" -gt 0 ]]; then
+              echo "Copilot completed a review of ${HEAD_SHA}."
+              exit 0
+            fi
+            echo "Waiting for Copilot review of ${HEAD_SHA} (${attempt}/60)."
+            sleep 20
+          done
+          echo "Copilot did not complete a review of ${HEAD_SHA}."
+          exit 1
