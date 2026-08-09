@@ -70,7 +70,13 @@ func checkRange(repo, base, head string) ([]finding, error) {
 				"commit must have exactly one parent",
 			))
 		}
-		findings = append(findings, checkMessage(commit, string(parts[1]))...)
+		message := string(parts[1])
+		findings = append(findings, checkMessage(commit, message)...)
+		changeFindings, err := checkCommitChanges(repo, commit, message)
+		if err != nil {
+			return nil, err
+		}
+		findings = append(findings, changeFindings...)
 	}
 	return findings, nil
 }
