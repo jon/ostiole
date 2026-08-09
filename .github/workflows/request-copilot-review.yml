@@ -1,0 +1,31 @@
+name: request Copilot review
+
+on:
+  pull_request_target:
+    types: [opened, ready_for_review, reopened, synchronize]
+
+permissions:
+  pull-requests: write
+
+concurrency:
+  group: copilot-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  request:
+    if: ${{ !github.event.pull_request.draft }}
+    name: request Copilot review
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      # This privileged workflow deliberately does not check out or evaluate
+      # any content from the pull request.
+      - name: Request Copilot as a reviewer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh api --method POST \
+            "repos/${GH_REPO}/pulls/${PR_NUMBER}/requested_reviewers" \
+            -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
