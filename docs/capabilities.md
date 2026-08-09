@@ -14,13 +14,14 @@ family or every feature of a protocol.
 
 | Capability | Implemented | Validation and boundary |
 | --- | --- | --- |
-| Linux host access | Yes | Pure-Go sysfs inventory and usbfs ownership/transfers; Linux CI. |
+| Linux host access | Yes | Pure-Go sysfs inventory and usbfs transfers; Linux CI and FT232H HIL. Permission setup and manual release of a bound kernel driver are host prerequisites. |
 | macOS host access | Yes | IOKit and IOUSBLib through cgo; macOS 26 arm64 and Intel CI with a macOS 12 deployment target. |
 | Filtered enumeration | Yes | VID/PID filters, deterministic bus/address ordering, and context checks. |
 | Exact open | Yes | Revalidates bus, address, vendor, and product before and after opening. |
-| Interface ownership | Yes | One claimed interface, alternate selection, release, and close. |
+| Interface ownership | Yes | One claimed interface, alternate selection, release, and close. Linux reports contention rather than detaching a bound kernel driver. |
 | Control transfers | Yes | Synchronous, deadline-bounded endpoint-zero transfers. |
 | Bulk transfers | Yes | Synchronous, deadline-bounded bulk IN and OUT transfers. |
+| Linux FT232H ownership | HIL | Manual `ftdi_sio` unbind, unprivileged usbfs claim and MPSSE/SWD traffic, release, and explicit driver rebind. |
 | macOS FT232H ownership | HIL | Interface seizure, control/bulk traffic, MPSSE setup, close, and Apple driver rematch. |
 
 The USB package does not currently expose descriptor trees, device strings,
@@ -29,13 +30,14 @@ isochronous transfers, device reset, or configuration switching.
 
 Linux is the only pure-Go host. macOS builds require cgo and the Xcode or
 Xcode command-line-tool SDK; they do not require libusb or another installed
-USB library. Windows is not supported.
+USB library. Windows is not supported. See [Linux USB access](linux-usb.md)
+for the host setup required by physical Linux USB operations.
 
 ## FTDI MPSSE
 
 | Capability | Implemented | Validation and boundary |
 | --- | --- | --- |
-| FT232H | Yes | Port A; full MPSSE and SWD HIL on macOS. |
+| FT232H | Yes | Port A; full MPSSE and SWD HIL on Linux and macOS. |
 | FT2232H | Yes | Ports A and B using the standard H-series interface and endpoint layout. |
 | FT4232H | Yes | Ports A and B using the standard H-series interface and endpoint layout. |
 | Explicit clock | Yes | Divisor selects a rate no faster than requested; examples use 400 kHz. |
@@ -61,7 +63,7 @@ wires its MPSSE port for debugging.
 | Batching or pipelining | No | Each call executes one complete transaction. |
 | Multidrop or dormant state | No | The public connection models one entered SWD target. |
 | Behavioral simulation | Yes | Protocol entry and basic DP/AP register transfers. |
-| Physical DPIDR read | HIL | Opt-in FTDI test and trivial example. |
+| Physical DPIDR read | HIL | Opt-in FTDI test and trivial example on Linux and macOS. |
 
 The public `swd.Wire` boundary permits another wire implementation, but FTDI
 is the only physical implementation currently provided.

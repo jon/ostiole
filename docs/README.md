@@ -11,6 +11,8 @@ today and how to assemble them without duplicating lower-level behavior.
 - [Capabilities](capabilities.md) distinguishes implemented behavior from
   simulated, CI-tested, and HIL-validated configurations and explicit
   limitations.
+- [Linux USB access](linux-usb.md) explains unprivileged device permissions
+  and bounded release and restoration of a bound FTDI kernel interface.
 - [Examples](../examples) contains executable compositions that progress from
   direct protocol demonstrations to focused inspection tools.
 
