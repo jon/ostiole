@@ -22,18 +22,27 @@ func run(args []string, stdout, stderr io.Writer) int {
 	repo := flags.String("repo", ".", "repository working tree")
 	base := flags.String("base", "", "pull-request base commit")
 	head := flags.String("head", "", "pull-request head commit")
+	event := flags.String("event", "", "GitHub pull-request event JSON")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
 	if *base == "" || *head == "" {
-		fmt.Fprintln(stderr, "checkpr: -base and -head are required")
+		_, _ = fmt.Fprintln(stderr, "checkpr: -base and -head are required")
 		return 2
 	}
 
 	findings, err := checkRange(*repo, *base, *head)
 	if err != nil {
-		fmt.Fprintf(stderr, "checkpr: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "checkpr: %v\n", err)
 		return 2
+	}
+	if *event != "" {
+		metadata, err := readPullRequestEvent(*event)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "checkpr: %v\n", err)
+			return 2
+		}
+		findings = append(findings, checkPullRequest(metadata)...)
 	}
 	for _, finding := range findings {
 		writeFinding(stdout, finding)
@@ -94,11 +103,11 @@ func writeFinding(output io.Writer, finding finding) {
 	if os.Getenv("GITHUB_ACTIONS") == "true" {
 		title := escapeAnnotation(finding.rule + " in " + commit)
 		message := escapeAnnotation(finding.message)
-		fmt.Fprintf(output, "::%s title=%s::%s\n", finding.level, title, message)
+		_, _ = fmt.Fprintf(output, "::%s title=%s::%s\n", finding.level, title, message)
 		return
 	}
 	format := "%s[%s] %s: %s\n"
-	fmt.Fprintf(output, format, finding.level, finding.rule, commit, finding.message)
+	_, _ = fmt.Fprintf(output, format, finding.level, finding.rule, commit, finding.message)
 }
 
 func escapeAnnotation(value string) string {
