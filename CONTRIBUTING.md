@@ -88,6 +88,28 @@ golangci-lint run --config .golangci.yml ./...
 golangci-lint run --config .golangci.tests.yml ./...
 ```
 
+Pull requests divide automated feedback into deterministic failures and
+review judgments. The `policy` check rejects merge commits, malformed commit
+subjects, Conventional Commit prefixes, subjects longer than 120 columns,
+missing body separators, clearly wrappable body prose longer than 72 columns,
+incomplete pull-request metadata, and broken local Markdown links or anchors.
+The `commits` check runs formatting, build, vet, and race tests independently
+at every commit. The `quality` and macOS checks validate the final tip with
+the additional linters, vulnerability scan, integration-tag compilation, and
+native C checks applicable to their hosts.
+
+Policy annotations remain advisory when judgment is required. These include
+73- through 120-column subjects, ambiguous imperative mood, weak bodies,
+commits near the 200-line review checkpoint, likely missing tests or docs,
+mixed capabilities, and changes to review-policy files. Copilot and the
+maintainer assess correctness, ownership, cleanup, hardware safety,
+architecture, behavioral coverage, and documentation claims. A completed
+Copilot review must match the current pull-request head, but its opinion does
+not count as an approval. Resolve its actionable conversations or explain the
+disposition before merging.
+
+Untrusted pull-request workflows receive no secrets and never run HIL.
+
 When changing the native macOS USB bridge, also verify its formatting and
 warning-clean C build with the commands used by `.github/workflows/test.yml`.
 Run the relevant opt-in HIL tests when the contribution changes an exercised
@@ -123,7 +145,8 @@ complete sentence describing the resulting change:
 - end with a period;
 - use the imperative mood where it reads naturally;
 - omit category and scope prefixes such as `feat:`, `fix:`, or `usb:`; and
-- stay at 72 columns or fewer.
+- prefer 72 columns or fewer. CI warns at 73 through 120 columns and rejects
+  longer subjects.
 
 Examples:
 
