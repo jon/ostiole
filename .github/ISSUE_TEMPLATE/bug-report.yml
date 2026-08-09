@@ -1,0 +1,84 @@
+name: Bug report
+description: Tell us about something that did not work as expected.
+title: ""
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Ostiole.
+
+        Please report suspected vulnerabilities privately through the
+        [security policy](https://github.com/jon/ostiole/security/policy).
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for the same problem.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true
+        - label: I agree to follow the code of conduct.
+          required: true
+
+  - type: input
+    id: revision
+    attributes:
+      label: Ostiole revision
+      description: Give the release, tag, or commit you tested.
+      placeholder: main at abc1234
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Host environment
+      description: Include the operating system, architecture, and Go version.
+      placeholder: Linux amd64, Go 1.25.12
+    validations:
+      required: true
+
+  - type: input
+    id: hardware
+    attributes:
+      label: Hardware or simulator
+      description: Identify the adapter, target, or simulator involved.
+      placeholder: FT232H adapter and Cortex-M target
+    validations:
+      required: true
+
+  - type: textarea
+    id: observed
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and any safety effects.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How can we reproduce it?
+      description: Provide the smallest reliable sequence of steps.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Validation and logs
+      description: |
+        Distinguish software tests, simulation, CI compilation, and physical
+        hardware validation. Remove credentials and other sensitive data.
+      render: shell
