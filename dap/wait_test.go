@@ -1,0 +1,939 @@
+package dap_test
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/jon/ostiole/dap"
+	dapsim "github.com/jon/ostiole/dap/sim"
+	"github.com/jon/ostiole/swd"
+	swdsim "github.com/jon/ostiole/swd/sim"
+)
+
+const testWriteDataError = uint32(1 << 7)
+
+type waitTarget struct {
+	*dapsim.Target
+	waitFor           swd.Request
+	waits             int
+	fault             bool
+	armed             bool
+	accepted          bool
+	attempts          int
+	executed          map[swd.Request]int
+	abortValues       []uint32
+	abortErr          error
+	clearErr          error
+	stickyAfterAbort  uint32
+	sticky            uint32
+	retryErr          error
+	aborted           bool
+	selectWaits       int
+	selectAttempts    int
+	writeErrFor       swd.Request
+	writeErr          error
+	readErrAfterAbort error
+	requests          []swd.Request
+}
+
+type cleanupFailWire struct {
+	inner                swd.Wire
+	err                  error
+	cancel               context.CancelFunc
+	armed                bool
+	lost                 bool
+	reentries            int
+	trafficBeforeReentry int
+	onReentry            func()
+}
+
+func (w *cleanupFailWire) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
+	input, err := w.inner.SWDIO(ctx, direction, output, bits)
+	if w.lost {
+		if err == nil && bits == 136 {
+			w.lost = false
+			w.reentries++
+			if w.onReentry != nil {
+				w.onReentry()
+			}
+		} else {
+			w.trafficBeforeReentry++
+		}
+		return input, err
+	}
+	if err == nil && w.armed && bits == 9 {
+		w.armed = false
+		w.lost = true
+		if w.cancel != nil {
+			w.cancel()
+			return input, nil
+		}
+		return nil, w.err
+	}
+	return input, err
+}
+
+func newWaitTarget() *waitTarget {
+	return &waitTarget{
+		Target:   dapsim.New(0x2ba01477),
+		executed: make(map[swd.Request]int),
+	}
+}
+
+func (t *waitTarget) arm(req swd.Request, waits int) {
+	t.waitFor = req
+	t.waits = waits
+	t.fault = false
+	t.armed = true
+	t.accepted = false
+	t.attempts = 0
+	t.executed[req] = 0
+}
+
+func (t *waitTarget) armFault(req swd.Request) {
+	t.arm(req, 0)
+	t.fault = true
+}
+
+func (t *waitTarget) Acknowledge(_ context.Context, req swd.Request) error {
+	t.requests = append(t.requests, req)
+	if t.sticky != 0 && !stickyExempt(req) {
+		return swd.ErrFault
+	}
+	if t.aborted && req == (swd.Request{Addr: uint8(dap.SELECT)}) && t.selectWaits != 0 {
+		t.selectAttempts++
+		if t.selectWaits > 0 {
+			t.selectWaits--
+		}
+		return swd.ErrWait
+	}
+	if !t.armed || req != t.waitFor {
+		return nil
+	}
+	t.attempts++
+	if t.retryErr != nil && t.attempts == 2 {
+		return t.retryErr
+	}
+	if t.waits != 0 {
+		if t.waits > 0 {
+			t.waits--
+		}
+		return swd.ErrWait
+	}
+	if t.fault {
+		t.armed = false
+		return swd.ErrFault
+	}
+	t.accepted = true
+	return nil
+}
+
+func stickyExempt(req swd.Request) bool {
+	if req.AP {
+		return false
+	}
+	return req.Read && (req.Addr == uint8(dap.DPIDR) || req.Addr == uint8(dap.CTRLSTAT)) ||
+		!req.Read && req.Addr == uint8(dap.ABORT)
+}
+
+func (t *waitTarget) Read(ctx context.Context, req swd.Request) (uint32, error) {
+	t.executed[req]++
+	t.finishAccepted(req)
+	if t.aborted && !req.AP && req.Read && req.Addr == uint8(dap.CTRLSTAT) && t.readErrAfterAbort != nil {
+		err := t.readErrAfterAbort
+		t.readErrAfterAbort = nil
+		return 0, err
+	}
+	value, err := t.Target.Read(ctx, req)
+	if !req.AP && req.Addr == uint8(dap.CTRLSTAT) {
+		value |= t.sticky
+	}
+	return value, err
+}
+
+func (t *waitTarget) Write(ctx context.Context, req swd.Request, value uint32) error {
+	t.executed[req]++
+	t.finishAccepted(req)
+	if !req.AP && req.Addr == uint8(dap.ABORT) {
+		if err := t.writeAbort(value); err != nil {
+			return err
+		}
+	}
+	if err := t.Target.Write(ctx, req, value); err != nil {
+		return err
+	}
+	if req == t.writeErrFor && t.writeErr != nil {
+		err := t.writeErr
+		t.writeErr = nil
+		return err
+	}
+	return nil
+}
+
+func (t *waitTarget) writeAbort(value uint32) error {
+	t.abortValues = append(t.abortValues, value)
+	if value&1 != 0 {
+		t.armed = false
+		t.aborted = true
+		t.sticky |= t.stickyAfterAbort
+		if t.abortErr != nil {
+			return t.abortErr
+		}
+	}
+	if value&0x1e != 0 && t.clearErr != nil {
+		return t.clearErr
+	}
+	if value&(1<<1) != 0 {
+		t.sticky &^= 1 << 4
+	}
+	if value&(1<<2) != 0 {
+		t.sticky &^= 1 << 5
+	}
+	if value&(1<<3) != 0 {
+		t.sticky &^= 1 << 7
+	}
+	if value&(1<<4) != 0 {
+		t.sticky &^= 1 << 1
+	}
+	return nil
+}
+
+func (t *waitTarget) finishAccepted(req swd.Request) {
+	if t.armed && t.accepted && req == t.waitFor {
+		t.armed = false
+		t.accepted = false
+		t.fault = false
+	}
+}
+
+func TestDebugPortRetriesOnlyTheWAITedTransfer(t *testing.T) {
+	selectReq := swd.Request{Addr: uint8(dap.SELECT)}
+	apReadReq := swd.Request{AP: true, Read: true, Addr: 0x0c}
+	apWriteReq := swd.Request{AP: true, Addr: 0x00}
+	rdbuffReq := swd.Request{Read: true, Addr: uint8(dap.RDBUFF)}
+	tests := []struct {
+		name       string
+		waitFor    swd.Request
+		logicalReq swd.Request
+		operation  func(*testing.T, *dap.DebugPort)
+	}{
+		{name: "SELECT before AP read", waitFor: selectReq, logicalReq: apReadReq, operation: readAPIDR},
+		{name: "AP read request", waitFor: apReadReq, logicalReq: apReadReq, operation: readAPIDR},
+		{name: "RDBUFF after AP read", waitFor: rdbuffReq, logicalReq: apReadReq, operation: readAPIDR},
+		{name: "AP write request", waitFor: apWriteReq, logicalReq: apWriteReq, operation: writeAPCSW},
+		{name: "RDBUFF after AP write", waitFor: rdbuffReq, logicalReq: apWriteReq, operation: writeAPCSW},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			target := newWaitTarget()
+			target.AddAP(0, 0x24770011)
+			dp := enteredDP(t, target)
+			if _, err := dp.Connect(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := dp.Release(context.Background()); err != nil {
+					t.Errorf("release SW-DP: %v", err)
+				}
+			})
+
+			target.arm(test.waitFor, 2)
+			test.operation(t, dp)
+			assertWAITReplay(t, target, test.waitFor, test.logicalReq)
+		})
+	}
+}
+
+func TestDebugPortDoesNotDelayWAITRetries(t *testing.T) {
+	target := newWaitTarget()
+	target.AddAP(0, 0x24770011)
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	req := swd.Request{AP: true, Read: true, Addr: 0x0c}
+	target.arm(req, 100)
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	value, err := dp.ReadAP(ctx, 0, dap.APIDR)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value != 0x24770011 {
+		t.Fatalf("AP IDR = %#08x", value)
+	}
+}
+
+func TestDebugPortDoesNotRetryWAITBeforeConfirmingOverrunDisabled(t *testing.T) {
+	target := newWaitTarget()
+	dp := enteredDP(t, target)
+	req := swd.Request{Addr: uint8(dap.SELECT)}
+	target.arm(req, 1)
+
+	err := dp.WriteDP(t.Context(), dap.SELECT, 0)
+	if !errors.Is(err, swd.ErrWait) || !strings.Contains(err.Error(), "ORUNDETECT") {
+		t.Fatalf("WriteDP() error = %v, want WAIT and ORUNDETECT error", err)
+	}
+	if target.attempts != 1 {
+		t.Fatalf("SELECT attempts = %d, want 1", target.attempts)
+	}
+}
+
+func TestConnectDoesNotReplayBankSelectionBeforeCheckingOverrun(t *testing.T) {
+	tests := []struct {
+		name string
+		arm  func(*waitTarget, swd.Request)
+		want error
+	}{
+		{
+			name: "WAIT",
+			arm:  func(target *waitTarget, req swd.Request) { target.arm(req, 1) },
+			want: swd.ErrWait,
+		},
+		{
+			name: "FAULT",
+			arm:  func(target *waitTarget, req swd.Request) { target.armFault(req) },
+			want: swd.ErrFault,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			target := newWaitTarget()
+			dp := enteredDP(t, target)
+			req := swd.Request{Addr: uint8(dap.SELECT)}
+			test.arm(target, req)
+
+			_, err := dp.Connect(t.Context())
+			if !errors.Is(err, test.want) {
+				t.Fatalf("Connect() error = %v, want %v", err, test.want)
+			}
+			if target.attempts != 1 || target.executed[req] != 0 {
+				t.Fatalf("bank-zero SELECT attempted %d times and executed %d times", target.attempts, target.executed[req])
+			}
+			if _, err := dp.ReadDP(t.Context(), dap.DPIDR); err == nil || !strings.Contains(err.Error(), "framing is unknown") {
+				t.Fatalf("DPIDR read after rejected bank selection error = %v", err)
+			}
+		})
+	}
+}
+
+func TestReleaseRecoversFramingAfterRejectedBootstrapSelection(t *testing.T) {
+	tests := []struct {
+		name string
+		arm  func(*waitTarget, swd.Request)
+		want error
+	}{
+		{
+			name: "WAIT",
+			arm:  func(target *waitTarget, req swd.Request) { target.arm(req, 1) },
+			want: swd.ErrWait,
+		},
+		{
+			name: "FAULT",
+			arm:  func(target *waitTarget, req swd.Request) { target.armFault(req) },
+			want: swd.ErrFault,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			target := newWaitTarget()
+			dp := enteredDP(t, target)
+			req := swd.Request{Addr: uint8(dap.SELECT)}
+			test.arm(target, req)
+
+			if _, err := dp.Connect(t.Context()); !errors.Is(err, test.want) {
+				t.Fatalf("Connect() error = %v, want %v", err, test.want)
+			}
+			if err := dp.Release(t.Context()); err != nil {
+				t.Fatalf("Release() after rejected bootstrap SELECT: %v", err)
+			}
+			if _, err := dp.Connect(t.Context()); err != nil {
+				t.Fatalf("Connect() after recovery: %v", err)
+			}
+			if err := dp.Release(t.Context()); err != nil {
+				t.Fatalf("Release() after recovered connection: %v", err)
+			}
+		})
+	}
+}
+
+func readAPIDR(t *testing.T, dp *dap.DebugPort) {
+	t.Helper()
+	value, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value != 0x24770011 {
+		t.Fatalf("AP IDR = %#08x", value)
+	}
+}
+
+func writeAPCSW(t *testing.T, dp *dap.DebugPort) {
+	t.Helper()
+	if err := dp.WriteAP(t.Context(), 0, dap.APCSW, 0x23000040); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertWAITReplay(t *testing.T, target *waitTarget, waitFor, logicalReq swd.Request) {
+	t.Helper()
+	if target.attempts != 3 {
+		t.Fatalf("WAITed transfer attempts = %d, want 3", target.attempts)
+	}
+	if target.executed[waitFor] != 1 {
+		t.Fatalf("WAITed transfer executions = %d, want 1", target.executed[waitFor])
+	}
+	if target.executed[logicalReq] != 1 {
+		t.Fatalf("logical AP request executions = %d, want 1", target.executed[logicalReq])
+	}
+}
+
+func TestDebugPortDoesNotRetryRequestsWhichMustNotWAIT(t *testing.T) {
+	tests := []struct {
+		name  string
+		req   swd.Request
+		apply func(context.Context, *dap.DebugPort) error
+	}{
+		{
+			name: "DPIDR read",
+			req:  swd.Request{Read: true, Addr: uint8(dap.DPIDR)},
+			apply: func(ctx context.Context, dp *dap.DebugPort) error {
+				_, err := dp.ReadDP(ctx, dap.DPIDR)
+				return err
+			},
+		},
+		{
+			name: "CTRLSTAT read",
+			req:  swd.Request{Read: true, Addr: uint8(dap.CTRLSTAT)},
+			apply: func(ctx context.Context, dp *dap.DebugPort) error {
+				_, err := dp.ReadDP(ctx, dap.CTRLSTAT)
+				return err
+			},
+		},
+		{
+			name: "ABORT write",
+			req:  swd.Request{Addr: uint8(dap.ABORT)},
+			apply: func(ctx context.Context, dp *dap.DebugPort) error {
+				return dp.WriteDP(ctx, dap.ABORT, 0x1e)
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			target := newWaitTarget()
+			dp := enteredDP(t, target)
+			if _, err := dp.Connect(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			target.arm(test.req, 1)
+			err := test.apply(t.Context(), dp)
+			if !errors.Is(err, swd.ErrWait) {
+				t.Fatalf("operation error = %v, want %v", err, swd.ErrWait)
+			}
+			if target.attempts != 1 || target.executed[test.req] != 0 {
+				t.Fatalf("request attempted %d times and executed %d times", target.attempts, target.executed[test.req])
+			}
+		})
+	}
+}
+
+func TestDebugPortRetriesBankedDPRegisterWAIT(t *testing.T) {
+	target := newWaitTarget()
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := dp.WriteDP(t.Context(), dap.SELECT, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	req := swd.Request{Read: true, Addr: uint8(dap.CTRLSTAT)}
+	target.arm(req, 2)
+	if _, err := dp.ReadDP(t.Context(), dap.CTRLSTAT); err != nil {
+		t.Fatal(err)
+	}
+	if target.attempts != 3 || target.executed[req] != 1 {
+		t.Fatalf("banked DP read attempted %d times and executed %d times", target.attempts, target.executed[req])
+	}
+}
+
+func TestDebugPortAbortsExtendedWAITAndClearsAbandonedWrite(t *testing.T) {
+	target := newWaitTarget()
+	target.AddAP(0, 0x24770011)
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := dp.Release(context.Background()); err != nil {
+			t.Errorf("release SW-DP: %v", err)
+		}
+	})
+
+	apWriteReq := swd.Request{AP: true, Addr: 0x00}
+	rdbuffReq := swd.Request{Read: true, Addr: uint8(dap.RDBUFF)}
+	target.stickyAfterAbort = testWriteDataError
+	target.arm(rdbuffReq, -1)
+	err := dp.WriteAP(t.Context(), 0, dap.APCSW, 0x23000040)
+	if !errors.Is(err, swd.ErrWait) {
+		t.Fatalf("WriteAP() error = %v, want %v", err, swd.ErrWait)
+	}
+	if target.executed[apWriteReq] != 1 {
+		t.Fatalf("AP write executions = %d, want 1", target.executed[apWriteReq])
+	}
+	if len(target.abortValues) < 2 || target.abortValues[len(target.abortValues)-2] != 1 ||
+		target.abortValues[len(target.abortValues)-1] != 1<<3 {
+		t.Fatalf("ABORT writes = %#v, want DAPABORT followed by WDERRCLR", target.abortValues)
+	}
+	state, readErr := dp.ReadDP(t.Context(), dap.CTRLSTAT)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if state&testWriteDataError != 0 {
+		t.Fatalf("CTRL/STAT = %#08x after WAIT recovery", state)
+	}
+}
+
+func TestDebugPortDoesNotAbortExtendedDPWAIT(t *testing.T) {
+	target := newWaitTarget()
+	target.AddAP(0, 0x24770011)
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	target.arm(swd.Request{Addr: uint8(dap.SELECT)}, -1)
+	_, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	if !errors.Is(err, swd.ErrWait) {
+		t.Fatalf("ReadAP() error = %v, want %v", err, swd.ErrWait)
+	}
+	for _, value := range target.abortValues {
+		if value&1 != 0 {
+			t.Fatalf("ABORT writes = %#v, DAPABORT is reserved for an AP transaction", target.abortValues)
+		}
+	}
+}
+
+func TestDebugPortDoesNotRetryFAULT(t *testing.T) {
+	target := newWaitTarget()
+	target.AddAP(0, 0x24770011)
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	req := swd.Request{AP: true, Read: true, Addr: 0x0c}
+	target.armFault(req)
+	_, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	if !errors.Is(err, swd.ErrFault) {
+		t.Fatalf("ReadAP() error = %v, want %v", err, swd.ErrFault)
+	}
+	if target.attempts != 1 || target.executed[req] != 0 {
+		t.Fatalf("FAULTed request attempted %d times and executed %d times", target.attempts, target.executed[req])
+	}
+}
+
+func TestDebugPortKeepsFramingAfterWAITThenFAULT(t *testing.T) {
+	target := newWaitTarget()
+	target.AddMEMAP(0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := dap.NewMemAP(t.Context(), dp, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := swd.Request{AP: true, Read: true, Addr: 0x0c}
+	target.arm(req, 1)
+	target.fault = true
+	if _, err := dp.ReadAP(t.Context(), 0, dap.APIDR); !errors.Is(err, swd.ErrFault) {
+		t.Fatalf("ReadAP() error = %v, want %v", err, swd.ErrFault)
+	}
+	if target.attempts != 2 || target.executed[req] != 0 {
+		t.Fatalf("WAIT-to-FAULT request attempted %d times and executed %d times", target.attempts, target.executed[req])
+	}
+	if _, err := mem.ReadWord(t.Context(), 0xe000ed00); err != nil {
+		t.Fatalf("ReadWord() after clean FAULT: %v", err)
+	}
+	for _, value := range target.abortValues {
+		if value&1 != 0 {
+			t.Fatalf("ABORT writes = %#v, clean FAULT must not cause DAPABORT", target.abortValues)
+		}
+	}
+}
+
+func TestDebugPortPreservesWAITAndAbortFailure(t *testing.T) {
+	target := newWaitTarget()
+	target.AddAP(0, 0x24770011)
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	abortErr := errors.New("injected DAPABORT failure")
+	target.abortErr = abortErr
+	target.arm(swd.Request{AP: true, Read: true, Addr: 0x0c}, -1)
+	_, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	if !errors.Is(err, swd.ErrWait) || !errors.Is(err, abortErr) {
+		t.Fatalf("ReadAP() error = %v, want WAIT and abort failure", err)
+	}
+}
+
+func TestDebugPortDoesNotReplayAfterWAITCleanupFailure(t *testing.T) {
+	target := newWaitTarget()
+	target.AddMEMAP(0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
+	cleanupErr := errors.New("injected WAIT cleanup failure")
+	wire := &cleanupFailWire{inner: swdsim.New(target), err: cleanupErr}
+	conn := swd.New(wire)
+	if err := conn.JTAGToSWD(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	dp := dap.NewSWDP(conn)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := dap.NewMemAP(t.Context(), dp, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := swd.Request{AP: true, Read: true, Addr: 0x0c}
+	target.arm(req, 1)
+	wire.armed = true
+	_, err = dp.ReadAP(t.Context(), 0, dap.APIDR)
+	if !errors.Is(err, swd.ErrWait) || !errors.Is(err, cleanupErr) {
+		t.Fatalf("ReadAP() error = %v, want WAIT and cleanup failure", err)
+	}
+	if !strings.Contains(err.Error(), "AP state is unknown") {
+		t.Fatalf("ReadAP() error = %v, want unknown AP state", err)
+	}
+	if target.attempts != 1 || target.executed[req] != 0 {
+		t.Fatalf("request attempted %d times and executed %d times", target.attempts, target.executed[req])
+	}
+	for _, value := range target.abortValues {
+		if value&1 != 0 {
+			t.Fatalf("ABORT writes = %#v, DAPABORT is unsafe after incomplete cleanup", target.abortValues)
+		}
+	}
+	if _, err := mem.ReadWord(t.Context(), 0xe000ed00); err == nil || !strings.Contains(err.Error(), "invalidated") {
+		t.Fatalf("ReadWord() after incomplete WAIT cleanup error = %v", err)
+	}
+}
+
+func TestMEMAPReleaseReentersAfterDPWAITCleanupFailure(t *testing.T) {
+	target := newWaitTarget()
+	target.AddMEMAP(0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
+	cleanupErr := errors.New("injected WAIT cleanup failure")
+	wire := &cleanupFailWire{inner: swdsim.New(target), err: cleanupErr}
+	conn := swd.New(wire)
+	if err := conn.JTAGToSWD(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	dp := dap.NewSWDP(conn)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := dap.NewMemAP(t.Context(), dp, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mem.ReadWord(t.Context(), 0xe000ed00); err != nil {
+		t.Fatal(err)
+	}
+
+	req := swd.Request{Addr: uint8(dap.SELECT)}
+	target.arm(req, 1)
+	wire.armed = true
+	_, err = dp.ReadAP(t.Context(), 0, dap.APIDR)
+	if !errors.Is(err, swd.ErrWait) || !errors.Is(err, cleanupErr) {
+		t.Fatalf("ReadAP() error = %v, want WAIT and cleanup failure", err)
+	}
+	assertMEMAPInvalidated(t, mem)
+	reentryRequest := -1
+	wire.onReentry = func() { reentryRequest = len(target.requests) }
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := mem.Release(canceled); err != nil {
+		t.Fatalf("Release() after SWD framing loss: %v", err)
+	}
+	if wire.trafficBeforeReentry != 0 {
+		t.Fatalf("framed transfers before SWD re-entry = %d, want 0", wire.trafficBeforeReentry)
+	}
+	if wire.reentries != 1 {
+		t.Fatalf("SWD re-entry attempts during MEM-AP release = %d, want 1", wire.reentries)
+	}
+	if reentryRequest < 0 || reentryRequest >= len(target.requests) ||
+		target.requests[reentryRequest] != (swd.Request{Read: true, Addr: uint8(dap.DPIDR)}) {
+		t.Fatalf("request index after SWD re-entry = %d in %#v, want DPIDR read", reentryRequest, target.requests)
+	}
+	if reentryRequest+1 >= len(target.requests) ||
+		target.requests[reentryRequest+1] != (swd.Request{Addr: uint8(dap.ABORT)}) {
+		t.Fatalf("requests after SWD re-entry = %#v, want DPIDR then ABORT", target.requests[reentryRequest:])
+	}
+	assertMEMAPInvalidated(t, mem)
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if wire.reentries != 1 {
+		t.Fatalf("total SWD re-entry attempts = %d, want 1", wire.reentries)
+	}
+	if wire.trafficBeforeReentry != 0 {
+		t.Fatalf("framed transfers before SWD re-entry = %d, want 0", wire.trafficBeforeReentry)
+	}
+}
+
+func TestDebugPortInvalidatesAPStateWhenWAITRetryFails(t *testing.T) {
+	tests := []struct {
+		name string
+		req  swd.Request
+	}{
+		{name: "SELECT", req: swd.Request{Addr: uint8(dap.SELECT)}},
+		{name: "AP request", req: swd.Request{AP: true, Read: true, Addr: 0x0c}},
+		{name: "RDBUFF", req: swd.Request{Read: true, Addr: uint8(dap.RDBUFF)}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			target := newWaitTarget()
+			target.AddMEMAP(0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
+			dp := enteredDP(t, target)
+			if _, err := dp.Connect(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			mem, err := dap.NewMemAP(t.Context(), dp, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			retryErr := errors.New("injected retry I/O failure")
+			target.arm(test.req, -1)
+			target.retryErr = retryErr
+			_, err = dp.ReadAP(t.Context(), 0, dap.APIDR)
+			if !errors.Is(err, swd.ErrWait) || !errors.Is(err, retryErr) {
+				t.Fatalf("ReadAP() error = %v, want WAIT and retry I/O failure", err)
+			}
+			if !strings.Contains(err.Error(), "AP state is unknown") {
+				t.Fatalf("ReadAP() error = %v, want unknown AP state", err)
+			}
+			for _, value := range target.abortValues {
+				if value&1 != 0 {
+					t.Fatalf("ABORT writes = %#v, DAPABORT is unsafe after retry I/O failure", target.abortValues)
+				}
+			}
+			if _, err := mem.ReadWord(t.Context(), 0xe000ed00); err == nil || !strings.Contains(err.Error(), "invalidated") {
+				t.Fatalf("ReadWord() after retry I/O failure error = %v", err)
+			}
+		})
+	}
+}
+
+func TestDebugPortStopsRecoveryAfterStickyCleanupFailure(t *testing.T) {
+	target := newWaitTarget()
+	target.AddAP(0, 0x24770011)
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	cleanupErr := errors.New("injected sticky-clear failure")
+	target.clearErr = cleanupErr
+	target.stickyAfterAbort = testWriteDataError
+	target.executed[swd.Request{Addr: uint8(dap.SELECT)}] = 0
+	target.arm(swd.Request{AP: true, Read: true, Addr: 0x0c}, -1)
+	_, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	if !errors.Is(err, swd.ErrWait) || !errors.Is(err, cleanupErr) {
+		t.Fatalf("ReadAP() error = %v, want WAIT and sticky-clear failure", err)
+	}
+	selectReq := swd.Request{Addr: uint8(dap.SELECT)}
+	if target.executed[selectReq] != 1 {
+		t.Fatalf("SELECT writes = %d, want no write after sticky cleanup failure", target.executed[selectReq])
+	}
+}
+
+func TestDebugPortStopsRecoveryAfterStickyStateReadFailure(t *testing.T) {
+	target := newWaitTarget()
+	target.AddAP(0, 0x24770011)
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	readErr := errors.New("injected sticky-state read failure")
+	target.readErrAfterAbort = readErr
+	selectReq := swd.Request{Addr: uint8(dap.SELECT)}
+	target.executed[selectReq] = 0
+	target.arm(swd.Request{AP: true, Read: true, Addr: 0x0c}, -1)
+	_, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	if !errors.Is(err, swd.ErrWait) || !errors.Is(err, readErr) {
+		t.Fatalf("ReadAP() error = %v, want WAIT and sticky-state read failure", err)
+	}
+	if target.executed[selectReq] != 1 {
+		t.Fatalf("SELECT writes = %d, want no write after sticky-state read failure", target.executed[selectReq])
+	}
+}
+
+func TestConnectRollsBackAmbiguousPowerRequestWrite(t *testing.T) {
+	target := newWaitTarget()
+	conn := swd.New(swdsim.New(target))
+	if err := conn.JTAGToSWD(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	dp := dap.NewSWDP(conn)
+
+	req := swd.Request{Addr: uint8(dap.CTRLSTAT)}
+	writeErr := errors.New("injected accepted power-request write failure")
+	target.arm(req, 1)
+	target.writeErrFor = req
+	target.writeErr = writeErr
+	_, err := dp.Connect(t.Context())
+	if !errors.Is(err, swd.ErrWait) || !errors.Is(err, writeErr) {
+		t.Fatalf("Connect() error = %v, want WAIT and accepted write failure", err)
+	}
+	state, err := target.Read(t.Context(), swd.Request{Read: true, Addr: uint8(dap.CTRLSTAT)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state&(debugRequest|systemRequest) != 0 {
+		t.Fatalf("power requests after rollback = %#08x, want 0", state)
+	}
+}
+
+func TestDebugPortRetriesSELECTAfterDAPAbort(t *testing.T) {
+	target := newWaitTarget()
+	target.AddAP(0, 0x24770011)
+	target.selectWaits = 2
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	selectReq := swd.Request{Addr: uint8(dap.SELECT)}
+	target.executed[selectReq] = 0
+	target.arm(swd.Request{AP: true, Read: true, Addr: 0x0c}, -1)
+	_, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	if !errors.Is(err, swd.ErrWait) {
+		t.Fatalf("ReadAP() error = %v, want %v", err, swd.ErrWait)
+	}
+	if target.selectAttempts != 2 {
+		t.Fatalf("post-abort SELECT WAITs = %d, want 2", target.selectAttempts)
+	}
+	if target.executed[selectReq] != 2 {
+		t.Fatalf("SELECT writes = %d, want AP selection and post-abort restoration", target.executed[selectReq])
+	}
+}
+
+func TestDebugPortAbortsWAITAfterContextCancellation(t *testing.T) {
+	target := newWaitTarget()
+	target.AddAP(0, 0x24770011)
+	wire := &cleanupFailWire{inner: swdsim.New(target)}
+	conn := swd.New(wire)
+	if err := conn.JTAGToSWD(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	dp := dap.NewSWDP(conn)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	wire.cancel = cancel
+	target.arm(swd.Request{AP: true, Read: true, Addr: 0x0c}, -1)
+	wire.armed = true
+	_, err := dp.ReadAP(ctx, 0, dap.APIDR)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("ReadAP() error = %v, want context cancellation", err)
+	}
+	if len(target.abortValues) == 0 || target.abortValues[len(target.abortValues)-1] != 1 {
+		t.Fatalf("ABORT writes = %#v, want DAPABORT", target.abortValues)
+	}
+}
+
+func TestDAPAbortInvalidatesExistingMEMAP(t *testing.T) {
+	target := newWaitTarget()
+	target.AddMEMAP(0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := dap.NewMemAP(t.Context(), dp, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := mem.Release(context.Background()); err != nil {
+			t.Errorf("release MEM-AP: %v", err)
+		}
+		if err := dp.Release(context.Background()); err != nil {
+			t.Errorf("release SW-DP: %v", err)
+		}
+	})
+
+	target.arm(swd.Request{Read: true, Addr: uint8(dap.RDBUFF)}, -1)
+	if _, err := mem.ReadWord(t.Context(), 0xe000ed00); !errors.Is(err, swd.ErrWait) {
+		t.Fatalf("ReadWord() error = %v, want %v", err, swd.ErrWait)
+	}
+	_, err = mem.ReadWord(t.Context(), 0xe000ed00)
+	if err == nil || !strings.Contains(err.Error(), "invalidated") {
+		t.Fatalf("ReadWord() after DAP abort error = %v", err)
+	}
+	if err := mem.Release(t.Context()); err != nil {
+		t.Fatalf("Release() after DAP abort: %v", err)
+	}
+	assertMEMAPInvalidated(t, mem)
+}
+
+func assertMEMAPInvalidated(t *testing.T, mem *dap.MemAP) {
+	t.Helper()
+	_, err := mem.ReadWord(t.Context(), 0xe000ed00)
+	if err == nil || !strings.Contains(err.Error(), "invalidated") {
+		t.Fatalf("ReadWord() error = %v, want invalidated handle", err)
+	}
+}
+
+func TestMEMAPReleaseRearmsRestorationAfterDAPAbort(t *testing.T) {
+	target := newWaitTarget()
+	target.AddMEMAP(0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := dp.WriteAP(t.Context(), 0, dap.APCSW, 0xa5000051); err != nil {
+		t.Fatal(err)
+	}
+	if err := dp.WriteAP(t.Context(), 0, dap.APTAR, 0x20000000); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := dap.NewMemAP(t.Context(), dp, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mem.ReadWord(t.Context(), 0xe000ed00); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := mem.Release(context.Background()); err != nil {
+			t.Errorf("release MEM-AP: %v", err)
+		}
+		if err := dp.Release(context.Background()); err != nil {
+			t.Errorf("release SW-DP: %v", err)
+		}
+	})
+
+	tarReq := swd.Request{AP: true, Addr: uint8(dap.APTAR)}
+	before := target.executed[tarReq]
+	target.arm(swd.Request{AP: true, Addr: uint8(dap.APCSW)}, -1)
+	if err := mem.Release(t.Context()); !errors.Is(err, swd.ErrWait) {
+		t.Fatalf("Release() error = %v, want WAIT", err)
+	}
+	if err := mem.Release(t.Context()); err != nil {
+		t.Fatalf("retried Release(): %v", err)
+	}
+	if got := target.executed[tarReq] - before; got != 2 {
+		t.Fatalf("TAR restoration writes = %d, want 2", got)
+	}
+}

@@ -13,6 +13,7 @@ import (
 )
 
 const (
+	overrunDetect = uint32(1 << 0)
 	debugRequest  = uint32(1 << 28)
 	debugAck      = uint32(1 << 29)
 	systemRequest = uint32(1 << 30)
@@ -106,8 +107,22 @@ func TestConnectClearsStickyStateBeforeSelecting(t *testing.T) {
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
+	if len(target.abortValues) == 0 || target.abortValues[0] != 0x1e {
+		t.Fatalf("ABORT writes = %#v, want full-DP sticky clear 0x1e", target.abortValues)
+	}
 	if target.ackReads < 2 {
 		t.Fatalf("power acknowledgement was not polled: %d reads", target.ackReads)
+	}
+}
+
+func TestConnectDoesNotClearUnsupportedMinimalDPState(t *testing.T) {
+	target := &powerTarget{dpidr: 0x2ba11477, sticky: true}
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(target.abortValues) == 0 || target.abortValues[0] != 0x1c {
+		t.Fatalf("ABORT writes = %#v, want minimal-DP sticky clear 0x1c", target.abortValues)
 	}
 }
 
@@ -116,6 +131,49 @@ func TestConnectReadsIdentityBeforeConfiguration(t *testing.T) {
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestConnectRejectsEnabledOverrunDetectionBeforeConfiguration(t *testing.T) {
+	target := &powerTarget{
+		dpidr:  0x2ba01477,
+		ctrl:   overrunDetect,
+		dpBank: 1,
+	}
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err == nil {
+		t.Fatal("Connect() succeeded with ORUNDETECT enabled")
+	}
+	if len(target.selectValues) != 1 || target.selectValues[0] != 0 {
+		t.Fatalf("SELECT writes before rejecting ORUNDETECT = %#v, want bank zero", target.selectValues)
+	}
+	if len(target.abortValues) != 1 || target.abortValues[0] != 0x1e ||
+		target.ctrl != overrunDetect {
+		t.Fatalf("state before rejecting ORUNDETECT: ABORT=%#v CTRL/STAT=%#08x", target.abortValues, target.ctrl)
+	}
+}
+
+func TestWriteDPRejectsEnablingOverrunDetection(t *testing.T) {
+	target := &powerTarget{dpidr: 0x2ba01477}
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	state, err := dp.ReadDP(t.Context(), dap.CTRLSTAT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dp.WriteDP(t.Context(), dap.CTRLSTAT, state|overrunDetect); err == nil {
+		t.Fatal("WriteDP() accepted unsupported ORUNDETECT")
+	}
+	if target.ctrl&overrunDetect != 0 {
+		t.Fatalf("CTRL/STAT after rejected write = %#08x, want ORUNDETECT clear", target.ctrl)
+	}
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatalf("Release() after rejected write: %v", err)
+	}
+	if target.ctrl&allPower != 0 {
+		t.Fatalf("power state after release = %#08x, want 0", target.ctrl)
 	}
 }
 
@@ -140,14 +198,24 @@ func assertPower(t *testing.T, dp *dap.DebugPort, want uint32) {
 }
 
 type powerTarget struct {
-	dpidr       uint32
-	ctrl        uint32
-	identified  bool
-	sticky      bool
-	suppressAck bool
-	ackAfter    int
-	ackReads    int
-	failRelease bool
+	dpidr        uint32
+	ctrl         uint32
+	identified   bool
+	sticky       bool
+	suppressAck  bool
+	ackAfter     int
+	ackReads     int
+	failRelease  bool
+	abortValues  []uint32
+	selectValues []uint32
+	dpBank       uint32
+}
+
+func (t *powerTarget) Acknowledge(_ context.Context, req swd.Request) error {
+	if !req.AP && !req.Read && req.Addr == uint8(dap.SELECT) && t.sticky {
+		return swd.ErrFault
+	}
+	return nil
 }
 
 func (t *powerTarget) Read(_ context.Context, req swd.Request) (uint32, error) {
@@ -160,6 +228,9 @@ func (t *powerTarget) Read(_ context.Context, req swd.Request) (uint32, error) {
 		return t.dpidr, nil
 	case 4:
 		t.ackReads++
+		if t.dpBank != 0 {
+			return 0, nil
+		}
 		value := t.ctrl
 		if t.suppressAck || t.ackReads < t.ackAfter {
 			value &^= debugAck | systemAck
@@ -181,7 +252,8 @@ func (t *powerTarget) Write(_ context.Context, req swd.Request, value uint32) er
 	}
 	switch req.Addr {
 	case 0:
-		if value&0x1e == 0x1e {
+		t.abortValues = append(t.abortValues, value)
+		if value&0x1c == 0x1c {
 			t.sticky = false
 		}
 	case 4:
@@ -198,9 +270,8 @@ func (t *powerTarget) Write(_ context.Context, req swd.Request, value uint32) er
 			t.ctrl |= systemAck
 		}
 	case 8:
-		if t.sticky {
-			return errors.New("SELECT written before sticky state was cleared")
-		}
+		t.selectValues = append(t.selectValues, value)
+		t.dpBank = value & 0x0f
 	default:
 		return errors.New("unexpected DP write")
 	}

@@ -32,7 +32,8 @@ target, inspect a system, or provide a project-specific recovery utility.
 
 Ostiole is at an early, exploratory stage. The available packages provide
 native Linux and macOS USB access, an explicitly configured FTDI MPSSE path,
-and conservative Serial Wire Debug transactions without automatic retries.
+and conservative raw Serial Wire Debug transactions without automatic
+retries.
 
 The `swd/sim` package provides a hardware-free behavioral wire that models SWD
 protocol entry and basic DP/AP register transfers against a caller-supplied
@@ -43,9 +44,11 @@ SW-DP registers, and an explicit connection lifecycle. A connection clears
 sticky status, selects the base register bank, and restores only the power
 requests it acquired. Selected AP registers are read and written through their
 posted `RDBUFF` completion path. The simulator models the same DP and AP state
-changes. A minimal MEM-AP client and its model can read one aligned 32-bit
-target word without address incrementing, then restore the CSW and TAR values
-changed by that read.
+changes. `dap.DebugPort` retries only the physical request that returned WAIT.
+After an extended AP stall, it issues DAPABORT rather than replaying the whole
+logical access. A minimal MEM-AP client and its model can read one aligned
+32-bit target word without address incrementing, then restore the CSW and TAR
+values changed by that read.
 
 The [examples](examples) begin with a raw SWD debug-port identity read, then
 add posted access-port reads and a Cortex-M identity read through a MEM-AP.

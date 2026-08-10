@@ -77,8 +77,8 @@ up and released in reverse order.
 | `*usb.Device` | Owns one open attachment and at most one claimed interface. `Close` releases both. |
 | `*ftdi.Channel` | Takes ownership of the USB device passed to `ftdi.Open`. `Close` resets bit mode, sets the latency timer to 16 ms, purges the receive and transmit paths, releases the interface, and closes the device. It does not preserve prior FTDI settings. |
 | `*swd.Conn` | Represents one logical SWD transaction stream over its wire. It does not own a separate host resource. |
-| `*dap.DebugPort` | After `Connect`, owns only the debug and system power requests it added. `Release` clears those requests. |
-| `*dap.MemAP` | Saves the CSW and TAR values it changes. `Release` retries restoration that previously failed. |
+| `*dap.DebugPort` | After `Connect`, owns only the debug and system power requests it added. It records newly requested power bits as owned before writing them, so bounded rollback can attempt to clear them if the write's result is ambiguous. `Release` re-enters SWD first if framing is unknown, then clears owned requests. |
+| `*dap.MemAP` | Saves the CSW and TAR values it changes. `Release` retries failed restoration; if DAPABORT interrupts cleanup, the next `Release` retries both saved values. |
 
 An application that reaches the MEM-AP layer releases the MEM-AP before the
 debug port, then closes the FTDI channel. Cleanup errors remain meaningful and
@@ -93,15 +93,24 @@ The FTDI channel clocks direction-explicit bit streams. It does not interpret
 SWD requests. `swd.Conn` owns request framing, turnaround, acknowledgements,
 data parity, line reset, and the JTAG-to-SWD selection sequence.
 
-The current SWD transfer performs one transaction. A WAIT or FAULT
-acknowledgement is returned to the caller; there is no automatic retry policy.
-See [Serial Wire Debug](protocols/swd.md) for the wire protocol and current
-bench notes.
+The SWD transfer performs one physical transaction. A WAIT or FAULT
+acknowledgement is returned to its caller without retrying. See
+[Serial Wire Debug](protocols/swd.md) for the wire protocol and current bench
+notes.
 
-`dap.DebugPort` adds ADIv5 policy above SWD. It validates DPIDR, clears sticky
-state, establishes the base register bank, requests acknowledged debug and
-system power, and completes posted AP transactions through RDBUFF. `dap.MemAP`
-configures one access port for a single aligned 32-bit read.
+`dap.DebugPort` adds ADIv5 policy above SWD. It validates DPIDR, clears
+supported sticky conditions with ABORT, writes zero to SELECT once without
+retrying to establish DP bank zero, and rejects ORUNDETECT because the current
+SWD transfer does not implement that response grammar. It then requests
+acknowledged debug and system power, retries the exact physical request which
+returned WAIT, and completes posted AP transactions through RDBUFF. After an
+extended AP stall, `dap.DebugPort`
+issues DAPABORT and invalidates AP-derived state. If WAIT cleanup or a later
+retry fails, `dap.DebugPort` treats SWD framing as unknown, invalidates
+AP-derived state, and blocks later framed traffic. Cleanup re-enters SWD before
+sending another request. `dap.MemAP.Release` restores saved registers before
+`dap.DebugPort.Release` releases owned power. `dap.MemAP` configures one access
+port for a single aligned 32-bit read.
 See [Arm Debug Access Ports](ports/dap.md) for the ADIv5 register protocol and
 the awkward parts of posted and memory access.
 

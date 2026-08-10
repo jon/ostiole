@@ -28,7 +28,7 @@ func (dp *DebugPort) ReadAP(ctx context.Context, sel APSel, reg APReg) (uint32, 
 	if err := dp.selectAP(ctx, sel, reg); err != nil {
 		return 0, err
 	}
-	_, err := dp.conn.Transfer(ctx, swd.Request{
+	_, err := dp.transfer(ctx, swd.Request{
 		AP:   true,
 		Read: true,
 		Addr: uint8(reg) & 0x0c,
@@ -50,7 +50,7 @@ func (dp *DebugPort) WriteAP(ctx context.Context, sel APSel, reg APReg, value ui
 	if err := dp.selectAP(ctx, sel, reg); err != nil {
 		return err
 	}
-	_, err := dp.conn.Transfer(ctx, swd.Request{
+	_, err := dp.transfer(ctx, swd.Request{
 		AP:   true,
 		Addr: uint8(reg) & 0x0c,
 	}, value)
