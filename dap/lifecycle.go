@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	stickyClear = uint32(0x1e)
+	overrunDetect = uint32(1 << 0)
 
 	debugPowerRequest  = uint32(1 << 28)
 	debugPowerAck      = uint32(1 << 29)
@@ -29,27 +29,16 @@ func (dp *DebugPort) Connect(ctx context.Context) (DPIDRInfo, error) {
 	if dp.connected || dp.ownedPower != 0 {
 		return DPIDRInfo{}, errors.New("dap: SW-DP connection is already active")
 	}
-	raw, err := dp.ReadDP(ctx, DPIDR)
-	if err != nil {
-		return DPIDRInfo{}, err
-	}
-	info, err := DecodeDPIDR(raw)
-	if err != nil {
-		return DPIDRInfo{}, err
-	}
-	if err := dp.prepare(ctx); err != nil {
-		return DPIDRInfo{}, err
-	}
-	state, err := dp.ReadDP(ctx, CTRLSTAT)
+	info, state, err := dp.initialize(ctx)
 	if err != nil {
 		return DPIDRInfo{}, err
 	}
 	owned := powerRequests &^ state
 	if owned != 0 {
-		if err := dp.WriteDP(ctx, CTRLSTAT, state|powerRequests); err != nil {
-			return DPIDRInfo{}, err
-		}
 		dp.ownedPower = owned
+		if err := dp.WriteDP(ctx, CTRLSTAT, state|powerRequests); err != nil {
+			return DPIDRInfo{}, dp.rollback(err)
+		}
 	}
 	if err := dp.waitPower(ctx, powerAcks(powerRequests), true); err != nil {
 		return DPIDRInfo{}, dp.rollback(err)
@@ -60,11 +49,43 @@ func (dp *DebugPort) Connect(ctx context.Context) (DPIDRInfo, error) {
 	return info, nil
 }
 
-func (dp *DebugPort) prepare(ctx context.Context) error {
-	if err := dp.WriteDP(ctx, ABORT, stickyClear); err != nil {
-		return err
+func (dp *DebugPort) initialize(ctx context.Context) (DPIDRInfo, uint32, error) {
+	dp.overrunDisabled = false
+	info, err := dp.identify(ctx)
+	if err != nil {
+		return DPIDRInfo{}, 0, err
 	}
-	return dp.WriteDP(ctx, SELECT, 0)
+	dp.minimal = info.Minimal
+	if err := dp.WriteDP(ctx, ABORT, supportedStickyClear(info.Minimal)); err != nil {
+		return DPIDRInfo{}, 0, err
+	}
+	if err := dp.selectDPBankZero(ctx); err != nil {
+		return DPIDRInfo{}, 0, err
+	}
+	state, err := dp.readSimpleState(ctx)
+	if err != nil {
+		return DPIDRInfo{}, 0, err
+	}
+	return info, state, nil
+}
+
+func (dp *DebugPort) identify(ctx context.Context) (DPIDRInfo, error) {
+	raw, err := dp.ReadDP(ctx, DPIDR)
+	if err != nil {
+		return DPIDRInfo{}, err
+	}
+	return DecodeDPIDR(raw)
+}
+
+func (dp *DebugPort) readSimpleState(ctx context.Context) (uint32, error) {
+	state, err := dp.ReadDP(ctx, CTRLSTAT)
+	if err != nil {
+		return 0, err
+	}
+	if state&overrunDetect != 0 {
+		return 0, errors.New("dap: CTRL/STAT.ORUNDETECT is enabled; overrun responses are not supported")
+	}
+	return state, nil
 }
 
 func (dp *DebugPort) rollback(cause error) error {
@@ -73,7 +94,7 @@ func (dp *DebugPort) rollback(cause error) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if err := dp.conn.JTAGToSWD(ctx); err != nil {
+	if err := dp.reenter(ctx); err != nil {
 		return errors.Join(cause, fmt.Errorf("dap: restore SWD protocol state: %w", err))
 	}
 	if err := dp.releasePower(ctx); err != nil {
@@ -87,16 +108,58 @@ func (dp *DebugPort) Release(ctx context.Context) error {
 	if dp == nil || dp.conn == nil {
 		return nil
 	}
-	if !dp.connected && dp.ownedPower == 0 {
+	if !dp.connected && dp.ownedPower == 0 && !dp.framingLost {
 		return nil
 	}
-	if err := dp.WriteDP(ctx, SELECT, 0); err != nil {
+	releaseCtx := ctx
+	if dp.framingLost || !dp.overrunDisabled {
+		var cancel context.CancelFunc
+		releaseCtx, cancel = context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := dp.reenter(releaseCtx); err != nil {
+			return fmt.Errorf("dap: restore SWD protocol state for release: %w", err)
+		}
+	}
+	if err := dp.WriteDP(releaseCtx, SELECT, 0); err != nil {
 		return err
 	}
-	if err := dp.releasePower(ctx); err != nil {
+	if err := dp.releasePower(releaseCtx); err != nil {
 		return err
 	}
 	dp.connected = false
+	return nil
+}
+
+func (dp *DebugPort) reenter(ctx context.Context) error {
+	dp.dpBankKnown = false
+	if err := dp.conn.JTAGToSWD(ctx); err != nil {
+		dp.framingLost = true
+		return err
+	}
+	dp.framingLost = false
+	dp.overrunDisabled = false
+	info, err := dp.identify(ctx)
+	if err != nil {
+		dp.framingLost = true
+		return fmt.Errorf("dap: identify SW-DP after protocol entry: %w", err)
+	}
+	dp.minimal = info.Minimal
+	if err := dp.WriteDP(ctx, ABORT, supportedStickyClear(info.Minimal)); err != nil {
+		dp.framingLost = true
+		return fmt.Errorf("dap: clear sticky state after protocol entry: %w", err)
+	}
+	if err := dp.selectDPBankZero(ctx); err != nil {
+		return err
+	}
+	state, err := dp.ReadDP(ctx, CTRLSTAT)
+	if err != nil {
+		dp.framingLost = true
+		dp.dpBankKnown = false
+		return err
+	}
+	if state&overrunDetect != 0 {
+		return errors.New("dap: CTRL/STAT.ORUNDETECT is enabled; overrun responses are not supported")
+	}
 	return nil
 }
 

@@ -54,8 +54,18 @@ the specification details which are easiest to misread.
 
 Use `dap.DebugPort` when the application needs debug-port identity, power
 ownership, bank selection, or AP access. Call `Connect` before AP operations
-and `Release` afterward. This layer owns the posted AP read and write
-completion rules.
+and `Release` afterward. This layer owns posted AP read and write completion
+and retries only the physical request that returned WAIT. After an extended AP
+stall, `dap.DebugPort` issues DAPABORT; existing `dap.MemAP` values reject
+further reads, though `dap.MemAP.Release` still attempts to restore their saved
+state. `Connect` reads DPIDR, clears supported sticky conditions with ABORT,
+and writes zero to SELECT once without retrying to establish DP bank zero. It
+then reads CTRL/STAT and rejects ORUNDETECT because the current SWD transfer
+does not implement the overrun-detection response grammar. If WAIT cleanup or
+a later retry fails, `dap.DebugPort` treats SWD framing as unknown and
+invalidates those values. Later DP and AP calls stop before sending traffic.
+When framing is unknown, `dap.MemAP.Release` and
+`dap.DebugPort.Release` re-enter SWD before sending cleanup traffic.
 The [DAP guide](ports/dap.md) describes the ADIv5 register protocol behind
 that lifecycle.
 

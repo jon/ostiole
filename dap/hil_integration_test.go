@@ -13,6 +13,25 @@ import (
 	"github.com/jon/ostiole/usb"
 )
 
+type ackCountingWire struct {
+	inner  swd.Wire
+	counts [8]int
+}
+
+func (w *ackCountingWire) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
+	input, err := w.inner.SWDIO(ctx, direction, output, bits)
+	if err == nil && bits == 12 && len(input) >= 2 {
+		var ack byte
+		for bit := range 3 {
+			if input[(9+bit)/8]>>(uint(9+bit)%8)&1 != 0 {
+				ack |= 1 << uint(bit)
+			}
+		}
+		w.counts[ack]++
+	}
+	return input, err
+}
+
 func openHardwareDebugPort(t *testing.T, ctx context.Context) *dap.DebugPort {
 	t.Helper()
 	if os.Getenv("OSTIOLE_FTDI_HIL") != "1" {
@@ -46,9 +65,20 @@ func openHardwareDebugPort(t *testing.T, ctx context.Context) *dap.DebugPort {
 		}
 	})
 
-	conn := swd.New(ch)
+	wire := &ackCountingWire{inner: ch}
+	conn := swd.New(wire)
 	if err := conn.JTAGToSWD(ctx); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		invalid := 0
+		for ack, count := range wire.counts {
+			if ack != 0b001 && ack != 0b010 && ack != 0b100 {
+				invalid += count
+			}
+		}
+		t.Logf("physical ACKs: OK=%d WAIT=%d FAULT=%d invalid=%d",
+			wire.counts[0b001], wire.counts[0b010], wire.counts[0b100], invalid)
+	})
 	return dap.NewSWDP(conn)
 }

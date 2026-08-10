@@ -7,12 +7,12 @@ Ports (APs). The surprising parts are the posted AP pipeline, power
 handshakes, and the amount of state a supposedly read-only memory inspection
 can disturb.
 
-The ADIv5 specification is Arm
-[IHI 0031H, _Arm Debug Interface Architecture Specification ADIv5.0 to
-ADIv5.2_](https://developer.arm.com/documentation/ihi0031/h). Chapters B2, B4,
-C1, and C2 are the programmer's model. This note keeps only the traps worth
-having close at hand and one hardware observation. “DAP” here means Arm Debug
-Access Port, not Microsoft's Debug Adapter Protocol.
+Arm [IHI 0031H, _Arm Debug Interface Architecture Specification ADIv5.0 to
+ADIv5.2_](https://developer.arm.com/documentation/ihi0031/h) is the normative
+ADIv5 specification. Use chapters B2, B4, C1, and C2 for the programmer's
+model and requirements. This note keeps only the traps worth having close at
+hand and one hardware observation. “DAP” here means Arm Debug Access Port, not
+Microsoft's Debug Adapter Protocol.
 
 ## The SW-DP register window
 
@@ -63,11 +63,32 @@ it says that the power controller accepted the request to remove power. It
 does not prove that the domain is now off. Another requester may be keeping it
 alive.
 
-ABORT at DP offset `0x00` clears sticky conditions. Writing `0x1e` clears
-STICKYCMP, STICKYERR, WDATAERR, and STICKYORUN without setting bit 0,
-DAPABORT. Arm reserves DAPABORT for an AP transaction which has returned WAIT
-for an extended period. Clearing all five bits with `0x1f` is not an
-equivalent tidying operation.
+Record newly requested power bits as owned before writing them. If the write
+then fails, the host cannot know whether the DP applied those bits. Bounded
+rollback can attempt to re-enter SWD and clear only the bits which were absent
+before acquisition.
+
+Read CTRL/STAT before the first request which can stall. If ORUNDETECT is
+already set, WAIT and FAULT have the overrun-detection data phase; the simpler
+response grammar is no longer safe. Do not set ORUNDETECT unless the SWD
+transport implements that response grammar. There is an annoying bootstrap
+problem: CTRL/STAT shares offset `0x04` with other DP banks, and a line reset
+does not reset every DP register. After inheriting unknown DP state, read
+DPIDR, clear the supported sticky conditions with ABORT, write zero to SELECT
+once without retrying, then read CTRL/STAT at `0x04`. ABORT is bank-independent
+and cannot return WAIT or FAULT; doing it first keeps inherited sticky state
+from faulting SELECT. If SELECT returns WAIT or FAULT, the simpler grammar
+cannot safely replay it because ORUNDETECT is not known yet. Re-enter SWD
+before trying the bootstrap again. Once another DP bank is selected, a read at
+`0x04` is no longer CTRL/STAT and may legitimately return WAIT.
+
+ABORT at DP offset `0x00` clears sticky conditions. On a full DP, writing
+`0x1e` clears STICKYCMP, STICKYERR, WDATAERR, and STICKYORUN without setting
+bit 0, DAPABORT. A Minimal DP does not implement pushed-compare operations;
+its STKCMPCLR bit is reserved and the corresponding clear mask is `0x1c`.
+Arm reserves DAPABORT for an AP transaction which has returned WAIT for an
+extended period. Clearing all five bits with `0x1f` is not an equivalent
+tidying operation.
 
 ## Posted AP transactions
 
@@ -94,6 +115,54 @@ operation which the DP is allowed to stall, drains the write buffer. DPIDR and
 CTRL/STAT reads and ABORT writes are exceptions: the DP must not stall them,
 and using one too early can abandon buffered writes and set WDATAERR. A
 RDBUFF read is therefore a useful completion barrier after AP writes.
+
+WAIT applies to the physical request which received it. If SELECT returns
+WAIT, repeat SELECT. If the AP request returns WAIT, repeat that AP request.
+Once the AP request returns OK, however, it has been accepted. If the following
+RDBUFF read returns WAIT, repeat RDBUFF; repeating the AP request would start
+the access twice. The same distinction matters for writes even when writing
+the same value twice happens to look harmless.
+
+That replay rule assumes that each WAIT response finished cleanly. If the wire
+fails during the following turnaround, the host no longer knows whether the DP
+reached the next request header. If a later retry fails, the host might also
+not know whether the AP access was accepted. DAPABORT is itself a normally
+framed DP write, so it cannot repair unknown SWD framing. Abandon AP-derived
+state and re-establish SWD before sending more requests.
+
+“More requests” includes cleanup. Restoring AP registers or releasing power
+still uses ordinary framed DP and AP traffic. Re-enter SWD first, or stop
+cleanup before it sends a packet header.
+
+After an AP transaction has returned WAIT for an extended period, DAPABORT
+discards the outstanding AP transaction and any pending read result. The AP's
+state is then UNPREDICTABLE. DAPABORT does not clear the sticky flags, and an
+abandoned buffered write can leave WDATAERR behind. The host must clear
+supported sticky flags separately. Once recovery reaches DAPABORT, the
+interrupted AP operation has no safe high-level replay point.
+
+DAPABORT makes the whole AP state unpredictable, including registers already
+restored during cleanup. If it interrupts restoration, retry every saved AP
+register, not just the one that returned WAIT.
+
+Re-entering SWD repairs the request boundary; it does not repair AP state.
+Restore saved AP registers before releasing debug power or disconnecting.
+Successful cleanup does not make an invalidated AP handle usable again.
+
+Post-abort repair is ordered traffic, not a best-effort checklist. If the
+CTRL/STAT read or sticky-clear write fails, SWD framing might be unknown; do
+not follow it with SELECT. Re-establish framing before sending another
+request.
+
+FAULT is different again. It reports sticky state and must not be replayed as
+if it were WAIT. CTRL/STAT identifies the recorded conditions; an ABORT write
+clears the supported ones. WDATAERR describes a write which the DP abandoned,
+while STICKYERR records an error reported by an AP. They are not interchangeable
+names for the same failure.
+
+A complete FAULT response after one or more WAITs still ends at a request
+boundary. Return FAULT; the preceding WAITs do not justify DAPABORT or framing
+invalidation.
 
 ## MEM-AP
 
@@ -137,6 +206,12 @@ AP0's IDR has class `0b1000`, identifying an ADIv5 MEM-AP. The run read CPUID
 through CSW, TAR, and DRW, then verified that the saved CSW and TAR values were
 restored. The debug and system power-request bits were zero both before and
 after the connection.
+
+The DAP test harness counted 85 OK acknowledgements and no WAIT, FAULT, or
+invalid acknowledgements. The USB round trip between single transfers likely
+gave this target ample time to finish ordinary AP work. The absence of WAIT
+here is a bench observation, not evidence that replay and abort recovery are
+correct.
 
 That is enough to identify one working DP/AP/MEM-AP path. It says nothing yet
 about sparse APs, delayed power acknowledgements, physical WAIT or FAULT

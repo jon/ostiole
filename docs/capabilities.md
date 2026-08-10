@@ -59,7 +59,7 @@ wires its MPSSE port for debugging.
 | DP and AP requests | Yes | One request at a time with header, turnaround, data, and idle cycles. |
 | ACK classification | Yes | OK, WAIT, FAULT, and invalid acknowledgements are distinguished. |
 | Read parity | Yes | Invalid read parity is reported. |
-| Automatic retries | No | WAIT and FAULT return directly to the caller. |
+| Automatic retries | No | A raw `swd.Conn` transfer returns WAIT and FAULT directly; retry policy belongs to DAP. |
 | Batching or pipelining | No | Each call executes one complete transaction. |
 | Multidrop or dormant state | No | The public connection models one entered SWD target. |
 | Behavioral simulation | Yes | Protocol entry, DP/AP register transfers, and request-phase WAIT or FAULT injection. |
@@ -75,14 +75,16 @@ specification notes, and current physical observation.
 | Capability | Implemented | Validation and boundary |
 | --- | --- | --- |
 | DPIDR decoding | Yes | Validates the constant bit and exposes raw identity fields. |
-| SW-DP connection | Yes | Clears sticky state, selects bank zero, requests acknowledged power, and records ownership. |
-| SW-DP release | Yes | Clears only power requests acquired by the connection; failed release can be retried. |
-| Raw DP access | Yes | Reads and writes the currently addressed DP registers over SWD. |
+| SW-DP connection | Yes | `Connect` reads DPIDR, clears supported sticky conditions with ABORT, writes zero to SELECT once without retrying, then reads CTRL/STAT and rejects ORUNDETECT. It requests acknowledged power, records newly requested power bits as owned before writing them, and attempts bounded rollback if the write's result is ambiguous. |
+| SW-DP release | Yes | Clears only power requests acquired by the connection. If framing is unknown, `Release` first performs bounded SWD re-entry; failed release can be retried. |
+| Raw DP access | Yes | Reads and writes the currently addressed DP registers over SWD. It tracks DPBANKSEL because only a bank-zero read at `0x04` is the non-stallable CTRL/STAT access. |
 | Selected AP access | Yes | Explicit `APSel`, bank selection, posted reads through RDBUFF, and completed writes. |
+| WAIT handling | Yes | Retries only the physical request which returned WAIT, and only after confirming ORUNDETECT is clear. A clean FAULT ends retrying without losing framing. Extended AP stalls use DAPABORT. Failed WAIT cleanup or a later retry error leaves framing unknown, invalidates AP-derived state, and blocks later framed traffic until re-entry. |
+| FAULT recovery | No | FAULT is returned without replay; typed sticky-state reporting and cleanup are not implemented. |
 | AP enumeration | No | Callers must select an access port explicitly. |
 | MEM-AP validation | Yes | Rejects an absent AP or an AP whose IDR is not a MEM-AP. |
 | Target word read | Yes | One aligned 32-bit word with address increment disabled. |
-| MEM-AP restoration | Yes | Saves and restores CSW and TAR; failed restoration remains retryable. |
+| MEM-AP restoration | Yes | Saves and restores CSW and TAR; failed restoration remains retryable. If framing is unknown, `Release` re-enters SWD before restoration. If DAPABORT interrupts cleanup, the next `Release` retries both saved values. The invalidated handle remains invalid. |
 | Target-memory writes | No | No public MEM-AP write operation exists. |
 | Block or sub-word access | No | No burst, auto-increment, 8-bit, or 16-bit operation exists. |
 | ADIv6 or JTAG-DP | No | The public implementation is the current minimal ADIv5 SW-DP path. |

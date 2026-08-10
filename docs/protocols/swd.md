@@ -4,13 +4,13 @@ Serial Wire Debug (SWD) uses one clock and one bidirectional data signal. The
 packet format is small; most of the trouble is knowing who owns SWDIO on each
 clock and remembering that everything goes least-significant bit first.
 
-The specification is Arm
-[IHI 0031H, _Arm Debug Interface Architecture Specification ADIv5.0 to
-ADIv5.2_](https://developer.arm.com/documentation/ihi0031/h). Use chapter B4
-and section B5.2 for the protocol definition. This note is limited to details
-which are easy to misread and observations from hardware. It covers the
-point-to-point protocol, not SWD protocol version 2 target selection,
-multidrop, or dormant-state entry.
+Arm [IHI 0031H, _Arm Debug Interface Architecture Specification ADIv5.0 to
+ADIv5.2_](https://developer.arm.com/documentation/ihi0031/h) is the normative
+SWD specification. Use chapter B4 and section B5.2 for the protocol definition;
+this note is not a substitute for them. It is limited to details which are easy
+to misread and observations from hardware. It covers the point-to-point
+protocol, not SWD protocol version 2 target selection, multidrop, or
+dormant-state entry.
 
 ## A transfer
 
@@ -58,16 +58,53 @@ request immediately is also valid.
 
 ## WAIT, FAULT, and overrun detection
 
-WAIT means that the request was not accepted and can normally be tried again.
-FAULT means that a sticky error has been recorded. An acknowledgement other
-than OK, WAIT, or FAULT is a protocol error, not a fourth response code.
+WAIT means that the request was not accepted. IHI 0031H requires the host to
+repeat the same request; it does not license replaying some larger operation
+which happens to contain it. The WAIT response still includes its specified
+turnaround. The host may repeat the request immediately; IHI 0031H does not
+require a separate retry delay. A DPIDR read, a bank-zero CTRL/STAT read, and
+an ABORT write are the three exceptions which must complete without WAIT or
+FAULT. A read from offset `0x04` in another DP bank may return WAIT or FAULT.
+
+Immediate replay assumes that the host completed the WAIT response and the
+target is waiting for another packet header. If the wire fails while clocking
+the trailing turnaround, that request boundary is no longer known. DAPABORT is
+an ordinary framed request, not an escape sequence; it is unsafe until the host
+has re-established SWD framing.
+
+FAULT means that a sticky error has been recorded. It is not a transient
+response to retry. An acknowledgement other than OK, WAIT, or FAULT is a
+protocol error, not a fourth response code.
+
+Once ORUNDETECT is known to be clear, a complete FAULT response after one or
+more WAITs still ends at a request boundary. Return FAULT without DAPABORT;
+the earlier WAITs do not make it a framing error.
 
 There is one important change when `CTRL/STAT.ORUNDETECT` is set. With overrun
 detection disabled, WAIT and FAULT end after the acknowledgement and trailing
 turnaround. With it enabled, every response has a data phase, including WAIT
 and FAULT. A host cannot turn on ORUNDETECT as a register-level feature and
 keep using the simpler transfer grammar; it will lose alignment on the first
-non-OK response.
+non-OK response. A host using that grammar must therefore reject any CTRL/STAT
+write that sets ORUNDETECT.
+
+A host using the simpler grammar must establish that ORUNDETECT is clear
+before it starts replaying requests which return WAIT. CTRL/STAT reads cannot
+return WAIT or FAULT, but offset `0x04` names CTRL/STAT only while
+`SELECT.DPBANKSEL` is zero. A host which inherits unknown DP state cannot
+simply read `0x04` and trust bit zero.
+
+One workable bootstrap is to read DPIDR, clear the supported sticky conditions
+with ABORT, write zero to SELECT once without retrying, then read CTRL/STAT.
+ABORT is bank-independent and cannot return WAIT or FAULT; clearing sticky
+state first prevents an inherited error from faulting SELECT. An OK response
+to the SELECT write has the normal write data phase with either response
+grammar, so bank zero is known before `0x04` is interpreted. A WAIT or FAULT
+at that point is not safe to replay with the simpler grammar: ORUNDETECT might
+be set, in which case the response has a data phase the host has not consumed.
+Checking ORUNDETECT only after retrying SELECT is too late. Re-enter SWD before
+trying the bootstrap again; treating the rejected SELECT as an ordinary retry
+would assume the response grammar which the bootstrap is meant to establish.
 
 The specification says to retry read data after a parity error. That advice is
 less mechanical for an AP read because AP reads are posted: by the time parity
@@ -143,6 +180,12 @@ persistent adapter state. This was a host-level end-to-end test, not a logic
 analyzer capture. It establishes that this adapter and target completed the
 transactions; it does not establish the physical turnaround margin or show a
 real WAIT, FAULT, or parity-error waveform.
+
+The DAP integration harness counted the acknowledgement for each physical
+request in its four hardware tests: 85 OK, no WAIT, no FAULT, and no invalid
+acknowledgements. The counter did not include the separate raw DPIDR test.
+Ordinary traffic on this target therefore did not exercise WAIT or abort
+recovery.
 
 Measuring turnaround requires a capture of SWCLK, SWDIO, and the FTDI
 direction pin. Exercising WAIT, FAULT, and bad parity requires a controllable
