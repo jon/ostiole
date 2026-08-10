@@ -67,6 +67,8 @@ wires its MPSSE port for debugging.
 
 The public `swd.Wire` boundary permits another wire implementation, but FTDI
 is the only physical implementation currently provided.
+The [Serial Wire Debug guide](protocols/swd.md) gives the bit-level protocol,
+specification notes, and current physical observation.
 
 ## Debug Access Port and MEM-AP
 
@@ -91,6 +93,8 @@ Connecting and reading a MEM-AP changes volatile debug state even though it
 does not write target memory. Applications must release the MEM-AP before the
 debug port so CSW and TAR are restored, bank selection returns to zero, and
 acquired power is released.
+The [Arm Debug Access Port guide](ports/dap.md) describes ADIv5 register
+access, posted transactions, power handshakes, and the current bench result.
 
 ## Cortex-M target operations
 
