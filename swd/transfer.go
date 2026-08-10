@@ -2,6 +2,7 @@ package swd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -55,7 +56,7 @@ func (c *Conn) finishFailed(ctx context.Context, ackErr error) error {
 	finish.appendN(c.turnaround, false, false)
 	finish.appendN(c.idleCycles, true, false)
 	if _, err := c.exchange(ctx, finish); err != nil {
-		return err
+		return errors.Join(ackErr, err)
 	}
 	return ackErr
 }

@@ -62,7 +62,7 @@ wires its MPSSE port for debugging.
 | Automatic retries | No | WAIT and FAULT return directly to the caller. |
 | Batching or pipelining | No | Each call executes one complete transaction. |
 | Multidrop or dormant state | No | The public connection models one entered SWD target. |
-| Behavioral simulation | Yes | Protocol entry and basic DP/AP register transfers. |
+| Behavioral simulation | Yes | Protocol entry, DP/AP register transfers, and request-phase WAIT or FAULT injection. |
 | Physical DPIDR read | HIL | Opt-in FTDI test and trivial example on Linux and macOS. |
 
 The public `swd.Wire` boundary permits another wire implementation, but FTDI

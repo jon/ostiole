@@ -15,11 +15,19 @@ type Target interface {
 	Write(context.Context, swd.Request, uint32) error
 }
 
+// Acknowledger lets a target choose the acknowledgement before a request's
+// data phase. Returning swd.ErrWait or swd.ErrFault emits that acknowledgement
+// without executing the target read or write.
+type Acknowledger interface {
+	Acknowledge(context.Context, swd.Request) error
+}
+
 // Wire validates SWD traffic without physical hardware.
 type Wire struct {
-	target  Target
-	active  bool
-	pending *swd.Request
+	target     Target
+	active     bool
+	pending    *swd.Request
+	pendingACK byte
 }
 
 // New returns a fresh wire backed by target.
@@ -55,12 +63,12 @@ func (w *Wire) SWDIO(ctx context.Context, direction, output []byte, bits int) ([
 		return nil, errors.New("swd/sim: protocol entry is required")
 	}
 	if w.pending == nil {
-		return w.request(direction, output, bits)
+		return w.request(ctx, direction, output, bits)
 	}
 	return w.data(ctx, direction, output, bits)
 }
 
-func (w *Wire) request(direction, output []byte, bits int) ([]byte, error) {
+func (w *Wire) request(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
 	if bits != 12 ||
 		!allBits(direction, 0, 8, true) ||
 		!allBits(direction, 8, 4, false) {
@@ -73,19 +81,55 @@ func (w *Wire) request(direction, output []byte, bits int) ([]byte, error) {
 	if w.target == nil {
 		return nil, errors.New("swd/sim: no target is configured")
 	}
+	ack, err := acknowledge(ctx, w.target, req)
+	if err != nil {
+		return nil, err
+	}
 	w.pending = &req
+	w.pendingACK = ack
 	input := make([]byte, 2)
-	setBit(input, 9, true)
+	for bit := range 3 {
+		setBit(input, 9+bit, ack>>uint(bit)&1 != 0)
+	}
 	return input, nil
 }
 
 func (w *Wire) data(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
 	req := *w.pending
 	w.pending = nil
+	if w.pendingACK != 0b001 {
+		return failedACK(direction, output, bits)
+	}
 	if req.Read {
 		return w.read(ctx, direction, bits, req)
 	}
 	return w.write(ctx, direction, output, bits, req)
+}
+
+func acknowledge(ctx context.Context, target Target, req swd.Request) (byte, error) {
+	a, ok := target.(Acknowledger)
+	if !ok {
+		return 0b001, nil
+	}
+	err := a.Acknowledge(ctx, req)
+	switch {
+	case err == nil:
+		return 0b001, nil
+	case errors.Is(err, swd.ErrFault):
+		return 0b100, nil
+	case errors.Is(err, swd.ErrWait):
+		return 0b010, nil
+	default:
+		return 0, err
+	}
+}
+
+func failedACK(direction, output []byte, bits int) ([]byte, error) {
+	if bits != 9 || bitAt(direction, 0) ||
+		!allBits(direction, 1, 8, true) || !allBits(output, 1, 8, false) {
+		return nil, errors.New("swd/sim: invalid transfer cleanup after WAIT or FAULT")
+	}
+	return make([]byte, 2), nil
 }
 
 func (w *Wire) read(ctx context.Context, direction []byte, bits int, req swd.Request) ([]byte, error) {

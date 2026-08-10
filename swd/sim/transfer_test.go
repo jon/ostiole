@@ -2,6 +2,7 @@ package sim_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -21,6 +22,88 @@ func (t *registerTarget) Read(_ context.Context, req swd.Request) (uint32, error
 func (t *registerTarget) Write(_ context.Context, req swd.Request, value uint32) error {
 	t.writes[req] = value
 	return nil
+}
+
+type acknowledgingTarget struct {
+	ack       error
+	readValue uint32
+	reads     int
+	writes    int
+}
+
+func (t *acknowledgingTarget) Acknowledge(context.Context, swd.Request) error {
+	return t.ack
+}
+
+func (t *acknowledgingTarget) Read(context.Context, swd.Request) (uint32, error) {
+	t.reads++
+	return t.readValue, nil
+}
+
+func (t *acknowledgingTarget) Write(context.Context, swd.Request, uint32) error {
+	t.writes++
+	return nil
+}
+
+func TestWireReturnsAcknowledgementBeforeExecutingTransfer(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "WAIT", err: swd.ErrWait},
+		{name: "FAULT", err: swd.ErrFault},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			target := &acknowledgingTarget{ack: test.err, readValue: 0x2ba01477}
+			wire := sim.New(target)
+			conn := swd.New(wire)
+			if err := conn.JTAGToSWD(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := conn.Transfer(t.Context(), swd.Request{Read: true}, 0)
+			if !errors.Is(err, test.err) {
+				t.Fatalf("Transfer() error = %v, want %v", err, test.err)
+			}
+			if target.reads != 0 {
+				t.Fatalf("target reads = %d, want 0", target.reads)
+			}
+
+			target.ack = nil
+			value, err := conn.Transfer(t.Context(), swd.Request{Read: true}, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if value != target.readValue || target.reads != 1 {
+				t.Fatalf("read = %#08x after %d target reads", value, target.reads)
+			}
+		})
+	}
+}
+
+func TestWireDoesNotExecuteWAITedWrite(t *testing.T) {
+	target := &acknowledgingTarget{ack: swd.ErrWait}
+	wire := sim.New(target)
+	conn := swd.New(wire)
+	if err := conn.JTAGToSWD(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	req := swd.Request{AP: true, Addr: 0x0c}
+
+	if _, err := conn.Transfer(t.Context(), req, 0x12345678); !errors.Is(err, swd.ErrWait) {
+		t.Fatalf("Transfer() error = %v, want %v", err, swd.ErrWait)
+	}
+	if target.writes != 0 {
+		t.Fatalf("target writes = %d, want 0", target.writes)
+	}
+	target.ack = nil
+	if _, err := conn.Transfer(t.Context(), req, 0x12345678); err != nil {
+		t.Fatal(err)
+	}
+	if target.writes != 1 {
+		t.Fatalf("target writes = %d, want 1", target.writes)
+	}
 }
 
 func TestWireExecutesRegisterTransfers(t *testing.T) {

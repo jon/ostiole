@@ -13,6 +13,7 @@ type targetWire struct {
 	request       Request
 	written       uint32
 	calls         int
+	cleanupErr    error
 }
 
 func (w *targetWire) SWDIO(_ context.Context, direction, output []byte, bits int) ([]byte, error) {
@@ -55,6 +56,9 @@ func (w *targetWire) dataPhase(direction, output []byte, bits int) ([]byte, erro
 	if w.ack != 0b001 {
 		if bits != 9 || !allTestBits(direction, 1, 9, true) {
 			return nil, errors.New("invalid failed-ACK cleanup")
+		}
+		if w.cleanupErr != nil {
+			return nil, w.cleanupErr
 		}
 		return make([]byte, (bits+7)/8), nil
 	}
@@ -132,6 +136,15 @@ func TestTransferClassifiesAcknowledgements(t *testing.T) {
 		if !errors.Is(err, test.want) {
 			t.Fatalf("ACK %03b error = %v", test.ack, err)
 		}
+	}
+}
+
+func TestTransferPreservesAcknowledgementWhenCleanupFails(t *testing.T) {
+	cleanupErr := errors.New("injected cleanup failure")
+	w := &targetWire{ack: 0b010, cleanupErr: cleanupErr}
+	_, err := New(w).Transfer(t.Context(), Request{Read: true}, 0)
+	if !errors.Is(err, ErrWait) || !errors.Is(err, cleanupErr) {
+		t.Fatalf("Transfer() error = %v, want WAIT and cleanup failure", err)
 	}
 }
 
