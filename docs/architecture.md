@@ -95,11 +95,15 @@ data parity, line reset, and the JTAG-to-SWD selection sequence.
 
 The current SWD transfer performs one transaction. A WAIT or FAULT
 acknowledgement is returned to the caller; there is no automatic retry policy.
+See [Serial Wire Debug](protocols/swd.md) for the wire protocol and current
+bench notes.
 
 `dap.DebugPort` adds ADIv5 policy above SWD. It validates DPIDR, clears sticky
 state, establishes the base register bank, requests acknowledged debug and
 system power, and completes posted AP transactions through RDBUFF. `dap.MemAP`
 configures one access port for a single aligned 32-bit read.
+See [Arm Debug Access Ports](ports/dap.md) for the ADIv5 register protocol and
+the awkward parts of posted and memory access.
 
 `target/cortexm` depends only on a compatible word reader. It knows the CPUID
 address and encoding, but it does not know about USB, FTDI, or SWD.

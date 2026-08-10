@@ -49,11 +49,15 @@ closing the device.
 Use `swd.Conn` when the application needs one explicit wire-protocol
 transaction or is bringing up an SWD path. It returns WAIT, FAULT, parity, and
 protocol errors directly and does not retry them.
+The [SWD protocol guide](protocols/swd.md) describes the wire transaction and
+the specification details which are easiest to misread.
 
 Use `dap.DebugPort` when the application needs debug-port identity, power
 ownership, bank selection, or AP access. Call `Connect` before AP operations
 and `Release` afterward. This layer owns the posted AP read and write
 completion rules.
+The [DAP guide](ports/dap.md) describes the ADIv5 register protocol behind
+that lifecycle.
 
 Use `dap.MemAP` when the application needs the currently supported target
 memory operation: one aligned 32-bit read through an explicitly selected
