@@ -26,7 +26,7 @@ func (dp *DebugPort) Connect(ctx context.Context) (DPIDRInfo, error) {
 	if dp == nil || dp.conn == nil {
 		return DPIDRInfo{}, errors.New("dap: nil SWD connection")
 	}
-	if dp.connected || dp.ownedPower != 0 {
+	if dp.state.session == sessionConnected || dp.state.ownedPower != 0 {
 		return DPIDRInfo{}, errors.New("dap: SW-DP connection is already active")
 	}
 	info, state, err := dp.initialize(ctx)
@@ -35,7 +35,7 @@ func (dp *DebugPort) Connect(ctx context.Context) (DPIDRInfo, error) {
 	}
 	owned := powerRequests &^ state
 	if owned != 0 {
-		dp.ownedPower = owned
+		dp.state.ownPower(owned)
 		if err := dp.WriteDP(ctx, CTRLSTAT, state|powerRequests); err != nil {
 			return DPIDRInfo{}, dp.rollback(err)
 		}
@@ -45,17 +45,16 @@ func (dp *DebugPort) Connect(ctx context.Context) (DPIDRInfo, error) {
 	}
 	dp.identity = info
 	dp.identified = true
-	dp.connected = true
+	dp.state.completeConnect()
 	return info, nil
 }
 
 func (dp *DebugPort) initialize(ctx context.Context) (DPIDRInfo, uint32, error) {
-	dp.overrunDisabled = false
+	dp.state.forgetResponse()
 	info, err := dp.identify(ctx)
 	if err != nil {
 		return DPIDRInfo{}, 0, err
 	}
-	dp.minimal = info.Minimal
 	if err := dp.WriteDP(ctx, ABORT, supportedStickyClear(info.Minimal)); err != nil {
 		return DPIDRInfo{}, 0, err
 	}
@@ -89,7 +88,7 @@ func (dp *DebugPort) readSimpleState(ctx context.Context) (uint32, error) {
 }
 
 func (dp *DebugPort) rollback(cause error) error {
-	if dp.ownedPower == 0 {
+	if dp.state.ownedPower == 0 {
 		return cause
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -108,11 +107,11 @@ func (dp *DebugPort) Release(ctx context.Context) error {
 	if dp == nil || dp.conn == nil {
 		return nil
 	}
-	if !dp.connected && dp.ownedPower == 0 && !dp.framingLost {
+	if dp.state.session != sessionConnected && dp.state.ownedPower == 0 && dp.state.response != responseLost {
 		return nil
 	}
 	releaseCtx := ctx
-	if dp.framingLost || !dp.overrunDisabled {
+	if dp.state.response != responseSimple {
 		var cancel context.CancelFunc
 		releaseCtx, cancel = context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -126,26 +125,23 @@ func (dp *DebugPort) Release(ctx context.Context) error {
 	if err := dp.releasePower(releaseCtx); err != nil {
 		return err
 	}
-	dp.connected = false
+	dp.state.completeRelease()
 	return nil
 }
 
 func (dp *DebugPort) reenter(ctx context.Context) error {
-	dp.dpBankKnown = false
+	dp.state.beginProtocolEntry()
 	if err := dp.conn.JTAGToSWD(ctx); err != nil {
-		dp.framingLost = true
+		dp.state.loseFraming()
 		return err
 	}
-	dp.framingLost = false
-	dp.overrunDisabled = false
 	info, err := dp.identify(ctx)
 	if err != nil {
-		dp.framingLost = true
+		dp.state.loseFraming()
 		return fmt.Errorf("dap: identify SW-DP after protocol entry: %w", err)
 	}
-	dp.minimal = info.Minimal
 	if err := dp.WriteDP(ctx, ABORT, supportedStickyClear(info.Minimal)); err != nil {
-		dp.framingLost = true
+		dp.state.loseFraming()
 		return fmt.Errorf("dap: clear sticky state after protocol entry: %w", err)
 	}
 	if err := dp.selectDPBankZero(ctx); err != nil {
@@ -153,8 +149,7 @@ func (dp *DebugPort) reenter(ctx context.Context) error {
 	}
 	state, err := dp.ReadDP(ctx, CTRLSTAT)
 	if err != nil {
-		dp.framingLost = true
-		dp.dpBankKnown = false
+		dp.state.loseFraming()
 		return err
 	}
 	if state&overrunDetect != 0 {
@@ -164,20 +159,20 @@ func (dp *DebugPort) reenter(ctx context.Context) error {
 }
 
 func (dp *DebugPort) releasePower(ctx context.Context) error {
-	if dp.ownedPower == 0 {
+	if dp.state.ownedPower == 0 {
 		return nil
 	}
 	state, err := dp.ReadDP(ctx, CTRLSTAT)
 	if err != nil {
 		return err
 	}
-	if err := dp.WriteDP(ctx, CTRLSTAT, state&^dp.ownedPower); err != nil {
+	if err := dp.WriteDP(ctx, CTRLSTAT, state&^dp.state.ownedPower); err != nil {
 		return err
 	}
-	if err := dp.waitPower(ctx, powerAcks(dp.ownedPower), false); err != nil {
+	if err := dp.waitPower(ctx, powerAcks(dp.state.ownedPower), false); err != nil {
 		return err
 	}
-	dp.ownedPower = 0
+	dp.state.clearOwnedPower()
 	return nil
 }
 

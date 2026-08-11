@@ -29,7 +29,7 @@ const (
 var errFramingUnknown = errors.New("dap: SWD framing is unknown")
 
 func (dp *DebugPort) transfer(ctx context.Context, req swd.Request, data uint32) (uint32, error) {
-	if dp.framingLost {
+	if dp.state.response == responseLost {
 		return 0, errFramingUnknown
 	}
 	waits := 0
@@ -79,7 +79,7 @@ func (dp *DebugPort) validateWait(req swd.Request, err error) error {
 		return cause
 	}
 	if err == swd.ErrWait {
-		if dp.overrunDisabled {
+		if dp.state.response == responseSimple {
 			return nil
 		}
 		cause := fmt.Errorf("dap: cannot retry WAIT until CTRL/STAT.ORUNDETECT is confirmed clear: %w", err)
@@ -93,7 +93,7 @@ func (dp *DebugPort) waitForbidden(req swd.Request) bool {
 		return false
 	}
 	return req.Read && (req.Addr == uint8(DPIDR) ||
-		(req.Addr == uint8(CTRLSTAT) && dp.dpBankKnown && dp.dpBank == 0)) ||
+		(req.Addr == uint8(CTRLSTAT) && dp.state.selectDP.valid && dp.state.dpBank() == 0)) ||
 		!req.Read && req.Addr == uint8(ABORT)
 }
 
@@ -105,9 +105,7 @@ func (dp *DebugPort) finishWait(req swd.Request, cause error) error {
 }
 
 func (dp *DebugPort) invalidateWait(cause error) error {
-	dp.apEpoch++
-	dp.framingLost = true
-	dp.dpBankKnown = false
+	dp.state.loseFraming()
 	return fmt.Errorf("dap: AP state is unknown after incomplete WAIT recovery: %w", cause)
 }
 
@@ -116,19 +114,17 @@ func waitMayAffectAP(req swd.Request) bool {
 }
 
 func (dp *DebugPort) abortWait(cause error) error {
-	dp.apEpoch++
+	dp.state.invalidateAP()
 	ctx, cancel := context.WithTimeout(context.Background(), waitRecoveryTimeout)
 	defer cancel()
 
 	_, err := dp.conn.Transfer(ctx, swd.Request{}, dapAbort)
 	if err != nil {
-		dp.framingLost = true
-		dp.dpBankKnown = false
+		dp.state.loseFraming()
 		return errors.Join(cause, fmt.Errorf("dap: DAPABORT after extended WAIT: %w", err))
 	}
 	if err := dp.restoreAfterAbort(ctx); err != nil {
-		dp.framingLost = true
-		dp.dpBankKnown = false
+		dp.state.loseFraming()
 		return errors.Join(cause, err)
 	}
 	return cause
@@ -139,11 +135,11 @@ func (dp *DebugPort) restoreAfterAbort(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("dap: read sticky state after DAP abort: %w", err)
 	}
-	dp.overrunDisabled = state&overrunDetect == 0
-	if !dp.overrunDisabled {
+	dp.state.confirmResponse(state)
+	if dp.state.response != responseSimple {
 		return errors.New("dap: CTRL/STAT.ORUNDETECT became enabled during DAP abort recovery")
 	}
-	clear := stickyClearForState(state, dp.minimal)
+	clear := stickyClearForState(state, dp.identity.Minimal)
 	if clear != 0 {
 		if _, err := dp.conn.Transfer(ctx, swd.Request{}, clear); err != nil {
 			return fmt.Errorf("dap: clear sticky state after DAP abort: %w", err)

@@ -58,8 +58,8 @@ func NewMemAP(ctx context.Context, dp *DebugPort, sel APSel) (*MemAP, error) {
 	return &MemAP{
 		dp:           dp,
 		sel:          sel,
-		epoch:        dp.apEpoch,
-		restoreEpoch: dp.apEpoch,
+		epoch:        dp.state.apGeneration,
+		restoreEpoch: dp.state.apGeneration,
 		csw:          configuredCSW,
 		savedCSW:     csw,
 		savedTAR:     tar,
@@ -71,7 +71,7 @@ func (m *MemAP) ReadWord(ctx context.Context, addr uint32) (uint32, error) {
 	if m == nil || m.dp == nil {
 		return 0, errors.New("dap: nil MEM-AP")
 	}
-	if m.epoch != m.dp.apEpoch {
+	if m.epoch != m.dp.state.apGeneration {
 		return 0, errors.New("dap: read target word: MEM-AP state was invalidated by debug-port recovery")
 	}
 	if addr&3 != 0 {
@@ -97,7 +97,7 @@ func (m *MemAP) Release(ctx context.Context) error {
 		return nil
 	}
 	releaseCtx := ctx
-	if m.dp.connected && (m.dp.framingLost || !m.dp.overrunDisabled) {
+	if m.dp.state.session != sessionIdle && m.dp.state.response != responseSimple {
 		var cancel context.CancelFunc
 		releaseCtx, cancel = context.WithTimeout(context.Background(), waitRecoveryTimeout)
 		defer cancel()
@@ -105,10 +105,10 @@ func (m *MemAP) Release(ctx context.Context) error {
 			return fmt.Errorf("dap: restore SWD protocol state for MEM-AP release: %w", err)
 		}
 	}
-	if m.restoreEpoch != m.dp.apEpoch {
+	if m.restoreEpoch != m.dp.state.apGeneration {
 		m.restoreTAR = true
 		m.restoreCSW = true
-		m.restoreEpoch = m.dp.apEpoch
+		m.restoreEpoch = m.dp.state.apGeneration
 	}
 	var tarErr, cswErr error
 	if m.restoreTAR {
