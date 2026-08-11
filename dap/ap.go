@@ -76,7 +76,7 @@ func validateAPReg(reg APReg) error {
 }
 
 func (dp *DebugPort) requireConnected() error {
-	if dp == nil || !dp.connected {
+	if dp == nil || dp.state.session == sessionIdle {
 		return errors.New("dap: SW-DP is not connected")
 	}
 	return nil
