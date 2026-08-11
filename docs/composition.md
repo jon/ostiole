@@ -54,8 +54,10 @@ the specification details which are easiest to misread.
 
 Use `dap.DebugPort` when the application needs debug-port identity, power
 ownership, bank selection, or AP access. Call `Connect` before AP operations
-and `Release` afterward. This layer owns posted AP read and write completion
-and retries only the physical request that returned WAIT. After an extended AP
+and `Release` afterward. Give the debug port exclusive, serialized use of its
+`swd.Conn`; direct transfers on that connection can invalidate cached DAP
+state. This layer owns posted AP read and write completion and retries only the
+physical request that returned WAIT. After an extended AP
 stall, `dap.DebugPort` issues DAPABORT; existing `dap.MemAP` values reject
 further reads, though `dap.MemAP.Release` still attempts to restore their saved
 state. `Connect` reads DPIDR, clears supported sticky conditions with ABORT,
@@ -64,15 +66,20 @@ then reads CTRL/STAT and rejects ORUNDETECT because the current SWD transfer
 does not implement the overrun-detection response grammar. If WAIT cleanup or
 a later retry fails, `dap.DebugPort` treats SWD framing as unknown and
 invalidates those values. Later DP and AP calls stop before sending traffic.
-When framing is unknown, `dap.MemAP.Release` and
-`dap.DebugPort.Release` re-enter SWD before sending cleanup traffic.
+`Connect` performs bounded cleanup after failed setup. When cleanup succeeds,
+the debug port can connect again immediately. If cleanup also fails, or if
+`Release` fails, ordinary DP, AP, and MEM-AP operations remain blocked. Call
+`MemAP.Release` before retrying `DebugPort.Release`; cleanup re-enters SWD when
+necessary and verifies that DPIDR still identifies the connection being
+cleaned up before restoring state.
 The [DAP guide](ports/dap.md) describes the ADIv5 register protocol behind
 that lifecycle.
 
 Use `dap.MemAP` when the application needs the currently supported target
 memory operation: one aligned 32-bit read through an explicitly selected
 MEM-AP. Keep the debug port connected until `MemAP.Release` restores CSW and
-TAR.
+TAR. Calls sharing a MEM-AP, its debug port, or their SWD connection must be
+serialized; these values do not add locking.
 
 Use `target/cortexm` when the desired result is processor identity. It accepts
 the word-reader behavior supplied by `dap.MemAP`, so target code remains

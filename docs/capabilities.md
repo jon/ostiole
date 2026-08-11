@@ -75,16 +75,16 @@ specification notes, and current physical observation.
 | Capability | Implemented | Validation and boundary |
 | --- | --- | --- |
 | DPIDR decoding | Yes | Validates the constant bit and exposes raw identity fields. |
-| SW-DP connection | Yes | `Connect` reads DPIDR, clears supported sticky conditions with ABORT, writes zero to SELECT once without retrying, then reads CTRL/STAT and rejects ORUNDETECT. It requests acknowledged power, records newly requested power bits as owned before writing them, and attempts bounded rollback if the write's result is ambiguous. |
-| SW-DP release | Yes | Clears only power requests acquired by the connection. If framing is unknown, `Release` first performs bounded SWD re-entry; failed release can be retried. |
-| Raw DP access | Yes | Reads and writes the currently addressed DP registers over SWD. It tracks DPBANKSEL because only a bank-zero read at `0x04` is the non-stallable CTRL/STAT access. |
-| Selected AP access | Yes | Explicit `APSel`, bank selection, posted reads through RDBUFF, and completed writes. |
-| WAIT handling | Yes | Retries only the physical request which returned WAIT, and only after confirming ORUNDETECT is clear. A clean FAULT ends retrying without losing framing. Extended AP stalls use DAPABORT. Failed WAIT cleanup or a later retry error leaves framing unknown, invalidates AP-derived state, and blocks later framed traffic until re-entry. |
+| SW-DP connection | Yes | `Connect` reads DPIDR, clears supported sticky conditions with ABORT, writes zero to SELECT once without retrying, then reads CTRL/STAT and rejects ORUNDETECT. It requests acknowledged power, records newly requested power bits before writing them, and performs bounded cleanup after failed setup. Failed cleanup remains retryable through `Release`. |
+| SW-DP release | Yes | Clears only power requests acquired by the connection. If framing is unknown, cleanup first performs bounded SWD re-entry and verifies DPIDR against the connection being cleaned up. Failed release can be retried and blocks ordinary operations in the meantime. |
+| Raw DP access | Yes | Reads and writes the currently addressed DP registers over SWD. It tracks the full SELECT value because only a bank-zero read at `0x04` is the non-stallable CTRL/STAT access. Raw DAPABORT writes invalidate AP-derived state. Raw access is blocked while cleanup is pending. |
+| Selected AP access | Yes | Explicit `APSel`, cached bank selection, posted reads through RDBUFF, and completed writes. Requires a connected port with no cleanup pending. |
+| WAIT handling | Yes | Retries only the physical request which returned WAIT, and only after confirming ORUNDETECT is clear. A clean FAULT ends retrying without losing framing. Extended AP stalls use DAPABORT. Failed WAIT cleanup or a later retry error leaves framing unknown, invalidates AP-derived state, and blocks all traffic except cleanup. |
 | FAULT recovery | No | FAULT is returned without replay; typed sticky-state reporting and cleanup are not implemented. |
 | AP enumeration | No | Callers must select an access port explicitly. |
 | MEM-AP validation | Yes | Rejects an absent AP or an AP whose IDR is not a MEM-AP. |
 | Target word read | Yes | One aligned 32-bit word with address increment disabled. |
-| MEM-AP restoration | Yes | Saves and restores CSW and TAR; failed restoration remains retryable. If framing is unknown, `Release` re-enters SWD before restoration. If DAPABORT interrupts cleanup, the next `Release` retries both saved values. The invalidated handle remains invalid. |
+| MEM-AP restoration | Yes | Saves and restores CSW and TAR; failed restoration remains retryable. MEM-AP restoration remains available while debug-port cleanup is pending. If framing is unknown, `Release` re-enters SWD before restoration. If DAPABORT interrupts cleanup, the next `Release` retries both saved values. The invalidated handle remains invalid. |
 | Target-memory writes | No | No public MEM-AP write operation exists. |
 | Block or sub-word access | No | No burst, auto-increment, 8-bit, or 16-bit operation exists. |
 | ADIv6 or JTAG-DP | No | The public implementation is the current minimal ADIv5 SW-DP path. |
@@ -95,6 +95,8 @@ Connecting and reading a MEM-AP changes volatile debug state even though it
 does not write target memory. Applications must release the MEM-AP before the
 debug port so CSW and TAR are restored, bank selection returns to zero, and
 acquired power is released.
+Calls which share a debug port, MEM-AP, or SWD connection must be serialized;
+the packages do not add locking.
 The [Arm Debug Access Port guide](ports/dap.md) describes ADIv5 register
 access, posted transactions, power handshakes, and the current bench result.
 

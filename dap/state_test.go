@@ -27,10 +27,6 @@ func TestDebugPortStateLosesFramingOnce(t *testing.T) {
 	if state.apGeneration != 1 {
 		t.Fatalf("AP generation after repeated loss = %d, want 1", state.apGeneration)
 	}
-	state.forgetResponse()
-	if state.response != responseLost {
-		t.Fatalf("response after reset attempt = %v, want lost", state.response)
-	}
 }
 
 func TestDebugPortStateTracksFullSELECT(t *testing.T) {

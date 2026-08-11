@@ -76,13 +76,18 @@ up and released in reverse order.
 | `*usb.Enumerator` | Holds inventory configuration, not an open attachment. |
 | `*usb.Device` | Owns one open attachment and at most one claimed interface. `Close` releases both. |
 | `*ftdi.Channel` | Takes ownership of the USB device passed to `ftdi.Open`. `Close` resets bit mode, sets the latency timer to 16 ms, purges the receive and transmit paths, releases the interface, and closes the device. It does not preserve prior FTDI settings. |
-| `*swd.Conn` | Represents one logical SWD transaction stream over its wire. It does not own a separate host resource. |
-| `*dap.DebugPort` | After `Connect`, owns only the debug and system power requests it added. It records newly requested power bits as owned before writing them, so bounded rollback can attempt to clear them if the write's result is ambiguous. `Release` re-enters SWD first if framing is unknown, then clears owned requests. |
-| `*dap.MemAP` | Saves the CSW and TAR values it changes. `Release` retries failed restoration; if DAPABORT interrupts cleanup, the next `Release` retries both saved values. |
+| `*swd.Conn` | Represents one logical SWD transaction stream over its wire. It does not own a separate host resource. Calls on a connection must be serialized. |
+| `*dap.DebugPort` | Requires exclusive use of its SWD transaction stream. After `Connect`, it owns only the debug and system power requests it added. It records newly requested power bits before writing them so bounded cleanup can attempt to clear them even when the write's result is ambiguous. |
+| `*dap.MemAP` | Saves the CSW and TAR values it changes. `Release` retries failed restoration; if DAPABORT interrupts cleanup, the next `Release` retries both saved values. Calls sharing the MEM-AP or its debug port must be serialized. |
 
 An application that reaches the MEM-AP layer releases the MEM-AP before the
 debug port, then closes the FTDI channel. Cleanup errors remain meaningful and
 should be joined with the operation error rather than discarded.
+
+`dap.DebugPort` caches response and register-selection state. Direct transfers
+on its `swd.Conn` can make that cached state stale, so do not share the
+connection with another transaction owner while the debug port remains in
+use. No layer adds a mutex; serialization belongs to the composition.
 
 Constructors and open operations clean up resources acquired before a failed
 return. A caller owns only values returned successfully.
@@ -105,12 +110,17 @@ SWD transfer does not implement that response grammar. It then requests
 acknowledged debug and system power, retries the exact physical request which
 returned WAIT, and completes posted AP transactions through RDBUFF. After an
 extended AP stall, `dap.DebugPort`
-issues DAPABORT and invalidates AP-derived state. If WAIT cleanup or a later
-retry fails, `dap.DebugPort` treats SWD framing as unknown, invalidates
-AP-derived state, and blocks later framed traffic. Cleanup re-enters SWD before
-sending another request. `dap.MemAP.Release` restores saved registers before
-`dap.DebugPort.Release` releases owned power. `dap.MemAP` configures one access
-port for a single aligned 32-bit read.
+issues DAPABORT and invalidates AP-derived state. If WAIT cleanup or another
+transfer leaves framing unknown, `dap.DebugPort` invalidates AP-derived state
+and blocks every operation except cleanup. Cleanup re-enters SWD before sending
+another framed request and refuses to restore state if DPIDR no longer matches
+the connection being cleaned up. Failed setup uses the DPIDR read by that
+attempt; cleanup for an established connection uses its last successful
+DPIDR. `Connect` attempts this cleanup itself when setup fails; a cleanup
+failure remains pending for `Release`. Once `Release` starts, a failure likewise
+leaves only `MemAP.Release`, `DebugPort.Release`, and the cached identity
+available. `dap.MemAP` configures one access port for a single aligned 32-bit
+read.
 See [Arm Debug Access Ports](ports/dap.md) for the ADIv5 register protocol and
 the awkward parts of posted and memory access.
 

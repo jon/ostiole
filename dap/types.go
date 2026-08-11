@@ -1,4 +1,3 @@
-// Package dap provides Arm Debug Interface access over SWD.
 package dap
 
 import "fmt"

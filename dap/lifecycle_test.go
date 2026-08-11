@@ -42,6 +42,12 @@ func TestConnectAndReleaseSWDP(t *testing.T) {
 	if err := dp.Release(t.Context()); err != nil {
 		t.Fatalf("repeated Release() failed: %v", err)
 	}
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatalf("Connect() after release failed: %v", err)
+	}
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatalf("Release() after reconnection failed: %v", err)
+	}
 }
 
 func TestConnectPreservesPowerItDidNotAcquire(t *testing.T) {
@@ -69,8 +75,9 @@ func TestConnectRollsBackAfterAcknowledgementTimeout(t *testing.T) {
 	if target.ctrl&allPower != 0 {
 		t.Fatalf("power state after rollback = %#08x, want 0", target.ctrl)
 	}
-	if err := dp.Release(t.Context()); err != nil {
-		t.Fatalf("Release() after failed Connect() failed: %v", err)
+	target.suppressAck = false
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatalf("Connect() after automatic rollback failed: %v", err)
 	}
 }
 
@@ -144,12 +151,12 @@ func TestConnectRejectsEnabledOverrunDetectionBeforeConfiguration(t *testing.T) 
 	if _, err := dp.Connect(t.Context()); err == nil {
 		t.Fatal("Connect() succeeded with ORUNDETECT enabled")
 	}
-	if len(target.selectValues) != 1 || target.selectValues[0] != 0 {
-		t.Fatalf("SELECT writes before rejecting ORUNDETECT = %#v, want bank zero", target.selectValues)
+	if len(target.selectValues) != 2 || target.selectValues[0] != 0 || target.selectValues[1] != 0 {
+		t.Fatalf("SELECT writes while rejecting and repairing ORUNDETECT = %#v, want two bank-zero writes", target.selectValues)
 	}
-	if len(target.abortValues) != 1 || target.abortValues[0] != 0x1e ||
+	if len(target.abortValues) != 2 || target.abortValues[0] != 0x1e || target.abortValues[1] != 0x1e ||
 		target.ctrl != overrunDetect {
-		t.Fatalf("state before rejecting ORUNDETECT: ABORT=%#v CTRL/STAT=%#08x", target.abortValues, target.ctrl)
+		t.Fatalf("state after rejecting and repairing ORUNDETECT: ABORT=%#v CTRL/STAT=%#08x", target.abortValues, target.ctrl)
 	}
 }
 

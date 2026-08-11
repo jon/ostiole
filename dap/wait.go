@@ -63,11 +63,19 @@ func (dp *DebugPort) stopWaiting(req swd.Request, waits int, cause error) error 
 }
 
 func (dp *DebugPort) finishRetryError(value uint32, err error, waits int) (uint32, error) {
-	if waits == 0 || err == swd.ErrFault {
+	if err == swd.ErrFault || waits == 0 && err == swd.ErrParity {
 		return value, err
+	}
+	if waits == 0 {
+		return 0, dp.invalidateTransfer(err)
 	}
 	cause := errors.Join(swd.ErrWait, fmt.Errorf("dap: WAIT retry failed: %w", err))
 	return 0, dp.invalidateWait(cause)
+}
+
+func (dp *DebugPort) invalidateTransfer(cause error) error {
+	dp.state.loseFraming()
+	return fmt.Errorf("dap: SWD framing is unknown after transfer failure: %w", cause)
 }
 
 func (dp *DebugPort) validateWait(req swd.Request, err error) error {
@@ -145,7 +153,7 @@ func (dp *DebugPort) restoreAfterAbort(ctx context.Context) error {
 			return fmt.Errorf("dap: clear sticky state after DAP abort: %w", err)
 		}
 	}
-	if err := dp.WriteDP(ctx, SELECT, 0); err != nil {
+	if err := dp.writeDP(ctx, SELECT, 0); err != nil {
 		return fmt.Errorf("dap: restore SELECT after DAP abort: %w", err)
 	}
 	return nil
