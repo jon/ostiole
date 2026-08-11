@@ -21,6 +21,9 @@ const (
 )
 
 // MemAP reads aligned target words through one memory access port.
+//
+// Its methods and all uses of its DebugPort must be serialized. Release the
+// MemAP before releasing its DebugPort.
 type MemAP struct {
 	dp           *DebugPort
 	sel          APSel
@@ -34,6 +37,7 @@ type MemAP struct {
 }
 
 // NewMemAP validates sel and saves the state changed by target reads.
+// The debug port must be connected and must not have cleanup pending.
 func NewMemAP(ctx context.Context, dp *DebugPort, sel APSel) (*MemAP, error) {
 	idr, err := dp.ReadAP(ctx, sel, APIDR)
 	if err != nil {
@@ -66,13 +70,17 @@ func NewMemAP(ctx context.Context, dp *DebugPort, sel APSel) (*MemAP, error) {
 	}, nil
 }
 
-// ReadWord reads one aligned 32-bit target word.
+// ReadWord reads one aligned 32-bit target word. Debug-port recovery
+// invalidates further reads through an existing MemAP.
 func (m *MemAP) ReadWord(ctx context.Context, addr uint32) (uint32, error) {
 	if m == nil || m.dp == nil {
 		return 0, errors.New("dap: nil MEM-AP")
 	}
 	if m.epoch != m.dp.state.apGeneration {
 		return 0, errors.New("dap: read target word: MEM-AP state was invalidated by debug-port recovery")
+	}
+	if err := m.dp.requireConnected(); err != nil {
+		return 0, err
 	}
 	if addr&3 != 0 {
 		return 0, fmt.Errorf("dap: unaligned target word address %#08x", addr)
@@ -90,21 +98,21 @@ func (m *MemAP) ReadWord(ctx context.Context, addr uint32) (uint32, error) {
 
 // Release restores the CSW and TAR values changed by target reads.
 //
-// Failed restoration remains pending so Release can be retried. The debug port
-// must remain connected until Release succeeds.
+// Release remains available while debug-port cleanup is pending. Failed
+// restoration remains pending so the method can be retried. Call it before
+// DebugPort.Release.
 func (m *MemAP) Release(ctx context.Context) error {
 	if m == nil || m.dp == nil {
 		return nil
 	}
-	releaseCtx := ctx
-	if m.dp.state.session != sessionIdle && m.dp.state.response != responseSimple {
-		var cancel context.CancelFunc
-		releaseCtx, cancel = context.WithTimeout(context.Background(), waitRecoveryTimeout)
-		defer cancel()
-		if err := m.dp.reenter(releaseCtx); err != nil {
-			return fmt.Errorf("dap: restore SWD protocol state for MEM-AP release: %w", err)
-		}
+	if !m.restoreCSW && !m.restoreTAR {
+		return nil
 	}
+	releaseCtx, cancel, err := m.prepareRelease(ctx)
+	if err != nil {
+		return err
+	}
+	defer cancel()
 	if m.restoreEpoch != m.dp.state.apGeneration {
 		m.restoreTAR = true
 		m.restoreCSW = true
@@ -112,7 +120,7 @@ func (m *MemAP) Release(ctx context.Context) error {
 	}
 	var tarErr, cswErr error
 	if m.restoreTAR {
-		tarErr = m.dp.WriteAP(releaseCtx, m.sel, APTAR, m.savedTAR)
+		tarErr = m.dp.writeAP(releaseCtx, m.sel, APTAR, m.savedTAR)
 		if tarErr != nil {
 			tarErr = fmt.Errorf("dap: restore MEM-AP TAR: %w", tarErr)
 		} else {
@@ -120,7 +128,7 @@ func (m *MemAP) Release(ctx context.Context) error {
 		}
 	}
 	if m.restoreCSW {
-		cswErr = m.dp.WriteAP(releaseCtx, m.sel, APCSW, m.savedCSW)
+		cswErr = m.dp.writeAP(releaseCtx, m.sel, APCSW, m.savedCSW)
 		if cswErr != nil {
 			cswErr = fmt.Errorf("dap: restore MEM-AP CSW: %w", cswErr)
 		} else {
@@ -128,4 +136,19 @@ func (m *MemAP) Release(ctx context.Context) error {
 		}
 	}
 	return errors.Join(tarErr, cswErr)
+}
+
+func (m *MemAP) prepareRelease(ctx context.Context) (context.Context, context.CancelFunc, error) {
+	if m.dp.state.session == sessionIdle {
+		return nil, nil, errors.New("dap: SW-DP is not connected")
+	}
+	if m.dp.state.response == responseSimple {
+		return ctx, func() {}, nil
+	}
+	releaseCtx, cancel := context.WithTimeout(context.Background(), waitRecoveryTimeout)
+	if err := m.dp.reenter(releaseCtx); err != nil {
+		cancel()
+		return nil, nil, fmt.Errorf("dap: restore SWD protocol state for MEM-AP release: %w", err)
+	}
+	return releaseCtx, cancel, nil
 }

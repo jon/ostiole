@@ -29,14 +29,17 @@ type Request struct {
 	Addr uint8
 }
 
-// Conn performs SWD transactions over one wire owner.
+// Conn performs one serialized stream of SWD transactions over a wire. Its
+// methods are not safe for concurrent use.
 type Conn struct {
 	wire       Wire
 	turnaround int
 	idleCycles int
 }
 
-// New returns an SWD connection using wire.
+// New returns an SWD connection using wire. The caller must serialize all
+// calls. A higher-level client that caches protocol state requires exclusive
+// use of the connection.
 func New(w Wire) *Conn {
 	return &Conn{wire: w, turnaround: 1, idleCycles: 8}
 }

@@ -83,6 +83,9 @@ func TestAPWriteWaitsForRDBUFF(t *testing.T) {
 	if err := dp.WriteAP(t.Context(), 0, 0, 1); !errors.Is(err, errBarrier) {
 		t.Fatalf("WriteAP() error = %v, want %v", err, errBarrier)
 	}
+	if _, err := dp.ReadDP(t.Context(), dap.DPIDR); err == nil {
+		t.Fatal("ReadDP() succeeded after the AP completion transfer failed")
+	}
 }
 
 var errBarrier = errors.New("posted write failed")

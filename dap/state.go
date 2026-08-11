@@ -39,10 +39,9 @@ func (s *debugPortState) beginProtocolEntry() {
 	s.selectDP.valid = false
 }
 
-func (s *debugPortState) forgetResponse() {
-	if s.response != responseLost {
-		s.response = responseUnchecked
-	}
+func (s *debugPortState) beginConnect() {
+	s.session = sessionRepairRequired
+	s.beginProtocolEntry()
 }
 
 func (s *debugPortState) dpBank() uint8 {

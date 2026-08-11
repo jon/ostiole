@@ -21,41 +21,47 @@ const (
 // Connect validates the SW-DP and acquires its debug power requests.
 //
 // The SWD connection must already be in SWD protocol mode. Release restores
-// the request bits acquired by this client.
+// the request bits acquired by this client. If connection setup fails,
+// Connect attempts bounded cleanup before returning the original error. A
+// cleanup failure is joined to that error; Release may then be retried, while
+// other DP and AP operations remain blocked.
 func (dp *DebugPort) Connect(ctx context.Context) (DPIDRInfo, error) {
 	if dp == nil || dp.conn == nil {
 		return DPIDRInfo{}, errors.New("dap: nil SWD connection")
 	}
-	if dp.state.session == sessionConnected || dp.state.ownedPower != 0 {
+	if dp.state.session == sessionConnected {
 		return DPIDRInfo{}, errors.New("dap: SW-DP connection is already active")
 	}
+	if dp.state.session == sessionRepairRequired {
+		return DPIDRInfo{}, errors.New("dap: debug-port cleanup is pending")
+	}
+	dp.beginConnect()
 	info, state, err := dp.initialize(ctx)
 	if err != nil {
-		return DPIDRInfo{}, err
+		return DPIDRInfo{}, dp.failConnect(err)
 	}
 	owned := powerRequests &^ state
 	if owned != 0 {
 		dp.state.ownPower(owned)
-		if err := dp.WriteDP(ctx, CTRLSTAT, state|powerRequests); err != nil {
-			return DPIDRInfo{}, dp.rollback(err)
+		if err := dp.writeDP(ctx, CTRLSTAT, state|powerRequests); err != nil {
+			return DPIDRInfo{}, dp.failConnect(err)
 		}
 	}
 	if err := dp.waitPower(ctx, powerAcks(powerRequests), true); err != nil {
-		return DPIDRInfo{}, dp.rollback(err)
+		return DPIDRInfo{}, dp.failConnect(err)
 	}
-	dp.identity = info
-	dp.identified = true
-	dp.state.completeConnect()
+	dp.completeConnect(info)
 	return info, nil
 }
 
 func (dp *DebugPort) initialize(ctx context.Context) (DPIDRInfo, uint32, error) {
-	dp.state.forgetResponse()
 	info, err := dp.identify(ctx)
 	if err != nil {
 		return DPIDRInfo{}, 0, err
 	}
-	if err := dp.WriteDP(ctx, ABORT, supportedStickyClear(info.Minimal)); err != nil {
+	dp.reentryID = info
+	dp.reentryKnown = true
+	if err := dp.writeDP(ctx, ABORT, supportedStickyClear(info.Minimal)); err != nil {
 		return DPIDRInfo{}, 0, err
 	}
 	if err := dp.selectDPBankZero(ctx); err != nil {
@@ -69,7 +75,7 @@ func (dp *DebugPort) initialize(ctx context.Context) (DPIDRInfo, uint32, error) 
 }
 
 func (dp *DebugPort) identify(ctx context.Context) (DPIDRInfo, error) {
-	raw, err := dp.ReadDP(ctx, DPIDR)
+	raw, err := dp.readDP(ctx, DPIDR)
 	if err != nil {
 		return DPIDRInfo{}, err
 	}
@@ -77,7 +83,7 @@ func (dp *DebugPort) identify(ctx context.Context) (DPIDRInfo, error) {
 }
 
 func (dp *DebugPort) readSimpleState(ctx context.Context) (uint32, error) {
-	state, err := dp.ReadDP(ctx, CTRLSTAT)
+	state, err := dp.readDP(ctx, CTRLSTAT)
 	if err != nil {
 		return 0, err
 	}
@@ -87,29 +93,33 @@ func (dp *DebugPort) readSimpleState(ctx context.Context) (uint32, error) {
 	return state, nil
 }
 
-func (dp *DebugPort) rollback(cause error) error {
-	if dp.state.ownedPower == 0 {
-		return cause
-	}
+func (dp *DebugPort) failConnect(cause error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if err := dp.reenter(ctx); err != nil {
-		return errors.Join(cause, fmt.Errorf("dap: restore SWD protocol state: %w", err))
+	if dp.state.response == responseLost || dp.state.response == responseOverrun || dp.state.ownedPower != 0 {
+		if err := dp.reenter(ctx); err != nil {
+			return errors.Join(cause, fmt.Errorf("dap: repair SWD state after Connect failure: %w", err))
+		}
 	}
 	if err := dp.releasePower(ctx); err != nil {
 		return errors.Join(cause, fmt.Errorf("dap: roll back power requests: %w", err))
 	}
+	dp.completeRelease()
 	return cause
 }
 
 // Release restores volatile debug-port state owned by this connection.
+//
+// Release may be retried. Once an attempt starts, other DP and AP operations
+// remain blocked until Release succeeds.
 func (dp *DebugPort) Release(ctx context.Context) error {
 	if dp == nil || dp.conn == nil {
 		return nil
 	}
-	if dp.state.session != sessionConnected && dp.state.ownedPower == 0 && dp.state.response != responseLost {
+	if dp.state.session == sessionIdle {
 		return nil
 	}
+	dp.state.beginRepair()
 	releaseCtx := ctx
 	if dp.state.response != responseSimple {
 		var cancel context.CancelFunc
@@ -119,13 +129,13 @@ func (dp *DebugPort) Release(ctx context.Context) error {
 			return fmt.Errorf("dap: restore SWD protocol state for release: %w", err)
 		}
 	}
-	if err := dp.WriteDP(releaseCtx, SELECT, 0); err != nil {
+	if err := dp.writeDP(releaseCtx, SELECT, 0); err != nil {
 		return err
 	}
 	if err := dp.releasePower(releaseCtx); err != nil {
 		return err
 	}
-	dp.state.completeRelease()
+	dp.completeRelease()
 	return nil
 }
 
@@ -140,14 +150,20 @@ func (dp *DebugPort) reenter(ctx context.Context) error {
 		dp.state.loseFraming()
 		return fmt.Errorf("dap: identify SW-DP after protocol entry: %w", err)
 	}
-	if err := dp.WriteDP(ctx, ABORT, supportedStickyClear(info.Minimal)); err != nil {
+	expected, known := dp.reentryIdentity()
+	if known && info.Raw != expected.Raw {
+		dp.state.loseFraming()
+		return fmt.Errorf("dap: SW-DP identity changed from %#08x to %#08x during protocol entry",
+			expected.Raw, info.Raw)
+	}
+	if err := dp.writeDP(ctx, ABORT, supportedStickyClear(info.Minimal)); err != nil {
 		dp.state.loseFraming()
 		return fmt.Errorf("dap: clear sticky state after protocol entry: %w", err)
 	}
 	if err := dp.selectDPBankZero(ctx); err != nil {
 		return err
 	}
-	state, err := dp.ReadDP(ctx, CTRLSTAT)
+	state, err := dp.readDP(ctx, CTRLSTAT)
 	if err != nil {
 		dp.state.loseFraming()
 		return err
@@ -158,15 +174,37 @@ func (dp *DebugPort) reenter(ctx context.Context) error {
 	return nil
 }
 
+func (dp *DebugPort) beginConnect() {
+	dp.reentryID = DPIDRInfo{}
+	dp.reentryKnown = false
+	dp.state.beginConnect()
+}
+
+func (dp *DebugPort) completeConnect(info DPIDRInfo) {
+	dp.identity = info
+	dp.identified = true
+	dp.state.completeConnect()
+}
+
+func (dp *DebugPort) completeRelease() {
+	dp.reentryID = DPIDRInfo{}
+	dp.reentryKnown = false
+	dp.state.completeRelease()
+}
+
+func (dp *DebugPort) reentryIdentity() (DPIDRInfo, bool) {
+	return dp.reentryID, dp.reentryKnown
+}
+
 func (dp *DebugPort) releasePower(ctx context.Context) error {
 	if dp.state.ownedPower == 0 {
 		return nil
 	}
-	state, err := dp.ReadDP(ctx, CTRLSTAT)
+	state, err := dp.readDP(ctx, CTRLSTAT)
 	if err != nil {
 		return err
 	}
-	if err := dp.WriteDP(ctx, CTRLSTAT, state&^dp.state.ownedPower); err != nil {
+	if err := dp.writeDP(ctx, CTRLSTAT, state&^dp.state.ownedPower); err != nil {
 		return err
 	}
 	if err := dp.waitPower(ctx, powerAcks(dp.state.ownedPower), false); err != nil {
@@ -178,7 +216,7 @@ func (dp *DebugPort) releasePower(ctx context.Context) error {
 
 func (dp *DebugPort) waitPower(ctx context.Context, mask uint32, set bool) error {
 	for {
-		state, err := dp.ReadDP(ctx, CTRLSTAT)
+		state, err := dp.readDP(ctx, CTRLSTAT)
 		if err != nil {
 			return err
 		}
@@ -202,7 +240,9 @@ func powerAcks(requests uint32) uint32 {
 	return acks
 }
 
-// Identity returns the identity established by the most recent connection.
+// Identity returns the identity established by the most recent successful
+// connection. The cached identity remains available after Release and after a
+// cleanup failure.
 func (dp *DebugPort) Identity() (DPIDRInfo, bool) {
 	if dp == nil {
 		return DPIDRInfo{}, false
