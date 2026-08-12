@@ -11,8 +11,8 @@ Arm [IHI 0031H, _Arm Debug Interface Architecture Specification ADIv5.0 to
 ADIv5.2_](https://developer.arm.com/documentation/ihi0031/h) is the normative
 ADIv5 specification. Use chapters B2, B4, C1, and C2 for the programmer's
 model and requirements. This note keeps only the traps worth having close at
-hand and one hardware observation. “DAP” here means Arm Debug Access Port, not
-Microsoft's Debug Adapter Protocol.
+hand and the hardware observations below. “DAP” here means Arm Debug Access
+Port, not Microsoft's Debug Adapter Protocol.
 
 ## The SW-DP register window
 
@@ -75,12 +75,22 @@ transport implements that response grammar. There is an annoying bootstrap
 problem: CTRL/STAT shares offset `0x04` with other DP banks, and a line reset
 does not reset every DP register. After inheriting unknown DP state, read
 DPIDR, clear the supported sticky conditions with ABORT, write zero to SELECT
-once without retrying, then read CTRL/STAT at `0x04`. ABORT is bank-independent
-and cannot return WAIT or FAULT; doing it first keeps inherited sticky state
-from faulting SELECT. If SELECT returns WAIT or FAULT, the simpler grammar
-cannot safely replay it because ORUNDETECT is not known yet. Re-enter SWD
-before trying the bootstrap again. Once another DP bank is selected, a read at
+once without retrying, read RDBUFF, then read CTRL/STAT at `0x04`. ABORT and
+RDBUFF are bank-independent. ABORT first keeps inherited sticky state from
+faulting SELECT; RDBUFF then shows whether the SELECT data took effect. If
+either SELECT or RDBUFF returns WAIT or FAULT, the simpler grammar cannot
+safely replay it because ORUNDETECT is not known yet. Re-enter SWD before
+trying the bootstrap again. Once another DP bank is selected, a read at
 `0x04` is no longer CTRL/STAT and may legitimately return WAIT.
+
+The SELECT write's OK acknowledgement comes before its data. There is no
+second acknowledgement after the parity bit, so the host cannot trust the new
+SELECT value until later traffic shows whether the write data took effect.
+DPIDR and ABORT do not settle that question because sticky state cannot make
+them return FAULT. RDBUFF is bank-independent and can settle it without relying
+on the requested bank. WDATAERR means that the DP might have abandoned the
+write and kept the previous bank. Do not use `0x04` until RDBUFF has returned
+OK.
 
 ABORT at DP offset `0x00` clears sticky conditions. On a full DP, writing
 `0x1e` clears STICKYCMP, STICKYERR, WDATAERR, and STICKYORUN without setting
@@ -156,9 +166,14 @@ request.
 
 FAULT is different again. It reports sticky state and must not be replayed as
 if it were WAIT. CTRL/STAT identifies the recorded conditions; an ABORT write
-clears the supported ones. WDATAERR describes a write which the DP abandoned,
-while STICKYERR records an error reported by an AP. They are not interchangeable
-names for the same failure.
+clears the supported ones. Read CTRL/STAT again before resuming ordinary
+traffic: ABORT has no acknowledgement after its data phase either. WDATAERR
+describes a write which the DP abandoned, while STICKYERR records an error
+reported by an AP. They are not interchangeable names for the same failure.
+
+If the failed request belonged to AP work, clearing the sticky flag does not
+establish what that request changed. Any AP state which matters still has to
+be read or restored explicitly before power is released.
 
 A complete FAULT response after one or more WAITs still ends at a request
 boundary. Return FAULT; the preceding WAITs do not justify DAPABORT or framing

@@ -75,12 +75,12 @@ specification notes, and current physical observation.
 | Capability | Implemented | Validation and boundary |
 | --- | --- | --- |
 | DPIDR decoding | Yes | Validates the constant bit and exposes raw identity fields. |
-| SW-DP connection | Yes | `Connect` reads DPIDR, clears supported sticky conditions with ABORT, writes zero to SELECT once without retrying, then reads CTRL/STAT and rejects ORUNDETECT. It requests acknowledged power, records newly requested power bits before writing them, and performs bounded cleanup after failed setup. Failed cleanup remains retryable through `Release`. |
-| SW-DP release | Yes | Clears only power requests acquired by the connection. If framing is unknown, cleanup first performs bounded SWD re-entry and verifies DPIDR against the connection being cleaned up. Failed release can be retried and blocks ordinary operations in the meantime. |
-| Raw DP access | Yes | Reads and writes the currently addressed DP registers over SWD. It tracks the full SELECT value because only a bank-zero read at `0x04` is the non-stallable CTRL/STAT access. Raw DAPABORT writes invalidate AP-derived state. Raw access is blocked while cleanup is pending. |
+| SW-DP connection | Yes | `Connect` reads DPIDR, clears supported sticky conditions with ABORT, writes zero to SELECT once without retrying, confirms the write through RDBUFF, then reads CTRL/STAT and rejects ORUNDETECT. It requests acknowledged power, records newly requested power bits before writing them, and performs bounded cleanup after failed setup. Failed cleanup remains retryable through `Release`. |
+| SW-DP release | Yes | Restores SELECT to bank zero, settles that write through RDBUFF, and clears only power requests acquired by the connection. If framing is unknown, cleanup first performs bounded SWD re-entry and verifies DPIDR against the connection being cleaned up. Failed release can be retried and blocks ordinary operations in the meantime. |
+| Raw DP access | Yes | Reads and writes the currently addressed DP registers over SWD. It retains the previous SELECT value until later traffic establishes whether the write data took effect. Only a bank-zero read at `0x04` is the non-stallable CTRL/STAT access. Raw DAPABORT writes invalidate AP-derived state. Raw access is blocked while cleanup is pending. |
 | Selected AP access | Yes | Explicit `APSel`, cached bank selection, posted reads through RDBUFF, and completed writes. Requires a connected port with no cleanup pending. |
 | WAIT handling | Yes | Retries only the physical request which returned WAIT, and only after confirming ORUNDETECT is clear. A clean FAULT ends retrying without losing framing. Extended AP stalls use DAPABORT. Failed WAIT cleanup or a later retry error leaves framing unknown, invalidates AP-derived state, and blocks all traffic except cleanup. |
-| FAULT recovery | No | FAULT is returned without replay; typed sticky-state reporting and cleanup are not implemented. |
+| FAULT recovery | Yes | A FAULT is never replayed. When simple bank-zero framing is known, the error includes the captured CTRL/STAT value and DAP clears only the sticky conditions reported there, then verifies that they are clear. Failed cleanup preserves the FAULT and blocks ordinary traffic until release repairs the port. |
 | AP enumeration | No | Callers must select an access port explicitly. |
 | MEM-AP validation | Yes | Rejects an absent AP or an AP whose IDR is not a MEM-AP. |
 | Target word read | Yes | One aligned 32-bit word with address increment disabled. |
@@ -89,7 +89,7 @@ specification notes, and current physical observation.
 | Block or sub-word access | No | No burst, auto-increment, 8-bit, or 16-bit operation exists. |
 | ADIv6 or JTAG-DP | No | The public implementation is the current minimal ADIv5 SW-DP path. |
 | Behavioral simulation | Yes | DP identity/power, posted AP access, and configured target words. |
-| AP and MEM-AP reads | HIL | Opt-in FTDI integration tests against an explicitly selected AP. |
+| AP and MEM-AP reads | HIL | Opt-in FTDI integration tests against an explicitly selected AP. A separately gated test corrupts write parity, observes a target-generated FAULT with WDATAERR, and verifies recovery. |
 
 Connecting and reading a MEM-AP changes volatile debug state even though it
 does not write target memory. Applications must release the MEM-AP before the

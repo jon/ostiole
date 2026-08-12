@@ -132,6 +132,9 @@ func (dp *DebugPort) Release(ctx context.Context) error {
 	if err := dp.writeDP(releaseCtx, SELECT, 0); err != nil {
 		return err
 	}
+	if _, err := dp.readDP(releaseCtx, RDBUFF); err != nil {
+		return fmt.Errorf("dap: confirm SELECT while releasing debug port: %w", err)
+	}
 	if err := dp.releasePower(releaseCtx); err != nil {
 		return err
 	}

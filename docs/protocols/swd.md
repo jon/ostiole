@@ -50,7 +50,9 @@ After OK, a read continues directly into 32 data bits and one parity bit from
 the target. The target then releases SWDIO for a turnaround clock. A write has
 the opposite handoff: after ACK, the target releases SWDIO, then the host sends
 32 data bits and parity. Data and parity use the same even-parity convention as
-the request.
+the request. There is no second acknowledgement after write data. If its parity
+is bad, the DP abandons the write, records WDATAERR, and reports the sticky
+condition on a later request.
 
 If the host is going to stop SWCLK after a transfer, IHI 0031H requires at
 least eight idle clocks while the host drives SWDIO low. Starting the next
@@ -95,16 +97,23 @@ return WAIT or FAULT, but offset `0x04` names CTRL/STAT only while
 simply read `0x04` and trust bit zero.
 
 One workable bootstrap is to read DPIDR, clear the supported sticky conditions
-with ABORT, write zero to SELECT once without retrying, then read CTRL/STAT.
+with ABORT, write zero to SELECT once without retrying, read RDBUFF to settle
+that write, then read CTRL/STAT.
 ABORT is bank-independent and cannot return WAIT or FAULT; clearing sticky
-state first prevents an inherited error from faulting SELECT. An OK response
-to the SELECT write has the normal write data phase with either response
-grammar, so bank zero is known before `0x04` is interpreted. A WAIT or FAULT
-at that point is not safe to replay with the simpler grammar: ORUNDETECT might
-be set, in which case the response has a data phase the host has not consumed.
-Checking ORUNDETECT only after retrying SELECT is too late. Re-enter SWD before
-trying the bootstrap again; treating the rejected SELECT as an ordinary retry
-would assume the response grammar which the bootstrap is meant to establish.
+state first prevents an inherited error from faulting SELECT. The host cannot
+trust the new SELECT value until later traffic shows whether the write data
+took effect. DPIDR and ABORT do not settle that question because sticky state
+cannot make them return FAULT. RDBUFF is bank-independent, so it can settle the
+write without relying on the requested bank. If it returns FAULT with
+WDATAERR, the DP might have abandoned the SELECT data and kept the previous
+bank. Re-enter SWD before trying again. Only after RDBUFF returns OK is `0x04`
+known to name CTRL/STAT.
+
+A WAIT or FAULT during this bootstrap is not safe to replay with the simpler
+grammar: ORUNDETECT might be set, in which case the response has a data phase
+the host has not consumed. Checking ORUNDETECT only after retrying is too late.
+Re-enter SWD before trying again; ordinary replay would assume the response
+grammar which the bootstrap is meant to establish.
 
 The specification says to retry read data after a parity error. That advice is
 less mechanical for an AP read because AP reads are posted: by the time parity

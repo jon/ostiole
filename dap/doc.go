@@ -14,4 +14,12 @@
 // also fails, Release remains available but other debug-port and access-port
 // operations fail until cleanup succeeds. A failed Release has the same
 // cleanup-only behavior and may be retried.
+//
+// A DebugPort does not replay a request which returns FAULT. It reads
+// bank-zero CTRL/STAT when the register selection is known, clears the sticky
+// conditions reported there, verifies the clear, and returns a FaultError. A
+// SELECT write remains provisional until later traffic establishes whether
+// its data took effect.
+// Failed FAULT cleanup leaves the port in the same cleanup-only state as a
+// failed release.
 package dap

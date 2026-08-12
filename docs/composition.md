@@ -61,17 +61,18 @@ physical request that returned WAIT. After an extended AP
 stall, `dap.DebugPort` issues DAPABORT; existing `dap.MemAP` values reject
 further reads, though `dap.MemAP.Release` still attempts to restore their saved
 state. `Connect` reads DPIDR, clears supported sticky conditions with ABORT,
-and writes zero to SELECT once without retrying to establish DP bank zero. It
-then reads CTRL/STAT and rejects ORUNDETECT because the current SWD transfer
-does not implement the overrun-detection response grammar. If WAIT cleanup or
-a later retry fails, `dap.DebugPort` treats SWD framing as unknown and
+and writes zero to SELECT once without retrying. It confirms the write through
+RDBUFF, then reads CTRL/STAT and rejects ORUNDETECT because the current SWD
+transfer does not implement the overrun-detection response grammar. If WAIT
+cleanup or a later retry fails, `dap.DebugPort` treats SWD framing as unknown and
 invalidates those values. Later DP and AP calls stop before sending traffic.
 `Connect` performs bounded cleanup after failed setup. When cleanup succeeds,
 the debug port can connect again immediately. If cleanup also fails, or if
 `Release` fails, ordinary DP, AP, and MEM-AP operations remain blocked. Call
 `MemAP.Release` before retrying `DebugPort.Release`; cleanup re-enters SWD when
 necessary and verifies that DPIDR still identifies the connection being
-cleaned up before restoring state.
+cleaned up before restoring state. `DebugPort.Release` settles its final
+bank-zero SELECT through RDBUFF before returning success.
 The [DAP guide](ports/dap.md) describes the ADIv5 register protocol behind
 that lifecycle.
 

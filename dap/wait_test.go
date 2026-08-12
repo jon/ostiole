@@ -35,6 +35,11 @@ type waitTarget struct {
 	selectAttempts    int
 	writeErrFor       swd.Request
 	writeErr          error
+	dropWriteFor      swd.Request
+	dropWrite         bool
+	stickyOnDrop      uint32
+	dropStickyClear   bool
+	ctrlStatErr       error
 	readErrAfterAbort error
 	requests          []swd.Request
 	dpidrOverride     uint32
@@ -170,6 +175,11 @@ func stickyExempt(req swd.Request) bool {
 func (t *waitTarget) Read(ctx context.Context, req swd.Request) (uint32, error) {
 	t.executed[req]++
 	t.finishAccepted(req)
+	if !req.AP && req.Read && req.Addr == uint8(dap.CTRLSTAT) && t.ctrlStatErr != nil {
+		err := t.ctrlStatErr
+		t.ctrlStatErr = nil
+		return 0, err
+	}
 	if !req.AP && req.Read && req.Addr == uint8(dap.DPIDR) && t.dpidrOverride != 0 {
 		return t.dpidrOverride, nil
 	}
@@ -188,6 +198,11 @@ func (t *waitTarget) Read(ctx context.Context, req swd.Request) (uint32, error) 
 func (t *waitTarget) Write(ctx context.Context, req swd.Request, value uint32) error {
 	t.executed[req]++
 	t.finishAccepted(req)
+	if t.dropWrite && req == t.dropWriteFor {
+		t.dropWrite = false
+		t.sticky |= t.stickyOnDrop
+		return nil
+	}
 	if !req.AP && req.Addr == uint8(dap.ABORT) {
 		if err := t.writeAbort(value); err != nil {
 			return err
@@ -216,6 +231,10 @@ func (t *waitTarget) writeAbort(value uint32) error {
 	}
 	if value&0x1e != 0 && t.clearErr != nil {
 		return t.clearErr
+	}
+	if value&0x1e != 0 && t.dropStickyClear {
+		t.dropStickyClear = false
+		return nil
 	}
 	if value&(1<<1) != 0 {
 		t.sticky &^= 1 << 4
@@ -593,6 +612,9 @@ func TestDebugPortRetriesBankedDPRegisterWAIT(t *testing.T) {
 	if err := dp.WriteDP(t.Context(), dap.SELECT, 0x120000f2); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := dp.ReadDP(t.Context(), dap.RDBUFF); err != nil {
+		t.Fatal(err)
+	}
 
 	req := swd.Request{Read: true, Addr: uint8(dap.CTRLSTAT)}
 	target.arm(req, 2)
@@ -700,6 +722,367 @@ func TestDebugPortDoesNotRetryFAULT(t *testing.T) {
 	}
 }
 
+func TestDebugPortReportsAndClearsFAULT(t *testing.T) {
+	target := newWaitTarget()
+	target.AddAP(0, 0x24770011)
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	target.sticky = 1<<4 | 1<<5 | 1<<7
+	_, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	var fault *dap.FaultError
+	if !errors.As(err, &fault) || !errors.Is(err, swd.ErrFault) {
+		t.Fatalf("ReadAP() error = %v, want typed FAULT", err)
+	}
+	if !fault.StateValid || fault.CTRLSTAT&(1<<4|1<<5|1<<7) != 1<<4|1<<5|1<<7 {
+		t.Fatalf("FaultError = %+v, want captured sticky state", fault)
+	}
+	if got := target.abortValues[len(target.abortValues)-1]; got != 0x0e {
+		t.Fatalf("sticky-clear ABORT = %#x, want 0x0e", got)
+	}
+	if target.sticky != 0 {
+		t.Fatalf("sticky state after recovery = %#08x, want 0", target.sticky)
+	}
+	if _, err := dp.ReadAP(t.Context(), 0, dap.APIDR); err != nil {
+		t.Fatalf("ReadAP() after FAULT recovery: %v", err)
+	}
+}
+
+func TestDebugPortClearsObservedSTICKYCMPWithoutIdentity(t *testing.T) {
+	target := newWaitTarget()
+	dp := enteredDP(t, target)
+	if err := dp.WriteDP(t.Context(), dap.SELECT, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dp.ReadDP(t.Context(), dap.RDBUFF); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dp.ReadDP(t.Context(), dap.CTRLSTAT); err != nil {
+		t.Fatal(err)
+	}
+
+	target.sticky = 1 << 4
+	_, err := dp.ReadDP(t.Context(), dap.RDBUFF)
+	var fault *dap.FaultError
+	if !errors.As(err, &fault) || !errors.Is(err, swd.ErrFault) {
+		t.Fatalf("ReadDP(RDBUFF) error = %v, want typed FAULT", err)
+	}
+	if !fault.StateValid || fault.CTRLSTAT&(1<<4) == 0 {
+		t.Fatalf("FaultError = %+v, want captured STICKYCMP", fault)
+	}
+	if got := target.abortValues[len(target.abortValues)-1]; got != 1<<1 {
+		t.Fatalf("sticky-clear ABORT = %#x, want STKCMPCLR", got)
+	}
+	if target.sticky != 0 {
+		t.Fatalf("sticky state after recovery = %#08x, want 0", target.sticky)
+	}
+	if _, err := dp.ReadDP(t.Context(), dap.RDBUFF); err != nil {
+		t.Fatalf("ReadDP(RDBUFF) after STICKYCMP recovery: %v", err)
+	}
+}
+
+func TestDebugPortUsesPreviousSELECTAfterWriteDataFAULT(t *testing.T) {
+	target := newWaitTarget()
+	target.AddAP(0, 0x24770011)
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	selectReq := swd.Request{Addr: uint8(dap.SELECT)}
+	target.dropWriteFor = selectReq
+	target.dropWrite = true
+	target.stickyOnDrop = testWriteDataError
+	if err := dp.WriteDP(t.Context(), dap.SELECT, 0xf0); err != nil {
+		t.Fatal(err)
+	}
+	_, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	var fault *dap.FaultError
+	if !errors.As(err, &fault) || !fault.StateValid || fault.CTRLSTAT&testWriteDataError == 0 {
+		t.Fatalf("ReadAP() error = %v, want WDATAERR after abandoned SELECT data", err)
+	}
+	value, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	if err != nil {
+		t.Fatalf("ReadAP() after WDATAERR recovery: %v", err)
+	}
+	if value != 0x24770011 {
+		t.Fatalf("APIDR = %#08x, want %#08x", value, uint32(0x24770011))
+	}
+	if got := target.executed[selectReq]; got != 3 {
+		t.Fatalf("executed SELECT writes = %d, want bootstrap, abandoned write, and restored AP selection", got)
+	}
+}
+
+func TestDebugPortDoesNotReadCTRLSTATAfterAbandonedBankZeroSELECT(t *testing.T) {
+	target := newWaitTarget()
+	target.AddAP(0, 0x24770011)
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := dp.WriteDP(t.Context(), dap.SELECT, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dp.ReadDP(t.Context(), dap.DPIDR); err != nil {
+		t.Fatal(err)
+	}
+	target.dropWriteFor = swd.Request{Addr: uint8(dap.SELECT)}
+	target.dropWrite = true
+	target.stickyOnDrop = testWriteDataError
+	if err := dp.WriteDP(t.Context(), dap.SELECT, 0); err != nil {
+		t.Fatal(err)
+	}
+	_, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	var fault *dap.FaultError
+	if !errors.As(err, &fault) || fault.StateValid || !strings.Contains(err.Error(), "cannot read CTRL/STAT") {
+		t.Fatalf("ReadAP() error = %v, want FAULT without CTRL/STAT state", err)
+	}
+	before := len(target.requests)
+	assertRepairBlocksTraffic(t, dp, target, before)
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatalf("Release() after abandoned bank-zero SELECT: %v", err)
+	}
+}
+
+func TestDebugPortKeepsSELECTProvisionalAfterDPIDRRead(t *testing.T) {
+	target := newWaitTarget()
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	target.dropWriteFor = swd.Request{Addr: uint8(dap.SELECT)}
+	target.dropWrite = true
+	target.stickyOnDrop = testWriteDataError
+	if err := dp.WriteDP(t.Context(), dap.SELECT, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dp.ReadDP(t.Context(), dap.DPIDR); err != nil {
+		t.Fatal(err)
+	}
+	before := len(target.requests)
+	if _, err := dp.ReadDP(t.Context(), dap.CTRLSTAT); err == nil || !strings.Contains(err.Error(), "bank is ambiguous") {
+		t.Fatalf("ReadDP(CTRLSTAT) error = %v, want ambiguous bank", err)
+	}
+	if got := len(target.requests); got != before {
+		t.Fatalf("requests after ambiguous CTRL/STAT read = %d, want %d", got, before)
+	}
+	if err := dp.WriteDP(t.Context(), dap.CTRLSTAT, 0); err == nil || !strings.Contains(err.Error(), "bank is ambiguous") {
+		t.Fatalf("WriteDP(CTRLSTAT) error = %v, want ambiguous bank", err)
+	}
+	if got := len(target.requests); got != before {
+		t.Fatalf("requests after ambiguous CTRL/STAT write = %d, want %d", got, before)
+	}
+}
+
+func TestConnectConfirmsSELECTThroughRDBUFF(t *testing.T) {
+	target := newWaitTarget()
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	selectIndex := -1
+	for i, req := range target.requests {
+		if req == (swd.Request{Addr: uint8(dap.SELECT)}) {
+			selectIndex = i
+			break
+		}
+	}
+	if selectIndex < 0 || selectIndex+2 >= len(target.requests) {
+		t.Fatalf("connection requests = %#v, want SELECT, RDBUFF, CTRL/STAT", target.requests)
+	}
+	if target.requests[selectIndex+1] != (swd.Request{Read: true, Addr: uint8(dap.RDBUFF)}) || target.requests[selectIndex+2] != (swd.Request{Read: true, Addr: uint8(dap.CTRLSTAT)}) {
+		t.Fatalf("requests after SELECT = %#v, want RDBUFF then CTRL/STAT", target.requests[selectIndex:selectIndex+3])
+	}
+}
+
+func TestConnectRepairsFailedRDBUFFConfirmation(t *testing.T) {
+	tests := []struct {
+		name string
+		arm  func(*waitTarget, swd.Request)
+		want error
+	}{
+		{name: "WAIT", arm: func(target *waitTarget, req swd.Request) { target.arm(req, 1) }, want: swd.ErrWait},
+		{name: "FAULT", arm: func(target *waitTarget, req swd.Request) { target.armFault(req) }, want: swd.ErrFault},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			target := newWaitTarget()
+			wire := &reentryFailWire{inner: swdsim.New(target)}
+			conn := swd.New(wire)
+			if err := conn.JTAGToSWD(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			dp := dap.NewSWDP(conn)
+			rdbuff := swd.Request{Read: true, Addr: uint8(dap.RDBUFF)}
+			test.arm(target, rdbuff)
+
+			if _, err := dp.Connect(t.Context()); !errors.Is(err, test.want) {
+				t.Fatalf("Connect() error = %v, want %v", err, test.want)
+			}
+			if wire.reentryAttempts != 1 {
+				t.Fatalf("SWD re-entry attempts = %d, want 1", wire.reentryAttempts)
+			}
+			if _, err := dp.Connect(t.Context()); err != nil {
+				t.Fatalf("Connect() after repaired SELECT confirmation: %v", err)
+			}
+		})
+	}
+}
+
+func TestDebugPortRejectsAmbiguousCTRLSTATReadBeforeTraffic(t *testing.T) {
+	target := newWaitTarget()
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	target.dropWriteFor = swd.Request{Addr: uint8(dap.SELECT)}
+	target.dropWrite = true
+	target.stickyOnDrop = testWriteDataError
+	if err := dp.WriteDP(t.Context(), dap.SELECT, 1); err != nil {
+		t.Fatal(err)
+	}
+	before := len(target.requests)
+	if _, err := dp.ReadDP(t.Context(), dap.CTRLSTAT); err == nil || !strings.Contains(err.Error(), "bank is ambiguous") {
+		t.Fatalf("ReadDP(CTRLSTAT) error = %v, want ambiguous bank", err)
+	}
+	if got := len(target.requests); got != before {
+		t.Fatalf("requests after ambiguous CTRL/STAT read = %d, want %d", got, before)
+	}
+}
+
+func TestDebugPortReestablishesSELECTAfterABORT(t *testing.T) {
+	target := newWaitTarget()
+	target.AddAP(0, 0x24770011)
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	selectReq := swd.Request{Addr: uint8(dap.SELECT)}
+	target.dropWriteFor = selectReq
+	target.dropWrite = true
+	target.stickyOnDrop = testWriteDataError
+	if err := dp.WriteDP(t.Context(), dap.SELECT, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := dp.WriteDP(t.Context(), dap.ABORT, 1<<3); err != nil {
+		t.Fatal(err)
+	}
+	value, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	if err != nil {
+		t.Fatalf("ReadAP() after WDERRCLR: %v", err)
+	}
+	if value != 0x24770011 {
+		t.Fatalf("APIDR = %#08x, want %#08x", value, uint32(0x24770011))
+	}
+	if got := target.executed[selectReq]; got != 3 {
+		t.Fatalf("executed SELECT writes = %d, want bootstrap, abandoned write, and re-established AP selection", got)
+	}
+}
+
+func TestDebugPortRequiresRepairWhenStickyClearDoesNotTakeEffect(t *testing.T) {
+	target := newWaitTarget()
+	target.AddMEMAP(0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := dap.NewMemAP(t.Context(), dp, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dp.ReadAP(t.Context(), 0, dap.APIDR); err != nil {
+		t.Fatal(err)
+	}
+
+	target.sticky = testWriteDataError
+	target.dropStickyClear = true
+	_, err = dp.ReadAP(t.Context(), 0, dap.APIDR)
+	var fault *dap.FaultError
+	if !errors.As(err, &fault) || !errors.Is(err, swd.ErrFault) || !strings.Contains(err.Error(), "sticky state remains") {
+		t.Fatalf("ReadAP() error = %v, want FAULT and uncleared sticky state", err)
+	}
+	if !fault.StateValid || fault.CTRLSTAT&testWriteDataError == 0 {
+		t.Fatalf("FaultError = %+v, want captured WDATAERR", fault)
+	}
+	before := len(target.requests)
+	assertRepairBlocksTraffic(t, dp, target, before)
+	if err := dp.Release(t.Context()); !errors.Is(err, swd.ErrFault) {
+		t.Fatalf("first Release() error = %v, want pending FAULT", err)
+	}
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatalf("retried Release(): %v", err)
+	}
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatalf("Connect() after repair: %v", err)
+	}
+	if _, err := mem.ReadWord(t.Context(), 0xe000ed00); err == nil || !strings.Contains(err.Error(), "invalidated") {
+		t.Fatalf("ReadWord() through pre-FAULT MEM-AP error = %v, want invalidated state", err)
+	}
+}
+
+func TestDebugPortPreservesFAULTWhenCleanupFails(t *testing.T) {
+	target := newWaitTarget()
+	target.AddAP(0, 0x24770011)
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	cleanupErr := errors.New("injected FAULT cleanup failure")
+	target.sticky = testWriteDataError
+	target.clearErr = cleanupErr
+	_, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	var fault *dap.FaultError
+	if !errors.As(err, &fault) || !errors.Is(err, swd.ErrFault) || !errors.Is(err, cleanupErr) {
+		t.Fatalf("ReadAP() error = %v, want typed FAULT and cleanup failure", err)
+	}
+	if !fault.StateValid || fault.CTRLSTAT&testWriteDataError == 0 {
+		t.Fatalf("FaultError = %+v, want captured WDATAERR", fault)
+	}
+	before := len(target.requests)
+	assertRepairBlocksTraffic(t, dp, target, before)
+	target.clearErr = nil
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatalf("Release() after FAULT cleanup failure: %v", err)
+	}
+}
+
+func TestDebugPortReportsFAULTWithoutStateWhenCTRLSTATReadFails(t *testing.T) {
+	target := newWaitTarget()
+	target.AddAP(0, 0x24770011)
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	readErr := errors.New("injected CTRL/STAT read failure")
+	target.sticky = testWriteDataError
+	target.ctrlStatErr = readErr
+	_, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	var fault *dap.FaultError
+	if !errors.As(err, &fault) || !errors.Is(err, swd.ErrFault) || !errors.Is(err, readErr) {
+		t.Fatalf("ReadAP() error = %v, want typed FAULT and CTRL/STAT read failure", err)
+	}
+	if fault.StateValid {
+		t.Fatalf("FaultError = %+v, want StateValid false", fault)
+	}
+	before := len(target.requests)
+	assertRepairBlocksTraffic(t, dp, target, before)
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatalf("Release() after failed CTRL/STAT read: %v", err)
+	}
+	if target.sticky != 0 {
+		t.Fatalf("sticky state after repair = %#08x, want 0", target.sticky)
+	}
+}
+
 func TestDebugPortKeepsFramingAfterWAITThenFAULT(t *testing.T) {
 	target := newWaitTarget()
 	target.AddMEMAP(0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
@@ -721,8 +1104,15 @@ func TestDebugPortKeepsFramingAfterWAITThenFAULT(t *testing.T) {
 	if target.attempts != 2 || target.executed[req] != 0 {
 		t.Fatalf("WAIT-to-FAULT request attempted %d times and executed %d times", target.attempts, target.executed[req])
 	}
+	if _, err := mem.ReadWord(t.Context(), 0xe000ed00); err == nil || !strings.Contains(err.Error(), "invalidated") {
+		t.Fatalf("ReadWord() through invalidated MEM-AP error = %v", err)
+	}
+	mem, err = dap.NewMemAP(t.Context(), dp, 0)
+	if err != nil {
+		t.Fatalf("NewMemAP() after clean FAULT: %v", err)
+	}
 	if _, err := mem.ReadWord(t.Context(), 0xe000ed00); err != nil {
-		t.Fatalf("ReadWord() after clean FAULT: %v", err)
+		t.Fatalf("ReadWord() through replacement MEM-AP: %v", err)
 	}
 	for _, value := range target.abortValues {
 		if value&1 != 0 {
@@ -1121,6 +1511,42 @@ func TestReleaseFailureAllowsCleanupOnly(t *testing.T) {
 	}
 	if err := dp.Release(t.Context()); err != nil {
 		t.Fatalf("retried debug-port Release(): %v", err)
+	}
+}
+
+func TestReleaseRepairsAbandonedSELECTWithInheritedPower(t *testing.T) {
+	target := newWaitTarget()
+	dp := enteredDP(t, target)
+	if err := dp.WriteDP(t.Context(), dap.CTRLSTAT, debugRequest|systemRequest); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := dp.WriteDP(t.Context(), dap.SELECT, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dp.ReadDP(t.Context(), dap.RDBUFF); err != nil {
+		t.Fatal(err)
+	}
+	target.dropWriteFor = swd.Request{Addr: uint8(dap.SELECT)}
+	target.dropWrite = true
+	target.stickyOnDrop = testWriteDataError
+
+	if err := dp.Release(t.Context()); !errors.Is(err, swd.ErrFault) {
+		t.Fatalf("Release() error = %v, want FAULT after abandoned SELECT data", err)
+	}
+	before := len(target.requests)
+	assertRepairBlocksTraffic(t, dp, target, before)
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatalf("Release() after SELECT repair: %v", err)
+	}
+	state, err := target.Target.Read(t.Context(), swd.Request{Read: true, Addr: uint8(dap.CTRLSTAT)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state&(debugRequest|systemRequest) != debugRequest|systemRequest {
+		t.Fatalf("inherited power requests after release = %#08x", state)
 	}
 }
 

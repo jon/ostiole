@@ -77,7 +77,7 @@ up and released in reverse order.
 | `*usb.Device` | Owns one open attachment and at most one claimed interface. `Close` releases both. |
 | `*ftdi.Channel` | Takes ownership of the USB device passed to `ftdi.Open`. `Close` resets bit mode, sets the latency timer to 16 ms, purges the receive and transmit paths, releases the interface, and closes the device. It does not preserve prior FTDI settings. |
 | `*swd.Conn` | Represents one logical SWD transaction stream over its wire. It does not own a separate host resource. Calls on a connection must be serialized. |
-| `*dap.DebugPort` | Requires exclusive use of its SWD transaction stream. After `Connect`, it owns only the debug and system power requests it added. It records newly requested power bits before writing them so bounded cleanup can attempt to clear them even when the write's result is ambiguous. |
+| `*dap.DebugPort` | Requires exclusive use of its SWD transaction stream. After `Connect`, it owns only the debug and system power requests it added. It records newly requested power bits before writing them so bounded cleanup can attempt to clear them even when the write's result is ambiguous. `Release` settles its final SELECT write through RDBUFF before reporting success. |
 | `*dap.MemAP` | Saves the CSW and TAR values it changes. `Release` retries failed restoration; if DAPABORT interrupts cleanup, the next `Release` retries both saved values. Calls sharing the MEM-AP or its debug port must be serialized. |
 
 An application that reaches the MEM-AP layer releases the MEM-AP before the
@@ -105,16 +105,22 @@ notes.
 
 `dap.DebugPort` adds ADIv5 policy above SWD. It validates DPIDR, clears
 supported sticky conditions with ABORT, writes zero to SELECT once without
-retrying to establish DP bank zero, and rejects ORUNDETECT because the current
-SWD transfer does not implement that response grammar. It then requests
+retrying, confirms the write through RDBUFF, and rejects ORUNDETECT because the
+current SWD transfer does not implement that response grammar. It then requests
 acknowledged debug and system power, retries the exact physical request which
 returned WAIT, and completes posted AP transactions through RDBUFF. After an
-extended AP stall, `dap.DebugPort`
-issues DAPABORT and invalidates AP-derived state. If WAIT cleanup or another
-transfer leaves framing unknown, `dap.DebugPort` invalidates AP-derived state
-and blocks every operation except cleanup. Cleanup re-enters SWD before sending
-another framed request and refuses to restore state if DPIDR no longer matches
-the connection being cleaned up. Failed setup uses the DPIDR read by that
+extended AP stall, `dap.DebugPort` issues DAPABORT and invalidates AP-derived
+state. A FAULT is not retried: the debug port captures bank-zero CTRL/STAT,
+clears the sticky conditions reported there, verifies the clear through
+CTRL/STAT, returns a typed error, and invalidates AP-derived state when the
+failed request belonged to AP work. A SELECT write remains provisional until
+later traffic establishes whether its data took effect. WDATAERR invalidates
+the cached selection; FAULT handling reads `0x04` only when both possible DP
+banks are zero. If FAULT cleanup, WAIT cleanup, or another transfer leaves
+framing unknown, `dap.DebugPort` invalidates AP-derived state and blocks every
+operation except cleanup. Cleanup re-enters SWD before sending another framed
+request and refuses to restore state if DPIDR no longer matches the connection
+being cleaned up. Failed setup uses the DPIDR read by that
 attempt; cleanup for an established connection uses its last successful
 DPIDR. `Connect` attempts this cleanup itself when setup fails; a cleanup
 failure remains pending for `Release`. Once `Release` starts, a failure likewise

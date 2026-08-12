@@ -24,12 +24,15 @@ type DebugPort struct {
 
 func (dp *DebugPort) selectDPBankZero(ctx context.Context) error {
 	_, err := dp.conn.Transfer(ctx, swd.Request{Addr: uint8(SELECT)}, 0)
-	if err == nil {
-		dp.state.recordSELECT(0)
-		return nil
+	if err != nil {
+		dp.state.loseFraming()
+		return fmt.Errorf("dap: select DP bank zero before checking CTRL/STAT: %w", err)
 	}
-	dp.state.loseFraming()
-	return fmt.Errorf("dap: select DP bank zero before checking CTRL/STAT: %w", err)
+	dp.state.recordSELECT(0)
+	if _, err := dp.transfer(ctx, swd.Request{Read: true, Addr: uint8(RDBUFF)}, 0); err != nil {
+		return fmt.Errorf("dap: confirm DP bank zero before checking CTRL/STAT: %w", err)
+	}
+	return nil
 }
 
 // NewSWDP returns a debug-port client over conn. The caller must give the
@@ -61,6 +64,10 @@ func (dp *DebugPort) readDP(ctx context.Context, reg DPReg) (uint32, error) {
 	if uint8(reg)&^0x0c != 0 {
 		return 0, fmt.Errorf("dap: invalid DP register address %#02x", reg)
 	}
+	if reg == CTRLSTAT && dp.state.dpBankAmbiguous() {
+		return 0, errors.New("dap: DP register bank is ambiguous after an unconfirmed SELECT write")
+	}
+	bankZero := reg == CTRLSTAT && dp.state.selectDP.valid && dp.state.dpBank() == 0
 	value, err := dp.transfer(ctx, swd.Request{
 		Read: true,
 		Addr: uint8(reg),
@@ -68,7 +75,7 @@ func (dp *DebugPort) readDP(ctx context.Context, reg DPReg) (uint32, error) {
 	if err != nil {
 		return 0, fmt.Errorf("dap: read DP register %#02x: %w", reg, err)
 	}
-	if reg == CTRLSTAT && dp.state.selectDP.valid && dp.state.dpBank() == 0 {
+	if bankZero {
 		dp.state.confirmResponse(value)
 	}
 	return value, nil
@@ -92,6 +99,9 @@ func (dp *DebugPort) writeDP(ctx context.Context, reg DPReg, value uint32) error
 	}
 	if uint8(reg)&^0x0c != 0 {
 		return fmt.Errorf("dap: invalid DP register address %#02x", reg)
+	}
+	if reg == CTRLSTAT && dp.state.dpBankAmbiguous() {
+		return errors.New("dap: DP register bank is ambiguous after an unconfirmed SELECT write")
 	}
 	if reg == CTRLSTAT && dp.state.selectDP.valid && dp.state.dpBank() == 0 && value&overrunDetect != 0 {
 		return errors.New("dap: write CTRL/STAT: ORUNDETECT requires unsupported overrun-response framing")
