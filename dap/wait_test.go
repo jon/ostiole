@@ -43,6 +43,7 @@ type waitTarget struct {
 	readErrAfterAbort error
 	requests          []swd.Request
 	dpidrOverride     uint32
+	selectValues      []uint32
 }
 
 type cleanupFailWire struct {
@@ -207,6 +208,9 @@ func (t *waitTarget) Write(ctx context.Context, req swd.Request, value uint32) e
 		if err := t.writeAbort(value); err != nil {
 			return err
 		}
+	}
+	if !req.AP && req.Addr == uint8(dap.SELECT) {
+		t.selectValues = append(t.selectValues, value)
 	}
 	if err := t.Target.Write(ctx, req, value); err != nil {
 		return err

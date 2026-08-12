@@ -103,10 +103,12 @@ acknowledgement is returned to its caller without retrying. See
 [Serial Wire Debug](protocols/swd.md) for the wire protocol and current bench
 notes.
 
-`dap.DebugPort` adds ADIv5 policy above SWD. It validates DPIDR, clears
+`dap.DebugPort` adds ADIv5 policy above SWD. It validates DPIDR, supports raw
+current-bank and explicitly banked DP access, clears
 supported sticky conditions with ABORT, writes zero to SELECT once without
-retrying, confirms the write through RDBUFF, and rejects ORUNDETECT because the
-current SWD transfer does not implement that response grammar. It then requests
+retrying, confirms the write through RDBUFF, and rejects ORUNDETECT or a
+non-default DLCR turnaround because the current SWD transfer does not implement
+those response grammars. It then requests
 acknowledged debug and system power, retries the exact physical request which
 returned WAIT, and completes posted AP transactions through RDBUFF. After an
 extended AP stall, `dap.DebugPort` issues DAPABORT and invalidates AP-derived
