@@ -228,11 +228,20 @@ gave this target ample time to finish ordinary AP work. The absence of WAIT
 here is a bench observation, not evidence that replay and abort recovery are
 correct.
 
-That is enough to identify one working DP/AP/MEM-AP path. It says nothing yet
-about sparse APs, delayed power acknowledgements, physical WAIT or FAULT
-responses, packed transfers, auto-increment across 1 KiB, or target writes.
-Those are better experiments than collecting more CPUID values from the same
-board.
+On 2026-08-11 I inverted the data-parity bit of a same-value SELECT write. The
+target set WDATAERR and returned FAULT to the next ordinary request. A
+following CTRL/STAT read showed that WDERRCLR cleared WDATAERR, and the AP
+access then completed normally. The five DAP hardware tests in that run
+counted 82 OK acknowledgements, one FAULT, no WAIT, and no invalid response.
+Both power-request bits were already set and remained set. This exercises a
+target-generated sticky fault; it does not exercise an AP-originated
+STICKYERR or a naturally occurring WAIT.
+
+That is enough to identify one working DP/AP/MEM-AP path and one physical
+WDATAERR recovery path. It says nothing yet about sparse APs, delayed power
+acknowledgements, physical WAIT responses, packed transfers, auto-increment
+across 1 KiB, or target writes. Those are better experiments than collecting
+more CPUID values from the same board.
 
 ## ADIv6 is a different job
 

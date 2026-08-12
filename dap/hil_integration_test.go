@@ -18,6 +18,21 @@ type ackCountingWire struct {
 	counts [8]int
 }
 
+type parityFaultWire struct {
+	inner swd.Wire
+	armed bool
+}
+
+func (w *parityFaultWire) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
+	if w.armed && bits == 42 {
+		w.armed = false
+		corrupt := append([]byte(nil), output...)
+		corrupt[33/8] ^= 1 << (33 % 8)
+		output = corrupt
+	}
+	return w.inner.SWDIO(ctx, direction, output, bits)
+}
+
 func (w *ackCountingWire) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
 	input, err := w.inner.SWDIO(ctx, direction, output, bits)
 	if err == nil && bits == 12 && len(input) >= 2 {
@@ -33,6 +48,11 @@ func (w *ackCountingWire) SWDIO(ctx context.Context, direction, output []byte, b
 }
 
 func openHardwareDebugPort(t *testing.T, ctx context.Context) *dap.DebugPort {
+	dp, _ := openHardwareDebugPortWithFaultWire(t, ctx)
+	return dp
+}
+
+func openHardwareDebugPortWithFaultWire(t *testing.T, ctx context.Context) (*dap.DebugPort, *parityFaultWire) {
 	t.Helper()
 	if os.Getenv("OSTIOLE_FTDI_HIL") != "1" {
 		t.Skip("OSTIOLE_FTDI_HIL is not 1")
@@ -66,7 +86,8 @@ func openHardwareDebugPort(t *testing.T, ctx context.Context) *dap.DebugPort {
 	})
 
 	wire := &ackCountingWire{inner: ch}
-	conn := swd.New(wire)
+	faultWire := &parityFaultWire{inner: wire}
+	conn := swd.New(faultWire)
 	if err := conn.JTAGToSWD(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -80,5 +101,5 @@ func openHardwareDebugPort(t *testing.T, ctx context.Context) *dap.DebugPort {
 		t.Logf("physical ACKs: OK=%d WAIT=%d FAULT=%d invalid=%d",
 			wire.counts[0b001], wire.counts[0b010], wire.counts[0b100], invalid)
 	})
-	return dap.NewSWDP(conn)
+	return dap.NewSWDP(conn), faultWire
 }
