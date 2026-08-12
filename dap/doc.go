@@ -19,7 +19,13 @@
 // bank-zero CTRL/STAT when the register selection is known, clears the sticky
 // conditions reported there, verifies the clear, and returns a FaultError. A
 // SELECT write remains provisional until later traffic establishes whether
-// its data took effect.
-// Failed FAULT cleanup leaves the port in the same cleanup-only state as a
-// failed release.
+// its data took effect. Failed FAULT cleanup leaves the port in the same
+// cleanup-only state as a failed release.
+//
+// A Txn queues an ordered group of DP and AP operations. Commit validates the
+// complete queue before sending traffic, settles DP writes through RDBUFF,
+// and resolves every Result. If an operation fails, earlier confirmed results
+// remain available and later operations report that they were not executed. If
+// traffic was clocked but completion cannot be established, the Result reports
+// ErrIndeterminate.
 package dap
