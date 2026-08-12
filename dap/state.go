@@ -23,20 +23,34 @@ type selectState struct {
 }
 
 type debugPortState struct {
-	session      debugPortSession
-	response     swdResponseState
-	selectDP     selectState
-	ownedPower   uint32
-	apGeneration uint64
+	session       debugPortSession
+	response      swdResponseState
+	selectDP      selectState
+	priorSELECT   selectState
+	selectPending bool
+	ownedPower    uint32
+	apGeneration  uint64
 }
 
 func (s *debugPortState) recordSELECT(value uint32) {
+	s.priorSELECT = s.selectDP
 	s.selectDP = selectState{value: value, valid: true}
+	s.selectPending = true
+}
+
+func (s *debugPortState) confirmSELECT() {
+	s.priorSELECT = selectState{}
+	s.selectPending = false
+}
+
+func (s *debugPortState) invalidateSELECT() {
+	s.selectDP = selectState{}
+	s.confirmSELECT()
 }
 
 func (s *debugPortState) beginProtocolEntry() {
 	s.response = responseUnchecked
-	s.selectDP.valid = false
+	s.invalidateSELECT()
 }
 
 func (s *debugPortState) beginConnect() {
@@ -46,6 +60,28 @@ func (s *debugPortState) beginConnect() {
 
 func (s *debugPortState) dpBank() uint8 {
 	return uint8(s.selectDP.value & 0x0f)
+}
+
+func (s *debugPortState) faultBankZero() bool {
+	if !s.selectDP.valid || s.dpBank() != 0 {
+		return false
+	}
+	return !s.selectPending || s.priorSELECT.valid && s.priorSELECT.value&0x0f == 0
+}
+
+func (s *debugPortState) resolveSELECTFromCTRLSTAT(ctrlStat uint32) {
+	if !s.selectPending {
+		return
+	}
+	if ctrlStat&writeDataError != 0 {
+		s.invalidateSELECT()
+		return
+	}
+	s.confirmSELECT()
+}
+
+func (s *debugPortState) dpBankAmbiguous() bool {
+	return s.selectPending && (!s.priorSELECT.valid || s.priorSELECT.value&0x0f != s.selectDP.value&0x0f)
 }
 
 func (s *debugPortState) confirmResponse(state uint32) {
@@ -66,7 +102,7 @@ func (s *debugPortState) loseFraming() {
 	}
 	s.session = sessionRepairRequired
 	s.response = responseLost
-	s.selectDP.valid = false
+	s.invalidateSELECT()
 }
 
 func (s *debugPortState) beginRepair() {

@@ -39,6 +39,19 @@ func TestDebugPortStateTracksFullSELECT(t *testing.T) {
 	if state.dpBank() != 2 {
 		t.Fatalf("DPBANKSEL = %d, want 2", state.dpBank())
 	}
+	if !state.selectPending {
+		t.Fatal("SELECT write is already confirmed")
+	}
+
+	state.confirmSELECT()
+	state.recordSELECT(0x34000001)
+	state.resolveSELECTFromCTRLSTAT(writeDataError)
+	if state.selectDP.valid {
+		t.Fatalf("SELECT remained valid after WDATAERR: %#08x", state.selectDP.value)
+	}
+	if state.selectPending {
+		t.Fatal("unresolved SELECT write remained pending")
+	}
 }
 
 func TestDebugPortStateCompletesLifecycle(t *testing.T) {

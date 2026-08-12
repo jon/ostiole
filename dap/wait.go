@@ -38,11 +38,12 @@ func (dp *DebugPort) transfer(ctx context.Context, req swd.Request, data uint32)
 			return 0, dp.stopWaiting(req, waits, err)
 		}
 		value, err := dp.conn.Transfer(ctx, req, data)
+		dp.resolveSELECT(req, value, err)
 		if err == nil {
 			return value, nil
 		}
 		if !errors.Is(err, swd.ErrWait) {
-			return dp.finishRetryError(value, err, waits)
+			return dp.finishRetryError(req, value, err, waits)
 		}
 		if err := dp.validateWait(req, err); err != nil {
 			return 0, err
@@ -55,6 +56,42 @@ func (dp *DebugPort) transfer(ctx context.Context, req swd.Request, data uint32)
 	}
 }
 
+func (dp *DebugPort) resolveSELECT(req swd.Request, value uint32, err error) {
+	if !dp.state.selectPending {
+		return
+	}
+	switch {
+	case isABORTWrite(req):
+		dp.resolveSELECTAfterABORT(err)
+	case isDPIDRRead(req):
+		return
+	case isCTRLSTATRead(req) && dp.state.selectDP.valid && dp.state.dpBank() == 0:
+		if err == nil {
+			dp.state.resolveSELECTFromCTRLSTAT(value)
+		}
+	case err == nil || err == swd.ErrWait || err == swd.ErrParity:
+		dp.state.confirmSELECT()
+	}
+}
+
+func (dp *DebugPort) resolveSELECTAfterABORT(err error) {
+	if err == nil {
+		dp.state.invalidateSELECT()
+	}
+}
+
+func isABORTWrite(req swd.Request) bool {
+	return !req.AP && !req.Read && req.Addr == uint8(ABORT)
+}
+
+func isDPIDRRead(req swd.Request) bool {
+	return !req.AP && req.Read && req.Addr == uint8(DPIDR)
+}
+
+func isCTRLSTATRead(req swd.Request) bool {
+	return !req.AP && req.Read && req.Addr == uint8(CTRLSTAT)
+}
+
 func (dp *DebugPort) stopWaiting(req swd.Request, waits int, cause error) error {
 	if waits == 0 {
 		return cause
@@ -62,8 +99,11 @@ func (dp *DebugPort) stopWaiting(req swd.Request, waits int, cause error) error 
 	return dp.finishWait(req, errors.Join(swd.ErrWait, cause))
 }
 
-func (dp *DebugPort) finishRetryError(value uint32, err error, waits int) (uint32, error) {
-	if err == swd.ErrFault || waits == 0 && err == swd.ErrParity {
+func (dp *DebugPort) finishRetryError(req swd.Request, value uint32, err error, waits int) (uint32, error) {
+	if err == swd.ErrFault {
+		return 0, dp.handleFault(req)
+	}
+	if waits == 0 && err == swd.ErrParity {
 		return value, err
 	}
 	if waits == 0 {
@@ -71,6 +111,66 @@ func (dp *DebugPort) finishRetryError(value uint32, err error, waits int) (uint3
 	}
 	cause := errors.Join(swd.ErrWait, fmt.Errorf("dap: WAIT retry failed: %w", err))
 	return 0, dp.invalidateWait(cause)
+}
+
+func (dp *DebugPort) handleFault(req swd.Request) error {
+	fault := &FaultError{}
+	if dp.state.response != responseSimple || !dp.state.faultBankZero() {
+		dp.state.loseFraming()
+		return errors.Join(fault, errors.New("dap: cannot read CTRL/STAT after FAULT without the simple response grammar and a known bank-zero selection"))
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), waitRecoveryTimeout)
+	defer cancel()
+	state, err := dp.conn.Transfer(ctx, swd.Request{Read: true, Addr: uint8(CTRLSTAT)}, 0)
+	if err != nil {
+		dp.state.loseFraming()
+		return errors.Join(fault, fmt.Errorf("dap: read CTRL/STAT after FAULT: %w", err))
+	}
+	fault.CTRLSTAT = state
+	fault.StateValid = true
+	dp.state.resolveSELECTFromCTRLSTAT(state)
+	minimal := dp.faultIdentityMinimal(state)
+	if stickyClearForState(state, minimal) != 0 {
+		if err := dp.clearFaultState(ctx, req, fault, minimal); err != nil {
+			return err
+		}
+	}
+	if waitMayAffectAP(req) {
+		dp.state.invalidateAP()
+	}
+	return fault
+}
+
+func (dp *DebugPort) clearFaultState(ctx context.Context, req swd.Request, fault *FaultError, minimal bool) error {
+	clear := stickyClearForState(fault.CTRLSTAT, minimal)
+	if _, err := dp.conn.Transfer(ctx, swd.Request{Addr: uint8(ABORT)}, clear); err != nil {
+		dp.state.loseFraming()
+		return errors.Join(fault, fmt.Errorf("dap: clear sticky state after FAULT: %w", err))
+	}
+	state, err := dp.conn.Transfer(ctx, swd.Request{Read: true, Addr: uint8(CTRLSTAT)}, 0)
+	if err != nil {
+		dp.state.loseFraming()
+		return errors.Join(fault, fmt.Errorf("dap: verify sticky state after FAULT: %w", err))
+	}
+	if remaining := state & supportedStickyState(minimal); remaining != 0 {
+		if waitMayAffectAP(req) {
+			dp.state.invalidateAP()
+		}
+		dp.state.beginRepair()
+		return errors.Join(fault, fmt.Errorf("dap: sticky state remains after FAULT cleanup: CTRL/STAT=%#08x", state))
+	}
+	return nil
+}
+
+func (dp *DebugPort) faultIdentityMinimal(state uint32) bool {
+	if dp.reentryKnown {
+		return dp.reentryID.Minimal
+	}
+	if dp.identified {
+		return dp.identity.Minimal
+	}
+	return state&stickyCompare == 0
 }
 
 func (dp *DebugPort) invalidateTransfer(cause error) error {
@@ -165,6 +265,14 @@ func supportedStickyClear(minimal bool) uint32 {
 		clear |= clearStickyCompare
 	}
 	return clear
+}
+
+func supportedStickyState(minimal bool) uint32 {
+	state := stickyError | writeDataError | stickyOverrun
+	if !minimal {
+		state |= stickyCompare
+	}
+	return state
 }
 
 func stickyClearForState(state uint32, minimal bool) uint32 {
