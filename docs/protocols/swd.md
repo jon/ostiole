@@ -196,6 +196,28 @@ acknowledgements. The counter did not include the separate raw DPIDR test.
 Ordinary traffic on this target therefore did not exercise WAIT or abort
 recovery.
 
+## Induced FAULT, 2026-08-11
+
+I repeated the macOS FT232H test with one deliberate change: a wire wrapper
+inverted the parity bit of a same-value SELECT write after the request had
+received OK. The target set WDATAERR. Its next ordinary request returned
+FAULT. A following CTRL/STAT read showed that WDERRCLR cleared WDATAERR, and
+the same AP access completed normally.
+
+The complete command was:
+
+```sh
+OSTIOLE_FTDI_HIL=1 OSTIOLE_FTDI_HIL_FAULT=1 \
+  go test -count=1 -p 1 -tags=integration -v ./swd ./dap
+```
+
+Across the five DAP hardware tests the harness counted 82 OK responses, one
+FAULT, no WAIT, and no invalid acknowledgement. Both power-request bits were
+already set and remained set, so this count is not directly comparable with
+the earlier run where connection ownership differed. The induced case
+demonstrates the target's write-parity and sticky-FAULT path. It does not
+manufacture an ACK in the probe and it still is not a waveform capture.
+
 Measuring turnaround requires a capture of SWCLK, SWDIO, and the FTDI
-direction pin. Exercising WAIT, FAULT, and bad parity requires a controllable
-target; successful transfers cannot settle those recovery paths.
+direction pin. A real WAIT still requires a target which can be made to stall;
+the ordinary transfers here did not produce one.
