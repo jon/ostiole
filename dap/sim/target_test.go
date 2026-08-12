@@ -38,6 +38,58 @@ func TestTargetReportsIdentityAndPowerState(t *testing.T) {
 	}
 }
 
+func TestTargetModelsBankedDPRegisters(t *testing.T) {
+	target := New(0x2ba01477)
+	ctx := context.Background()
+	const dlcr = uint32(0xa5a50000)
+	if err := target.SetBankedDPRegister(1, dlcr); err != nil {
+		t.Fatal(err)
+	}
+	if err := target.Write(ctx, swd.Request{Addr: 0x08}, 1); err != nil {
+		t.Fatal(err)
+	}
+	value, err := target.Read(ctx, swd.Request{Read: true, Addr: 0x04})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value != dlcr {
+		t.Fatalf("DLCR = %#08x, want %#08x", value, dlcr)
+	}
+
+	const changed = uint32(0x5a5a0000)
+	if err := target.Write(ctx, swd.Request{Addr: 0x04}, changed); err != nil {
+		t.Fatal(err)
+	}
+	value, err = target.Read(ctx, swd.Request{Read: true, Addr: 0x04})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value != changed {
+		t.Fatalf("DLCR after write = %#08x, want %#08x", value, changed)
+	}
+	if target.ctrlStat != 0 {
+		t.Fatalf("CTRL/STAT after DLCR write = %#08x, want 0", target.ctrlStat)
+	}
+}
+
+func TestTargetRejectsInvalidBankedDPRegister(t *testing.T) {
+	target := New(0x2ba01477)
+	for _, bank := range []uint8{0, 16} {
+		if err := target.SetBankedDPRegister(bank, 0); err == nil {
+			t.Fatalf("SetBankedDPRegister(%d) succeeded", bank)
+		}
+	}
+	if err := target.SetBankedDPRegister(1, 1<<8); err == nil {
+		t.Fatal("SetBankedDPRegister() accepted unsupported turnaround")
+	}
+	if err := target.Write(t.Context(), swd.Request{Addr: 0x08}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := target.Write(t.Context(), swd.Request{Addr: 0x04}, 1<<8); err == nil {
+		t.Fatal("DLCR write accepted unsupported turnaround")
+	}
+}
+
 func TestAbortClearsStickyState(t *testing.T) {
 	target := New(0x2ba01477)
 	target.ctrlStat = stickyCompare | stickyError | writeDataError | stickyOverrun

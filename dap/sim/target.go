@@ -24,12 +24,15 @@ const (
 	debugPowerAck      = uint32(1 << 29)
 	systemPowerRequest = uint32(1 << 30)
 	systemPowerAck     = uint32(1 << 31)
+
+	dlcrTurnaroundMask = uint32(3 << 8)
 )
 
 // Target models the initial SW-DP register state.
 type Target struct {
 	dpidr    uint32
 	ctrlStat uint32
+	dpBanks  [16]uint32
 	selectDP uint32
 	rdbuff   uint32
 	aps      map[uint8]*accessPort
@@ -44,6 +47,21 @@ type accessPort struct {
 // New returns an SW-DP target with the supplied identity.
 func New(dpidr uint32) *Target {
 	return &Target{dpidr: dpidr, aps: make(map[uint8]*accessPort)}
+}
+
+// SetBankedDPRegister sets the simulated register at offset 0x04 in bank.
+func (t *Target) SetBankedDPRegister(bank uint8, value uint32) error {
+	if t == nil {
+		return errors.New("dap/sim: nil target")
+	}
+	if bank == 0 || bank > 0x0f {
+		return fmt.Errorf("dap/sim: invalid banked DP register bank %d", bank)
+	}
+	if bank == 1 && value&dlcrTurnaroundMask != 0 {
+		return errors.New("dap/sim: variable SWD turnaround is not modeled")
+	}
+	t.dpBanks[bank] = value
+	return nil
 }
 
 // AddAP adds an access port with the supplied identification register.
@@ -85,7 +103,11 @@ func (t *Target) Read(ctx context.Context, req swd.Request) (uint32, error) {
 	case 0x00:
 		return t.dpidr, nil
 	case 0x04:
-		return t.ctrlStat, nil
+		bank := uint8(t.selectDP & 0x0f)
+		if bank == 0 {
+			return t.ctrlStat, nil
+		}
+		return t.dpBanks[bank], nil
 	case 0x0c:
 		return t.rdbuff, nil
 	default:
@@ -108,7 +130,16 @@ func (t *Target) Write(ctx context.Context, req swd.Request, value uint32) error
 	case 0x00:
 		t.clearSticky(value)
 	case 0x04:
-		t.setPower(value)
+		bank := uint8(t.selectDP & 0x0f)
+		switch bank {
+		case 0:
+			t.setPower(value)
+		case 1:
+			if value&dlcrTurnaroundMask != 0 {
+				return errors.New("dap/sim: variable SWD turnaround is not modeled")
+			}
+			t.dpBanks[bank] = value
+		}
 	case 0x08:
 		t.selectDP = value
 	default:

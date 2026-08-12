@@ -5,6 +5,13 @@ import "fmt"
 // DPReg identifies a debug-port register address.
 type DPReg uint8
 
+// DPAddress identifies an ADIv5 debug-port register and its SELECT bank.
+// Bank is significant for registers at offset 0x04.
+type DPAddress struct {
+	Addr DPReg
+	Bank uint8
+}
+
 // Debug-port register addresses used by the initial SW-DP client.
 const (
 	ABORT    DPReg = 0x00
@@ -12,6 +19,20 @@ const (
 	CTRLSTAT DPReg = 0x04
 	SELECT   DPReg = 0x08
 	RDBUFF   DPReg = 0x0c
+)
+
+// Named ADIv5 debug-port register addresses.
+var (
+	ABORTAddr     = DPAddress{Addr: ABORT}
+	DPIDRAddr     = DPAddress{Addr: DPIDR}
+	CTRLSTATAddr  = DPAddress{Addr: CTRLSTAT}
+	DLCRAddr      = DPAddress{Addr: CTRLSTAT, Bank: 1}
+	TARGETIDAddr  = DPAddress{Addr: CTRLSTAT, Bank: 2}
+	DLPIDRAddr    = DPAddress{Addr: CTRLSTAT, Bank: 3}
+	EVENTSTATAddr = DPAddress{Addr: CTRLSTAT, Bank: 4}
+	SELECTAddr    = DPAddress{Addr: SELECT}
+	RESENDAddr    = DPAddress{Addr: SELECT}
+	RDBUFFAddr    = DPAddress{Addr: RDBUFF}
 )
 
 // DPIDRInfo contains the structural fields of a DPIDR value.
