@@ -23,9 +23,9 @@
 // cleanup-only state as a failed release.
 //
 // A Txn queues an ordered group of DP and AP operations. Commit validates the
-// complete queue before sending traffic, settles DP writes through RDBUFF,
-// and resolves every Result. If an operation fails, earlier confirmed results
-// remain available and later operations report that they were not executed. If
-// traffic was clocked but completion cannot be established, the Result reports
-// ErrIndeterminate.
+// complete queue, settles any earlier raw DP write, then sends queued traffic.
+// DP writes and AP operations settle through RDBUFF. If an operation fails,
+// earlier confirmed results remain available and later operations report that
+// they were not executed. If traffic was clocked but completion cannot be
+// established, the Result reports ErrIndeterminate.
 package dap

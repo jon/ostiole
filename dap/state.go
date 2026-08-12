@@ -23,13 +23,14 @@ type selectState struct {
 }
 
 type debugPortState struct {
-	session       debugPortSession
-	response      swdResponseState
-	selectDP      selectState
-	priorSELECT   selectState
-	selectPending bool
-	ownedPower    uint32
-	apGeneration  uint64
+	session        debugPortSession
+	response       swdResponseState
+	selectDP       selectState
+	priorSELECT    selectState
+	selectPending  bool
+	dpWritePending bool
+	ownedPower     uint32
+	apGeneration   uint64
 }
 
 func (s *debugPortState) recordSELECT(value uint32) {
@@ -51,6 +52,7 @@ func (s *debugPortState) invalidateSELECT() {
 func (s *debugPortState) beginProtocolEntry() {
 	s.response = responseUnchecked
 	s.invalidateSELECT()
+	s.settleDPWrite()
 }
 
 func (s *debugPortState) beginConnect() {
@@ -96,6 +98,14 @@ func (s *debugPortState) invalidateAP() {
 	s.apGeneration++
 }
 
+func (s *debugPortState) beginDPWrite() {
+	s.dpWritePending = true
+}
+
+func (s *debugPortState) settleDPWrite() {
+	s.dpWritePending = false
+}
+
 func (s *debugPortState) loseFraming() {
 	if s.response != responseLost {
 		s.invalidateAP()
@@ -124,4 +134,5 @@ func (s *debugPortState) completeConnect() {
 func (s *debugPortState) completeRelease() {
 	s.session = sessionIdle
 	s.ownedPower = 0
+	s.settleDPWrite()
 }

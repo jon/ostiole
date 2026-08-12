@@ -77,12 +77,13 @@ The [DAP guide](ports/dap.md) describes the ADIv5 register protocol behind
 that lifecycle.
 
 Use `DebugPort.NewTxn` when several DP or AP accesses need ordered results.
-`Commit` validates the complete queue before sending traffic, executes one SWD
-request at a time, and settles DP writes through RDBUFF before reporting
-success. Earlier confirmed results remain available after a failure. An
-operation reports `ErrIndeterminate` after framing loss or invalid read parity,
-and later operations report `ErrNotExecuted`. A transaction acquires no
-additional state and does not change the release order.
+`Commit` validates the complete queue, settles an earlier raw DP write if
+necessary, then executes one SWD request at a time. DP writes and AP operations
+settle through RDBUFF before reporting success. If the earlier write cannot be
+settled, none of the queued operations runs. Otherwise, confirmed results remain
+available after a failure; a clocked operation whose completion is uncertain
+reports `ErrIndeterminate`, and later operations report `ErrNotExecuted`. A
+transaction acquires no additional state and does not change the release order.
 
 Use `dap.MemAP` when the application needs the currently supported target
 memory operation: one aligned 32-bit read through an explicitly selected

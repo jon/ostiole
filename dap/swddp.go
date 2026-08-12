@@ -30,8 +30,8 @@ func (dp *DebugPort) selectDPBankZero(ctx context.Context) error {
 		dp.state.loseFraming()
 		return fmt.Errorf("dap: select DP bank zero before checking CTRL/STAT: %w", err)
 	}
-	dp.state.recordSELECT(0)
-	if _, err := dp.transfer(ctx, swd.Request{Read: true, Addr: uint8(RDBUFF)}, 0); err != nil {
+	dp.recordDPWrite(SELECT, 0)
+	if _, err := dp.readDP(ctx, RDBUFF); err != nil {
 		return fmt.Errorf("dap: confirm DP bank zero before checking CTRL/STAT: %w", err)
 	}
 	return nil
@@ -90,10 +90,13 @@ func (dp *DebugPort) readDP(ctx context.Context, reg DPReg) (uint32, error) {
 	if reg == CTRLSTAT && dp.state.dpBankAmbiguous() {
 		return 0, errors.New("dap: DP register bank is ambiguous after an unconfirmed SELECT write")
 	}
-	value, err := dp.transfer(ctx, swd.Request{
-		Read: true,
-		Addr: uint8(reg),
-	}, 0)
+	var value uint32
+	var err error
+	if reg == RDBUFF && dp.state.dpWritePending {
+		value, err = dp.transferDPWriteBarrier(ctx)
+	} else {
+		value, err = dp.transfer(ctx, swd.Request{Read: true, Addr: uint8(reg)}, 0)
+	}
 	if err != nil {
 		return 0, fmt.Errorf("dap: read DP register %#02x: %w", reg, err)
 	}
@@ -253,11 +256,16 @@ func (dp *DebugPort) validateRawDPWrite(reg DPReg, value uint32) error {
 }
 
 func (dp *DebugPort) recordDPWrite(reg DPReg, value uint32) {
-	if reg == SELECT {
-		dp.state.recordSELECT(value)
-	}
+	dp.recordDPWriteState(reg, value)
 	if reg == ABORT && value&dapAbort != 0 {
 		dp.state.invalidateAP()
+	}
+}
+
+func (dp *DebugPort) recordDPWriteState(reg DPReg, value uint32) {
+	dp.state.beginDPWrite()
+	if reg == SELECT {
+		dp.state.recordSELECT(value)
 	}
 	if reg == CTRLSTAT && dp.state.selectDP.valid && dp.state.dpBank() == 0 {
 		dp.state.confirmResponse(value)
@@ -265,6 +273,9 @@ func (dp *DebugPort) recordDPWrite(reg DPReg, value uint32) {
 }
 
 func (dp *DebugPort) recordDPRead(reg DPReg, value uint32) {
+	if reg != DPIDR {
+		dp.state.settleDPWrite()
+	}
 	if reg == CTRLSTAT && dp.state.selectDP.valid && dp.state.dpBank() == 0 {
 		dp.state.confirmResponse(value)
 	}
