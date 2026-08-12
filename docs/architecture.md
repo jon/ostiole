@@ -37,7 +37,7 @@ debugger service.
 | `ftdi` | Own one explicitly selected FTDI MPSSE port and expose direction-safe SWD bits. |
 | `swd` | Enter SWD mode and encode, execute, and validate individual DP/AP register transactions. |
 | `swd/sim` | Model SWD protocol entry and basic register transfers without hardware. |
-| `dap` | Manage SW-DP identity and power, posted AP access, and one MEM-AP view. |
+| `dap` | Manage SW-DP identity and power, ordered DP/AP transactions, posted AP access, and one MEM-AP view. |
 | `dap/sim` | Model the DP, AP, and target-word state consumed by `dap`. |
 | `target/cortexm` | Read and decode the architectural Cortex-M CPUID value. |
 | `examples/...` | Demonstrate public package compositions as executable programs. |
