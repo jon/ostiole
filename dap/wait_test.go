@@ -26,6 +26,7 @@ type waitTarget struct {
 	executed          map[swd.Request]int
 	abortValues       []uint32
 	abortErr          error
+	waitAfterAbort    bool
 	clearErr          error
 	stickyAfterAbort  uint32
 	sticky            uint32
@@ -136,6 +137,9 @@ func (t *waitTarget) Acknowledge(_ context.Context, req swd.Request) error {
 	t.requests = append(t.requests, req)
 	if t.sticky != 0 && !stickyExempt(req) {
 		return swd.ErrFault
+	}
+	if t.aborted && t.waitAfterAbort && req == (swd.Request{Read: true, Addr: uint8(dap.RDBUFF)}) {
+		return swd.ErrWait
 	}
 	if t.aborted && req == (swd.Request{Addr: uint8(dap.SELECT)}) && t.selectWaits != 0 {
 		t.selectAttempts++

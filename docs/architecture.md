@@ -112,17 +112,18 @@ those response grammars. It then requests
 acknowledged debug and system power, retries the exact physical request which
 returned WAIT, and completes posted AP transactions through RDBUFF. After an
 extended AP stall, `dap.DebugPort` issues DAPABORT and invalidates AP-derived
-state. A FAULT is not retried: the debug port captures bank-zero CTRL/STAT,
-clears the sticky conditions reported there, verifies the clear through
-CTRL/STAT, returns a typed error, and invalidates AP-derived state when the
-failed request belonged to AP work. A SELECT write remains provisional until
-later traffic establishes whether its data took effect. WDATAERR invalidates
-the cached selection; FAULT handling reads `0x04` only when both possible DP
-banks are zero. If FAULT cleanup, WAIT cleanup, or another transfer leaves
-framing unknown, `dap.DebugPort` invalidates AP-derived state and blocks every
-operation except cleanup. Cleanup re-enters SWD before sending another framed
-request and refuses to restore state if DPIDR no longer matches the connection
-being cleaned up. Failed setup uses the DPIDR read by that
+state. RDBUFF also settles DP writes, but a stall or FAULT at that barrier does
+not trigger AP-only recovery. A FAULT is not retried: the debug port captures
+bank-zero CTRL/STAT, clears the sticky conditions reported there, verifies the
+clear through CTRL/STAT, returns a typed error, and invalidates AP-derived state
+when the failed request belonged to AP work. A SELECT write remains provisional
+until later traffic establishes whether its data took effect. WDATAERR
+invalidates the cached selection; FAULT handling reads `0x04` only when both
+possible DP banks are zero. If FAULT cleanup, WAIT cleanup, or another transfer
+leaves framing unknown, `dap.DebugPort` invalidates AP-derived state and blocks
+every operation except cleanup. Cleanup re-enters SWD before sending another
+framed request and refuses to restore state if DPIDR no longer matches the
+connection being cleaned up. Failed setup uses the DPIDR read by that
 attempt; cleanup for an established connection uses its last successful
 DPIDR. `Connect` attempts this cleanup itself when setup fails; a cleanup
 failure remains pending for `Release`. Once `Release` starts, a failure likewise

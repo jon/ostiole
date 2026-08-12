@@ -1,6 +1,7 @@
 package dap_test
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -8,6 +9,20 @@ import (
 	"github.com/jon/ostiole/swd"
 	swdsim "github.com/jon/ostiole/swd/sim"
 )
+
+type readParityWire struct {
+	inner swd.Wire
+	armed bool
+}
+
+func (w *readParityWire) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
+	input, err := w.inner.SWDIO(ctx, direction, output, bits)
+	if err == nil && w.armed && bits == 42 && direction[0]&0x02 == 0 {
+		w.armed = false
+		input[32/8] ^= 1 << (32 % 8)
+	}
+	return input, err
+}
 
 func TestDebugPortTransactionResolvesOrderedOperations(t *testing.T) {
 	target := newWaitTarget()
@@ -37,6 +52,61 @@ func TestDebugPortTransactionResolvesOrderedOperations(t *testing.T) {
 	}
 	if _, err := txn.ReadDP(dap.DPIDRAddr).Value(); !errors.Is(err, dap.ErrTxnCommitted) {
 		t.Fatalf("queue after Commit error = %v, want committed", err)
+	}
+}
+
+func TestDebugPortTransactionSettlesSELECTBeforeBankedDPAccess(t *testing.T) {
+	target := newWaitTarget()
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := dp.WriteDP(t.Context(), dap.SELECT, 0x120000f0); err != nil {
+		t.Fatal(err)
+	}
+
+	before := len(target.requests)
+	txn := dp.NewTxn()
+	result := txn.ReadDP(dap.DLCRAddr)
+	if err := txn.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := result.Value(); err != nil {
+		t.Fatal(err)
+	}
+	want := []swd.Request{{Read: true, Addr: uint8(dap.RDBUFF)}, {Addr: uint8(dap.SELECT)}, {Read: true, Addr: uint8(dap.RDBUFF)}, {Read: true, Addr: uint8(dap.CTRLSTAT)}}
+	if got := target.requests[before:]; !equalRequests(got, want) {
+		t.Fatalf("transaction requests = %#v, want %#v", got, want)
+	}
+}
+
+func TestDebugPortTransactionPreservesConfirmedSELECTAfterABORT(t *testing.T) {
+	target := newWaitTarget()
+	const dlcr = uint32(0xa5a50000)
+	if err := target.SetBankedDPRegister(1, dlcr); err != nil {
+		t.Fatal(err)
+	}
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := dp.WriteDP(t.Context(), dap.SELECT, 0x120000f0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dp.ReadDP(t.Context(), dap.RDBUFF); err != nil {
+		t.Fatal(err)
+	}
+
+	txn := dp.NewTxn()
+	abort := txn.WriteDP(dap.ABORTAddr, 0)
+	read := txn.ReadDP(dap.DLCRAddr)
+	if err := txn.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	assertTxnValue(t, abort, 0)
+	assertTxnValue(t, read, dlcr)
+	if got := target.selectValues[len(target.selectValues)-1]; got != 0x120000f1 {
+		t.Fatalf("SELECT after ABORT = %#08x, want preserved AP fields", got)
 	}
 }
 
@@ -245,6 +315,554 @@ func TestDebugPortTransactionSettlesDPWriteThroughRDBUFF(t *testing.T) {
 	want := []swd.Request{{Addr: uint8(dap.SELECT)}, {Read: true, Addr: uint8(dap.RDBUFF)}}
 	if got := target.requests[before:]; !equalRequests(got, want) {
 		t.Fatalf("DP write requests = %#v, want %#v", got, want)
+	}
+}
+
+func TestDebugPortTransactionKeepsFaultDeterminateWhenCleanupLosesFraming(t *testing.T) {
+	target := newWaitTarget()
+	target.AddAP(0, 0x24770011)
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	cleanupErr := errors.New("injected CTRL/STAT read failure")
+	target.armFault(swd.Request{AP: true, Read: true, Addr: 0x0c})
+	target.ctrlStatErr = cleanupErr
+	txn := dp.NewTxn()
+	faulted := txn.ReadAP(0, dap.APIDR)
+	suffix := txn.ReadDP(dap.DPIDRAddr)
+	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrFault) || !errors.Is(err, cleanupErr) {
+		t.Fatalf("Commit() error = %v, want FAULT and CTRL/STAT read failure", err)
+	}
+	if _, err := faulted.Value(); !errors.Is(err, swd.ErrFault) || !errors.Is(err, cleanupErr) {
+		t.Fatalf("AP result error = %v, want FAULT and CTRL/STAT read failure", err)
+	}
+	if _, err := faulted.Value(); errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("AP result error = %v, want rejected request", err)
+	}
+	if _, err := suffix.Value(); !errors.Is(err, dap.ErrNotExecuted) {
+		t.Fatalf("suffix result error = %v, want not executed", err)
+	}
+}
+
+func TestDebugPortTransactionKeepsWAITDeterminateWhenDAPABORTFails(t *testing.T) {
+	target := newWaitTarget()
+	target.AddAP(0, 0x24770011)
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	abortErr := errors.New("injected DAPABORT failure")
+	target.abortErr = abortErr
+	target.arm(swd.Request{AP: true, Read: true, Addr: 0x0c}, -1)
+	txn := dp.NewTxn()
+	waited := txn.ReadAP(0, dap.APIDR)
+	suffix := txn.ReadDP(dap.DPIDRAddr)
+	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrWait) || !errors.Is(err, abortErr) {
+		t.Fatalf("Commit() error = %v, want WAIT and DAPABORT failure", err)
+	}
+	if _, err := waited.Value(); !errors.Is(err, swd.ErrWait) || !errors.Is(err, abortErr) {
+		t.Fatalf("AP result error = %v, want WAIT and DAPABORT failure", err)
+	}
+	if _, err := waited.Value(); errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("AP result error = %v, want rejected request", err)
+	}
+	if _, err := suffix.Value(); !errors.Is(err, dap.ErrNotExecuted) {
+		t.Fatalf("suffix result error = %v, want not executed", err)
+	}
+}
+
+func TestDebugPortTransactionSettlesPreviousRawDPWriteBeforeTraffic(t *testing.T) {
+	target := newWaitTarget()
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	target.dropWriteFor = swd.Request{Addr: uint8(dap.SELECT)}
+	target.dropWrite = true
+	target.stickyOnDrop = testWriteDataError
+	if err := dp.WriteDP(t.Context(), dap.SELECT, 0); err != nil {
+		t.Fatal(err)
+	}
+	txn := dp.NewTxn()
+	abort := txn.WriteDP(dap.ABORTAddr, 1)
+	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrFault) {
+		t.Fatalf("Commit() error = %v, want previous write FAULT", err)
+	}
+	if _, err := abort.Value(); !errors.Is(err, dap.ErrNotExecuted) {
+		t.Fatalf("DAPABORT result error = %v, want not executed", err)
+	}
+	for _, value := range target.abortValues {
+		if value&1 != 0 {
+			t.Fatalf("ABORT writes = %#v, queued DAPABORT must not execute", target.abortValues)
+		}
+	}
+}
+
+func TestDebugPortTransactionDoesNotIssueDAPABORTForDPWriteBarrierWAIT(t *testing.T) {
+	target := newWaitTarget()
+	target.AddMEMAP(0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := dap.NewMemAP(t.Context(), dp, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	target.arm(swd.Request{Read: true, Addr: uint8(dap.RDBUFF)}, -1)
+	txn := dp.NewTxn()
+	write := txn.WriteDP(dap.SELECTAddr, 0)
+	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrWait) || !errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("Commit() error = %v, want WAIT and indeterminate DP write", err)
+	}
+	if _, err := write.Value(); !errors.Is(err, swd.ErrWait) || !errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("DP write result error = %v, want WAIT and indeterminate outcome", err)
+	}
+	for _, value := range target.abortValues {
+		if value&1 != 0 {
+			t.Fatalf("ABORT writes = %#v, DP write barrier must not cause DAPABORT", target.abortValues)
+		}
+	}
+	target.armed = false
+	if _, err := mem.ReadWord(t.Context(), 0xe000ed00); err != nil {
+		t.Fatalf("ReadWord() after DP write barrier WAIT: %v", err)
+	}
+}
+
+func TestDebugPortTransactionDoesNotIssueDAPABORTForSELECTBarrierWAIT(t *testing.T) {
+	target := newWaitTarget()
+	target.AddMEMAP(0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := dap.NewMemAP(t.Context(), dp, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	target.arm(swd.Request{Read: true, Addr: uint8(dap.RDBUFF)}, -1)
+	txn := dp.NewTxn()
+	read := txn.ReadDP(dap.DLCRAddr)
+	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrWait) {
+		t.Fatalf("Commit() error = %v, want SELECT barrier WAIT", err)
+	}
+	if _, err := read.Value(); !errors.Is(err, swd.ErrWait) || errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("banked DP result error = %v, want unexecuted read after WAIT", err)
+	}
+	for _, value := range target.abortValues {
+		if value&1 != 0 {
+			t.Fatalf("ABORT writes = %#v, SELECT barrier must not cause DAPABORT", target.abortValues)
+		}
+	}
+	target.armed = false
+	if _, err := mem.ReadWord(t.Context(), 0xe000ed00); err != nil {
+		t.Fatalf("ReadWord() after SELECT barrier WAIT: %v", err)
+	}
+}
+
+func TestDebugPortRawRDBUFFDoesNotIssueDAPABORTForDPWriteWAIT(t *testing.T) {
+	target := newWaitTarget()
+	target.AddMEMAP(0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := dap.NewMemAP(t.Context(), dp, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dp.WriteDP(t.Context(), dap.SELECT, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	target.arm(swd.Request{Read: true, Addr: uint8(dap.RDBUFF)}, -1)
+	if _, err := dp.ReadDP(t.Context(), dap.RDBUFF); !errors.Is(err, swd.ErrWait) {
+		t.Fatalf("ReadDP(RDBUFF) error = %v, want WAIT", err)
+	}
+	for _, value := range target.abortValues {
+		if value&1 != 0 {
+			t.Fatalf("ABORT writes = %#v, raw DP barrier must not cause DAPABORT", target.abortValues)
+		}
+	}
+	target.armed = false
+	if _, err := mem.ReadWord(t.Context(), 0xe000ed00); err != nil {
+		t.Fatalf("ReadWord() after raw DP barrier WAIT: %v", err)
+	}
+}
+
+func TestDebugPortTransactionDoesNotInvalidateAPForDPWriteBarrierFAULT(t *testing.T) {
+	target := newWaitTarget()
+	target.AddMEMAP(0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := dap.NewMemAP(t.Context(), dp, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	target.dropWriteFor = swd.Request{Addr: uint8(dap.SELECT)}
+	target.dropWrite = true
+	target.stickyOnDrop = testWriteDataError
+	txn := dp.NewTxn()
+	write := txn.WriteDP(dap.SELECTAddr, 0)
+	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrFault) {
+		t.Fatalf("Commit() error = %v, want WDATAERR FAULT", err)
+	}
+	if _, err := write.Value(); !errors.Is(err, swd.ErrFault) || errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("DP write result error = %v, want rejected write", err)
+	}
+	if _, err := mem.ReadWord(t.Context(), 0xe000ed00); err != nil {
+		t.Fatalf("ReadWord() after DP write barrier FAULT: %v", err)
+	}
+}
+
+func TestDebugPortTransactionKeepsRejectedAPWriteDeterminate(t *testing.T) {
+	target := newWaitTarget()
+	target.AddAP(0, 0x24770011)
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	target.dropWriteFor = swd.Request{AP: true, Addr: uint8(dap.APCSW)}
+	target.dropWrite = true
+	target.stickyOnDrop = testWriteDataError
+	txn := dp.NewTxn()
+	write := txn.WriteAP(0, dap.APCSW, 0x23000040)
+	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrFault) || errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("Commit() error = %v, want rejected AP write", err)
+	}
+	if _, err := write.Value(); !errors.Is(err, swd.ErrFault) || errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("AP write result error = %v, want rejected write", err)
+	}
+	value, err := dp.ReadAP(t.Context(), 0, dap.APCSW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value != 0 {
+		t.Fatalf("AP CSW after rejected write = %#08x, want unchanged", value)
+	}
+}
+
+func TestDebugPortTransactionDoesNotInvalidateAPForRejectedDAPABORT(t *testing.T) {
+	target := newWaitTarget()
+	target.AddMEMAP(0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := dap.NewMemAP(t.Context(), dp, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	target.dropWriteFor = swd.Request{Addr: uint8(dap.ABORT)}
+	target.dropWrite = true
+	target.stickyOnDrop = testWriteDataError
+	txn := dp.NewTxn()
+	abort := txn.WriteDP(dap.ABORTAddr, 1)
+	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrFault) || errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("Commit() error = %v, want rejected DAPABORT", err)
+	}
+	if _, err := abort.Value(); !errors.Is(err, swd.ErrFault) || errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("DAPABORT result error = %v, want rejected write", err)
+	}
+	if _, err := mem.ReadWord(t.Context(), 0xe000ed00); err != nil {
+		t.Fatalf("ReadWord() after rejected DAPABORT: %v", err)
+	}
+}
+
+func TestDebugPortTransactionInvalidatesAPForIndeterminateDAPABORT(t *testing.T) {
+	target := newWaitTarget()
+	target.AddMEMAP(0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := dap.NewMemAP(t.Context(), dp, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	target.waitAfterAbort = true
+	txn := dp.NewTxn()
+	abort := txn.WriteDP(dap.ABORTAddr, 1)
+	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrWait) || !errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("Commit() error = %v, want WAIT and indeterminate DAPABORT", err)
+	}
+	if _, err := abort.Value(); !errors.Is(err, swd.ErrWait) || !errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("DAPABORT result error = %v, want indeterminate write", err)
+	}
+	target.waitAfterAbort = false
+	assertMEMAPInvalidated(t, mem)
+}
+
+func TestDebugPortTransactionInvalidatesAPWhenDAPABORTBarrierDataParityFails(t *testing.T) {
+	target := newWaitTarget()
+	target.AddMEMAP(0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
+	wire := &readParityWire{inner: swdsim.New(target)}
+	conn := swd.New(wire)
+	if err := conn.JTAGToSWD(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	dp := dap.NewSWDP(conn)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := dap.NewMemAP(t.Context(), dp, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wire.armed = true
+	txn := dp.NewTxn()
+	abort := txn.WriteDP(dap.ABORTAddr, 1)
+	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrParity) || errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("Commit() error = %v, want completed DAPABORT with parity error", err)
+	}
+	if _, err := abort.Value(); !errors.Is(err, swd.ErrParity) || errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("DAPABORT result error = %v, want determinate parity error", err)
+	}
+	assertMEMAPInvalidated(t, mem)
+}
+
+func TestDebugPortTransactionSettlesDPWriteWhenBarrierDataParityFails(t *testing.T) {
+	target := newWaitTarget()
+	wire := &readParityWire{inner: swdsim.New(target)}
+	conn := swd.New(wire)
+	if err := conn.JTAGToSWD(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	dp := dap.NewSWDP(conn)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	wire.armed = true
+	txn := dp.NewTxn()
+	write := txn.WriteDP(dap.SELECTAddr, 0)
+	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrParity) || errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("Commit() error = %v, want determinate parity error", err)
+	}
+	if _, err := write.Value(); !errors.Is(err, swd.ErrParity) || errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("DP write result error = %v, want determinate parity error", err)
+	}
+
+	before := len(target.requests)
+	txn = dp.NewTxn()
+	read := txn.ReadDP(dap.DPIDRAddr)
+	if err := txn.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	assertTxnValue(t, read, 0x2ba01477)
+	want := []swd.Request{{Read: true, Addr: uint8(dap.DPIDR)}}
+	if got := target.requests[before:]; !equalRequests(got, want) {
+		t.Fatalf("requests after barrier parity error = %#v, want %#v", got, want)
+	}
+}
+
+func TestDebugPortTransactionTreatsSELECTBarrierDataParityAsDeterminate(t *testing.T) {
+	target := newWaitTarget()
+	wire := &readParityWire{inner: swdsim.New(target)}
+	conn := swd.New(wire)
+	if err := conn.JTAGToSWD(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	dp := dap.NewSWDP(conn)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	wire.armed = true
+	txn := dp.NewTxn()
+	read := txn.ReadDP(dap.DLCRAddr)
+	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrParity) || errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("Commit() error = %v, want determinate SELECT barrier parity error", err)
+	}
+	if _, err := read.Value(); !errors.Is(err, swd.ErrParity) || errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("banked DP result error = %v, want determinate parity error", err)
+	}
+
+	before := len(target.requests)
+	txn = dp.NewTxn()
+	dpidr := txn.ReadDP(dap.DPIDRAddr)
+	if err := txn.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	assertTxnValue(t, dpidr, 0x2ba01477)
+	want := []swd.Request{{Read: true, Addr: uint8(dap.DPIDR)}}
+	if got := target.requests[before:]; !equalRequests(got, want) {
+		t.Fatalf("requests after SELECT barrier parity error = %#v, want %#v", got, want)
+	}
+}
+
+func TestDebugPortTransactionSettlesPreviousDPWriteWhenBarrierDataParityFails(t *testing.T) {
+	target := newWaitTarget()
+	wire := &readParityWire{inner: swdsim.New(target)}
+	conn := swd.New(wire)
+	if err := conn.JTAGToSWD(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	dp := dap.NewSWDP(conn)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := dp.WriteDP(t.Context(), dap.SELECT, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	wire.armed = true
+	txn := dp.NewTxn()
+	read := txn.ReadDP(dap.DPIDRAddr)
+	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrParity) || errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("Commit() error = %v, want previous write barrier parity error", err)
+	}
+	if _, err := read.Value(); !errors.Is(err, dap.ErrNotExecuted) {
+		t.Fatalf("DPIDR result error = %v, want not executed", err)
+	}
+
+	before := len(target.requests)
+	txn = dp.NewTxn()
+	read = txn.ReadDP(dap.DPIDRAddr)
+	if err := txn.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	assertTxnValue(t, read, 0x2ba01477)
+	want := []swd.Request{{Read: true, Addr: uint8(dap.DPIDR)}}
+	if got := target.requests[before:]; !equalRequests(got, want) {
+		t.Fatalf("requests after previous write barrier parity error = %#v, want %#v", got, want)
+	}
+}
+
+func TestDebugPortRawRDBUFFSettlesDPWriteWhenDataParityFails(t *testing.T) {
+	target := newWaitTarget()
+	wire := &readParityWire{inner: swdsim.New(target)}
+	conn := swd.New(wire)
+	if err := conn.JTAGToSWD(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	dp := dap.NewSWDP(conn)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := dp.WriteDP(t.Context(), dap.SELECT, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	wire.armed = true
+	if _, err := dp.ReadDP(t.Context(), dap.RDBUFF); !errors.Is(err, swd.ErrParity) {
+		t.Fatalf("ReadDP(RDBUFF) error = %v, want parity error", err)
+	}
+
+	before := len(target.requests)
+	txn := dp.NewTxn()
+	read := txn.ReadDP(dap.DPIDRAddr)
+	if err := txn.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	assertTxnValue(t, read, 0x2ba01477)
+	want := []swd.Request{{Read: true, Addr: uint8(dap.DPIDR)}}
+	if got := target.requests[before:]; !equalRequests(got, want) {
+		t.Fatalf("requests after raw RDBUFF parity error = %#v, want %#v", got, want)
+	}
+}
+
+func TestDebugPortTransactionCompletesAPWriteWhenBarrierDataParityFails(t *testing.T) {
+	target := newWaitTarget()
+	target.AddAP(0, 0x24770011)
+	wire := &readParityWire{inner: swdsim.New(target)}
+	conn := swd.New(wire)
+	if err := conn.JTAGToSWD(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	dp := dap.NewSWDP(conn)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	wire.armed = true
+	txn := dp.NewTxn()
+	write := txn.WriteAP(0, dap.APCSW, 0x23000040)
+	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrParity) || errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("Commit() error = %v, want determinate parity error", err)
+	}
+	if _, err := write.Value(); !errors.Is(err, swd.ErrParity) || errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("AP write result error = %v, want determinate parity error", err)
+	}
+	value, err := dp.ReadAP(t.Context(), 0, dap.APCSW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value != 0x23000040 {
+		t.Fatalf("AP CSW after barrier parity error = %#08x, want applied write", value)
+	}
+}
+
+func TestDebugPortTransactionAttributesRDBUFFFailure(t *testing.T) {
+	target := newWaitTarget()
+	target.AddAP(0, 0x24770011)
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	apRead := swd.Request{AP: true, Read: true, Addr: 0x0c}
+	target.armFault(swd.Request{Read: true, Addr: uint8(dap.RDBUFF)})
+	txn := dp.NewTxn()
+	faulted := txn.ReadAP(0, dap.APIDR)
+	suffix := txn.ReadDP(dap.DPIDRAddr)
+	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrFault) {
+		t.Fatalf("Commit() error = %v, want FAULT", err)
+	}
+	if target.executed[apRead] != 1 {
+		t.Fatalf("AP read executions = %d, want 1", target.executed[apRead])
+	}
+	if _, err := faulted.Value(); !errors.Is(err, swd.ErrFault) {
+		t.Fatalf("AP result error = %v, want RDBUFF FAULT", err)
+	}
+	if _, err := faulted.Value(); !errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("AP result error = %v, want indeterminate outcome", err)
+	}
+	if _, err := suffix.Value(); !errors.Is(err, dap.ErrNotExecuted) {
+		t.Fatalf("suffix result error = %v, want not executed", err)
+	}
+}
+
+func TestDebugPortTransactionMarksAPWriteIndeterminateWhenBarrierFails(t *testing.T) {
+	target := newWaitTarget()
+	target.AddAP(0, 0x24770011)
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	target.armFault(swd.Request{Read: true, Addr: uint8(dap.RDBUFF)})
+	txn := dp.NewTxn()
+	write := txn.WriteAP(0, dap.APCSW, 0x23000040)
+	suffix := txn.ReadDP(dap.DPIDRAddr)
+	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrFault) || !errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("Commit() error = %v, want FAULT and indeterminate outcome", err)
+	}
+	if _, err := write.Value(); !errors.Is(err, swd.ErrFault) || !errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("AP write result error = %v, want FAULT and indeterminate outcome", err)
+	}
+	if _, err := suffix.Value(); !errors.Is(err, dap.ErrNotExecuted) {
+		t.Fatalf("suffix result error = %v, want not executed", err)
+	}
+	value, err := dp.ReadAP(t.Context(), 0, dap.APCSW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value != 0x23000040 {
+		t.Fatalf("AP CSW after failed barrier = %#08x, want applied write", value)
 	}
 }
 
