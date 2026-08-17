@@ -53,8 +53,8 @@ writing a MEM-AP data register can write target memory. Any raw access which
 completes or might have completed invalidates existing `MemAP` values.
 `dap.DebugPort` retries only the physical request that returned WAIT.
 After an extended AP stall, it issues DAPABORT rather than replaying the whole
-logical access. A MEM-AP client and its model can read and write aligned scalar
-values without address incrementing, then restore the CSW, TAR, and optional
+logical access. A MEM-AP client and its model can read arbitrary byte ranges and
+perform aligned scalar reads and writes, then restore the CSW, TAR, and optional
 TARHI values changed by that access. Cleanup terminates an incomplete 64-bit
 transfer through CSW before restoring the target address registers.
 

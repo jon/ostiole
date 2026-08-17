@@ -237,9 +237,13 @@ through RDBUFF before its effect can be attributed.
 
 Automatic address increment is guaranteed only across TAR bits `[9:0]`.
 Whether it crosses a 1 KiB boundary is implementation-defined in ADIv5. A
-block reader has to discover or bound that behavior; it cannot assume that
-TAR advances linearly across the boundary because it worked for the first
-kilobyte.
+portable block reader therefore stops the incrementing run and reprograms TAR
+at each boundary. It cannot assume TAR advances linearly across the boundary
+because it worked for the first kilobyte.
+
+Posted reads expose no result until a later AP read or RDBUFF. A failed
+completion therefore leaves the last read undelivered even if its memory
+access already happened.
 
 Even a memory read can change debug-side state: SELECT, CSW, TAR, TARHI, and
 the DAP power requests. Saving and restoring that state matters when another
@@ -313,6 +317,20 @@ OSTIOLE_FTDI_HIL=1 \
 OSTIOLE_FTDI_HIL_WRITE=1 \
 OSTIOLE_FTDI_HIL_SCRATCH=0x20000000 \
 go test -count=1 -p 1 -tags=integration -v ./dap
+```
+
+A read-only run compared one 64-byte block read from the same range with 64
+scalar byte reads and got the same bytes. The range was aligned to the start
+of a TAR window, so it did not physically exercise boundary splitting. The
+test counted 571 OK acknowledgements, no WAIT, FAULT, or invalid
+acknowledgement, and 563 fixed overrun-response frames. Cleanup released the
+MEM-AP and debug port, then closed the FTDI channel.
+
+```sh
+OSTIOLE_FTDI_HIL=1 \
+OSTIOLE_FTDI_HIL_SCRATCH=0x20000000 \
+go test -count=1 -p 1 -tags=integration -v ./dap \
+  -run '^TestReadMEMAPBlockOverFTDI$'
 ```
 
 That is enough to identify one working DP/AP/MEM-AP path and one physical

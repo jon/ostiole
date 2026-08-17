@@ -483,7 +483,8 @@ func (ap *accessPort) validateLargeDataRegister(reg uint8, operation string) err
 
 func (ap *accessPort) readDRW() (uint32, error) {
 	size := uint8(ap.regs[0] & 7)
-	if size > 3 || ap.regs[0]&0x30 != 0 {
+	addrInc := ap.regs[0] & 0x30
+	if size > 3 || addrInc == 0x20 || addrInc == 0x30 || addrInc == 0x10 && size != 2 {
 		return 0, errors.New("dap/sim: DRW read has unsupported CSW.Size or AddrInc")
 	}
 	if size == 3 {
@@ -506,12 +507,14 @@ func (ap *accessPort) readDRW() (uint32, error) {
 	}
 	width := 1 << size
 	value := uint32(ap.memoryValue(ap.targetAddress(), width))
+	ap.incrementTAR(width)
 	return value << ap.laneShift(width), nil
 }
 
 func (ap *accessPort) writeDRW(value uint32) error {
 	size := uint8(ap.regs[0] & 7)
-	if size > 3 || ap.regs[0]&0x30 != 0 {
+	addrInc := ap.regs[0] & 0x30
+	if size > 3 || addrInc == 0x20 || addrInc == 0x30 || addrInc == 0x10 && size != 2 {
 		return errors.New("dap/sim: DRW write has unsupported CSW.Size or AddrInc")
 	}
 	if size == 3 {
@@ -534,7 +537,16 @@ func (ap *accessPort) writeDRW(value uint32) error {
 	width := 1 << size
 	data := uint64(value >> ap.laneShift(width))
 	ap.writeMemoryValue(ap.targetAddress(), width, data)
+	ap.incrementTAR(width)
 	return nil
+}
+
+func (ap *accessPort) incrementTAR(width int) {
+	if ap.regs[0]&0x30 != 0x10 {
+		return
+	}
+	tar := ap.regs[4]
+	ap.regs[4] = tar&^0x3ff | (tar+uint32(width))&0x3ff
 }
 
 func (ap *accessPort) targetAddress() uint64 {

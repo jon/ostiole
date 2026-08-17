@@ -124,6 +124,32 @@ func TestTargetSnapshotsSize64ReadData(t *testing.T) {
 	}
 }
 
+func TestTargetAcceptsAutoIncrementOnlyForSize32(t *testing.T) {
+	target := New(0x2ba01477)
+	sel := dap.NewAPSel(0)
+	if err := target.AddMEMAP(sel, 0x00010001, nil); err != nil {
+		t.Fatal(err)
+	}
+	ap := target.aps[sel]
+	for _, size := range []uint32{0, 1, 3} {
+		ap.regs[0] = size | 0x10
+		if _, err := ap.readDRW(); err == nil {
+			t.Errorf("DRW read accepted CSW.Size encoding %d with address increment", size)
+		}
+		if err := ap.writeDRW(0); err == nil {
+			t.Errorf("DRW write accepted CSW.Size encoding %d with address increment", size)
+		}
+	}
+	ap.regs[0] = 2 | 0x10
+	ap.regs[4] = 0x100
+	if _, err := ap.readDRW(); err != nil {
+		t.Fatalf("Size32 incrementing DRW read: %v", err)
+	}
+	if ap.regs[4] != 0x104 {
+		t.Fatalf("TAR after Size32 incrementing read = %#08x, want 0x00000104", ap.regs[4])
+	}
+}
+
 func TestTargetRequiresCSWToTerminateIncompleteSize64Transfer(t *testing.T) {
 	target := New(0x2ba01477)
 	sel := dap.NewAPSel(0)

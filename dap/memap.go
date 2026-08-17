@@ -15,10 +15,11 @@ const (
 )
 
 const (
-	memAPClass = uint8(0x08)
-	cswSize    = uint32(0x07)
-	cswAddrInc = uint32(0x30)
-	cswSize32  = uint32(0x02)
+	memAPClass   = uint8(0x08)
+	cswSize      = uint32(0x07)
+	cswAddrInc   = uint32(0x30)
+	cswSize32    = uint32(0x02)
+	cswIncSingle = uint32(0x10)
 
 	cfgBigEndian = uint32(1 << 0)
 	cfgLargeAddr = uint32(1 << 1)
@@ -36,7 +37,8 @@ const (
 	Size64
 )
 
-// MemAP reads and writes aligned scalar values through one memory access port.
+// MemAP reads arbitrary byte ranges and performs aligned scalar reads and
+// writes through one memory access port.
 //
 // Its methods and all uses of its DebugPort must be serialized. Release the
 // MemAP before releasing its DebugPort. Reads and writes change volatile
@@ -219,13 +221,18 @@ func (m *MemAP) checkScalar(addr uint64, size TransferSize, operation string) er
 }
 
 func (m *MemAP) selectSize(ctx context.Context, size TransferSize) error {
+	return m.selectCSW(ctx, size, 0)
+}
+
+func (m *MemAP) selectCSW(ctx context.Context, size TransferSize, addrInc uint32) error {
 	encoding, err := transferSizeEncoding(size)
 	if err != nil {
 		return err
 	}
 	txn := m.dp.NewTxn()
 	m.restoreCSW = true
-	txn.writeAP(m.sel, memAPCSW, m.csw&^cswSize|encoding)
+	desired := m.csw&^(cswSize|cswAddrInc) | encoding | addrInc
+	txn.writeAP(m.sel, memAPCSW, desired)
 	selected := txn.readAP(m.sel, memAPCSW)
 	if err := txn.Commit(ctx); err != nil {
 		return err
@@ -238,6 +245,9 @@ func (m *MemAP) selectSize(ctx context.Context, size TransferSize) error {
 	if value&cswSize != encoding {
 		width, _ := sizeBytes(size)
 		return fmt.Errorf("dap: MEM-AP does not support %d-bit transfers", width*8)
+	}
+	if value&cswAddrInc != addrInc {
+		return errors.New("dap: MEM-AP did not accept the requested address increment")
 	}
 	return nil
 }
