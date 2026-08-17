@@ -84,6 +84,13 @@ not justify artificial commits and must not conceal behavioral changes.
   gate effectful operations explicitly, and restore volatile state with
   bounded cleanup.
 
+When a change affects a public package, render and review its complete exported
+API rather than reading only the diff. Check whether distinct operations can
+compare equal, zero values can cause effects, callers repeat owned state,
+exported vocabulary remains mutable, fields are ignored in one mode, raw paths
+bypass or invalidate state owned by a higher-level value, constructors hide
+traffic or cleanup, or bad input reaches hardware before it is rejected.
+
 ### Claims and review integrity
 
 - Compare documentation and pull-request claims with the implemented tree.
