@@ -10,7 +10,7 @@ import (
 
 const dlcrTurnaroundMask = uint32(3 << 8)
 
-// DebugPort accesses one SW-DP through an entered SWD connection.
+// DebugPort enters and accesses one SW-DP through an SWD connection.
 //
 // Calls to a DebugPort and its underlying connection must be serialized.
 // DebugPort caches protocol state, so do not use the connection directly while
@@ -37,21 +37,19 @@ func (dp *DebugPort) selectDPBankZero(ctx context.Context) error {
 	return nil
 }
 
-// NewSWDP returns a debug-port client over conn. The caller must give the
-// returned client exclusive use of conn's SWD transaction stream until the
-// client is no longer used.
-//
-// The caller remains responsible for entering SWD protocol mode first. Do not
-// call conn.ReadDP, conn.WriteDP, conn.ReadAP, or conn.WriteAP while using the
-// returned DebugPort; doing so can invalidate its cached register selection
+// NewDebugPort returns a debug-port client over conn. Connect performs SWD
+// protocol entry. The caller must give the returned client exclusive use of
+// conn's transaction stream until the client is no longer used. Do not call
+// conn.ReadDP, conn.WriteDP, conn.ReadAP, conn.WriteAP, or conn.JTAGToSWD while
+// using the DebugPort; doing so can invalidate its cached register selection
 // and response state.
-func NewSWDP(conn *swd.Conn) *DebugPort {
+func NewDebugPort(conn *swd.Conn) *DebugPort {
 	return &DebugPort{conn: conn}
 }
 
 // ReadDP reads one logical ADIv5 debug-port register. Bank-independent and
 // bank-zero registers remain distinct. Nonzero banks require an active DPv1 or
-// DPv2 connection; DPv3 uses the ADIv6 map.
+// DPv2 connection; DPv3 uses the ADIv6 map. The debug port must be connected.
 func (dp *DebugPort) ReadDP(ctx context.Context, reg DPRegister) (uint32, error) {
 	if err := dp.requireOperational(); err != nil {
 		return 0, err
@@ -96,7 +94,8 @@ func (dp *DebugPort) readDPRegister(ctx context.Context, reg DPRegister, info dp
 // WriteDP writes one logical ADIv5 debug-port register. Writes that would
 // enable an unsupported SWD response mode or turnaround are rejected before
 // traffic. Release does not own power-request bits changed through this method.
-// A successful DAPABORT write invalidates existing MemAP values.
+// A successful DAPABORT write invalidates existing MemAP values. The debug port
+// must be connected.
 func (dp *DebugPort) WriteDP(ctx context.Context, reg DPRegister, value uint32) error {
 	if err := dp.requireOperational(); err != nil {
 		return err
@@ -230,6 +229,9 @@ func (dp *DebugPort) requireOperational() error {
 	}
 	if dp.state.session == sessionRepairRequired {
 		return dp.repairPendingError()
+	}
+	if dp.state.session != sessionConnected {
+		return errors.New("dap: SW-DP is not connected")
 	}
 	return nil
 }

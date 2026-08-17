@@ -41,7 +41,7 @@ func TestReadMEMAPWordOverFTDI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mem, err = dap.NewMemAP(ctx, dp, hardwareAP)
+	mem, err = dap.OpenMemAP(ctx, dp, hardwareAP)
 	if err != nil {
 		t.Fatal(err)
 	}

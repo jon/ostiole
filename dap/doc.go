@@ -1,8 +1,8 @@
 // Package dap manages an Arm Debug Access Port over SWD.
 //
-// A DebugPort owns the volatile debug-port state it acquires with Connect. A
-// MemAP owns the access-port register values it changes. Release them in
-// reverse order: the MemAP first, then the DebugPort.
+// A DebugPort enters SWD and acquires volatile debug-port state with Connect.
+// OpenMemAP validates one access port and snapshots the register values it will
+// change. Release them in reverse order: the MemAP first, then the DebugPort.
 //
 // DebugPort and MemAP values are not safe for concurrent use. Serialize calls
 // that share either value or the underlying swd.Conn. A DebugPort requires
@@ -22,6 +22,9 @@
 // defined by the selected AP class; writing a MEM-AP data register can write
 // target memory. A raw access which completes or might have completed
 // invalidates existing MemAP values.
+//
+// Public DP, AP, transaction, and MEM-AP operations require a successful
+// Connect.
 //
 // A failed Connect attempts bounded cleanup before returning. If that cleanup
 // also fails, Release remains available but other debug-port and access-port

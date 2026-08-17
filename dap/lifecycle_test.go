@@ -21,8 +21,97 @@ const (
 	allPower      = debugRequest | debugAck | systemRequest | systemAck
 )
 
+type entryGuardWire struct {
+	inner   swd.Wire
+	entered bool
+	entries int
+}
+
+type entryFailureWire struct {
+	inner       swd.Wire
+	entryErrors []error
+	entries     int
+	calls       int
+}
+
+func (w *entryFailureWire) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
+	w.calls++
+	input, err := w.inner.SWDIO(ctx, direction, output, bits)
+	if err != nil || bits != 136 {
+		return input, err
+	}
+	w.entries++
+	if w.entries <= len(w.entryErrors) && w.entryErrors[w.entries-1] != nil {
+		return nil, w.entryErrors[w.entries-1]
+	}
+	return input, nil
+}
+
+func (w *entryGuardWire) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
+	if bits == 136 {
+		w.entered = true
+		w.entries++
+		return w.inner.SWDIO(ctx, direction, output, bits)
+	}
+	if !w.entered {
+		return nil, errors.New("request sent before SWD entry")
+	}
+	return w.inner.SWDIO(ctx, direction, output, bits)
+}
+
+func TestConnectEntersSWDBeforeDebugPortTraffic(t *testing.T) {
+	target := sim.New(0x2ba01477)
+	wire := &entryGuardWire{inner: swdsim.New(target)}
+	dp := dap.NewDebugPort(swd.New(wire))
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if wire.entries != 1 {
+		t.Fatalf("SWD entries = %d, want 1", wire.entries)
+	}
+}
+
+func TestConnectRepairsFailedInitialProtocolEntry(t *testing.T) {
+	entryErr := errors.New("injected protocol-entry failure")
+	wire := &entryFailureWire{inner: swdsim.New(sim.New(0x2ba01477)), entryErrors: []error{entryErr}}
+	dp := dap.NewDebugPort(swd.New(wire))
+	if _, err := dp.Connect(t.Context()); !errors.Is(err, entryErr) {
+		t.Fatalf("Connect() error = %v, want %v", err, entryErr)
+	}
+	if wire.entries != 2 {
+		t.Fatalf("SWD entries after automatic repair = %d, want 2", wire.entries)
+	}
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatalf("Connect() after automatic repair: %v", err)
+	}
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFailedInitialEntryRepairLeavesCleanupPending(t *testing.T) {
+	entryErr := errors.New("injected protocol-entry failure")
+	repairErr := errors.New("injected protocol-entry repair failure")
+	wire := &entryFailureWire{inner: swdsim.New(sim.New(0x2ba01477)), entryErrors: []error{entryErr, repairErr}}
+	dp := dap.NewDebugPort(swd.New(wire))
+	if _, err := dp.Connect(t.Context()); !errors.Is(err, entryErr) || !errors.Is(err, repairErr) {
+		t.Fatalf("Connect() error = %v, want entry and repair failures", err)
+	}
+	before := wire.calls
+	if _, err := dp.ReadDP(t.Context(), dap.DPIDR); err == nil {
+		t.Fatal("ReadDP() succeeded while entry cleanup was pending")
+	}
+	if wire.calls != before {
+		t.Fatalf("blocked ReadDP() sent %d calls", wire.calls-before)
+	}
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatalf("Release() after entry repair failure: %v", err)
+	}
+}
+
 func TestConnectAndReleaseSWDP(t *testing.T) {
-	dp := enteredDP(t, sim.New(0x2ba01477))
+	target := sim.New(0x2ba01477)
+	dp := newDebugPort(t, target)
 	info, err := dp.Connect(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -35,7 +124,13 @@ func TestConnectAndReleaseSWDP(t *testing.T) {
 	if err := dp.Release(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	assertPower(t, dp, 0)
+	state, err := target.Read(t.Context(), dpRead(0x04))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state&allPower != 0 {
+		t.Fatalf("power state after release = %#08x, want 0", state&allPower)
+	}
 	if got, ok := dp.Identity(); !ok || got != info {
 		t.Fatalf("Identity() = %+v, %t; want %+v, true", got, ok, info)
 	}
@@ -51,22 +146,29 @@ func TestConnectAndReleaseSWDP(t *testing.T) {
 }
 
 func TestConnectPreservesPowerItDidNotAcquire(t *testing.T) {
-	dp := enteredDP(t, sim.New(0x2ba01477))
-	if err := dp.WriteDP(t.Context(), dap.CTRLSTAT, debugRequest); err != nil {
+	target := sim.New(0x2ba01477)
+	if err := target.Write(t.Context(), dpWrite(0x04), debugRequest); err != nil {
 		t.Fatal(err)
 	}
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if err := dp.Release(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	assertPower(t, dp, debugRequest|debugAck)
+	state, err := target.Read(t.Context(), dpRead(0x04))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state&allPower != debugRequest|debugAck {
+		t.Fatalf("power state after release = %#08x, want inherited debug power", state&allPower)
+	}
 }
 
 func TestConnectRollsBackAfterAcknowledgementTimeout(t *testing.T) {
 	target := &powerTarget{dpidr: 0x2ba01477, suppressAck: true}
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond)
 	defer cancel()
 	if _, err := dp.Connect(ctx); err == nil {
@@ -82,7 +184,7 @@ func TestConnectRollsBackAfterAcknowledgementTimeout(t *testing.T) {
 }
 
 func TestConnectRejectsSecondConnection(t *testing.T) {
-	dp := enteredDP(t, sim.New(0x2ba01477))
+	dp := newDebugPort(t, sim.New(0x2ba01477))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +195,7 @@ func TestConnectRejectsSecondConnection(t *testing.T) {
 
 func TestReleaseCanRetryAfterWriteFailure(t *testing.T) {
 	target := &powerTarget{dpidr: 0x2ba01477, failRelease: true}
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +212,7 @@ func TestReleaseCanRetryAfterWriteFailure(t *testing.T) {
 
 func TestConnectClearsStickyStateBeforeSelecting(t *testing.T) {
 	target := &powerTarget{dpidr: 0x2ba01477, sticky: true, ackAfter: 2}
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +226,7 @@ func TestConnectClearsStickyStateBeforeSelecting(t *testing.T) {
 
 func TestConnectDoesNotClearUnsupportedMinimalDPState(t *testing.T) {
 	target := &powerTarget{dpidr: 0x2ba11477, sticky: true}
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +237,7 @@ func TestConnectDoesNotClearUnsupportedMinimalDPState(t *testing.T) {
 
 func TestConnectReadsIdentityBeforeConfiguration(t *testing.T) {
 	target := &powerTarget{dpidr: 0x2ba01477}
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +249,7 @@ func TestConnectRejectsEnabledOverrunDetectionBeforeConfiguration(t *testing.T) 
 		ctrl:   overrunDetect,
 		dpBank: 1,
 	}
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err == nil {
 		t.Fatal("Connect() succeeded with ORUNDETECT enabled")
 	}
@@ -162,7 +264,7 @@ func TestConnectRejectsEnabledOverrunDetectionBeforeConfiguration(t *testing.T) 
 
 func TestWriteDPRejectsEnablingOverrunDetection(t *testing.T) {
 	target := &powerTarget{dpidr: 0x2ba01477}
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -184,13 +286,10 @@ func TestWriteDPRejectsEnablingOverrunDetection(t *testing.T) {
 	}
 }
 
-func enteredDP(t *testing.T, target swdsim.Target) *dap.DebugPort {
+func newDebugPort(t *testing.T, target swdsim.Target) *dap.DebugPort {
 	t.Helper()
 	conn := swd.New(swdsim.New(target))
-	if err := conn.JTAGToSWD(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	return dap.NewSWDP(conn)
+	return dap.NewDebugPort(conn)
 }
 
 func assertPower(t *testing.T, dp *dap.DebugPort, want uint32) {

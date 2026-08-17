@@ -40,13 +40,7 @@ func TestIdentifyCortexMOverFTDI(t *testing.T) {
 		t.Fatal(errors.Join(err, device.Close()))
 	}
 	connection := swd.New(channel)
-	if err := connection.JTAGToSWD(ctx); err != nil {
-		if closeErr := channel.Close(); closeErr != nil {
-			t.Errorf("close FTDI channel: %v", closeErr)
-		}
-		t.Fatal(err)
-	}
-	debugPort := dap.NewSWDP(connection)
+	debugPort := dap.NewDebugPort(connection)
 	var memory *dap.MemAP
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Second)
@@ -65,7 +59,7 @@ func TestIdentifyCortexMOverFTDI(t *testing.T) {
 	if _, err := debugPort.Connect(ctx); err != nil {
 		t.Fatal(err)
 	}
-	memory, err = dap.NewMemAP(ctx, debugPort, dap.NewAPSel(0))
+	memory, err = dap.OpenMemAP(ctx, debugPort, dap.NewAPSel(0))
 	if err != nil {
 		t.Fatal(err)
 	}

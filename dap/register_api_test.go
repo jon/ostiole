@@ -20,7 +20,7 @@ func TestLogicalDPRegistersDistinguishSharedWireOffsets(t *testing.T) {
 
 func TestLogicalDPAccessRejectsWrongDirectionBeforeTraffic(t *testing.T) {
 	target := newWaitTarget()
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 
 	for _, reg := range []dap.DPRegister{dap.DPIDR, dap.TARGETID, dap.DLPIDR, dap.EVENTSTAT, dap.RESEND, dap.RDBUFF} {
 		before := len(target.requests)
@@ -57,7 +57,7 @@ func TestLogicalDPAccessRejectsWrongDirectionBeforeTraffic(t *testing.T) {
 
 func TestLogicalDPAccessDistinguishesBankIndependentAndBankZero(t *testing.T) {
 	target := newWaitTarget()
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}

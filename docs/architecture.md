@@ -80,8 +80,8 @@ up and released in reverse order.
 | `*usb.Device` | Owns one open attachment. `ClaimInterface` returns the sole owner of one interface; that value selects alternates and releases the claim. A failed release can be retried, and `Device.Close` does not close the attachment while release remains pending. |
 | `*ftdi.Channel` | Takes ownership of the USB device after `ftdi.Open` succeeds. `Close` resets bit mode, sets the latency timer to 16 ms, purges the receive and transmit paths, releases the interface, and closes the device. A failed interface release leaves the channel and device open for another `Close`. It does not preserve prior FTDI settings. |
 | `*swd.Conn` | Represents one logical SWD transaction stream over its wire. It does not own a separate host resource. Calls on a connection must be serialized. |
-| `*dap.DebugPort` | Requires exclusive use of its SWD transaction stream. After `Connect`, it owns only the debug and system power requests it added. It records newly requested power bits before writing them so bounded cleanup can attempt to clear them even when the write's result is ambiguous. `Release` settles its final SELECT write through RDBUFF before reporting success. |
-| `*dap.MemAP` | Saves the CSW and TAR values it changes. `Release` retries failed restoration; if DAPABORT interrupts cleanup, the next `Release` retries both saved values. Calls sharing the MEM-AP or its debug port must be serialized. |
+| `*dap.DebugPort` | Requires exclusive use of its SWD transaction stream. `Connect` enters SWD and owns only the debug and system power requests it added. It records newly requested power bits before writing them so bounded cleanup can attempt to clear them even when the write's result is ambiguous. `Release` settles its final SELECT write through RDBUFF before reporting success. |
+| `*dap.MemAP` | `OpenMemAP` validates the selected AP and saves its CSW and TAR. `Release` retries failed restoration; if DAPABORT interrupts cleanup, the next `Release` retries both saved values. Calls sharing the MEM-AP or its debug port must be serialized. |
 
 An application that reaches the MEM-AP layer releases the MEM-AP before the
 debug port, then closes the FTDI channel. Cleanup errors remain meaningful and
@@ -110,7 +110,9 @@ caller without retrying. See
 [Serial Wire Debug](protocols/swd.md) for the wire protocol and current bench
 notes.
 
-`dap.DebugPort` adds ADIv5 policy above SWD. It validates DPIDR, gives each
+`dap.DebugPort.Connect` enters SWD before applying ADIv5 policy. Public DP, AP,
+transaction, and MEM-AP operations remain blocked until that connection is
+active. The debug port validates DPIDR, gives each
 logical DP register its architectural direction and bank, preserves the AP
 fields while changing DPBANKSEL, clears supported sticky conditions with ABORT,
 writes zero to SELECT once without retrying, confirms the write through RDBUFF,

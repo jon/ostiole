@@ -62,10 +62,7 @@ func readIdentity(ctx context.Context) (_ identity, err error) {
 		return identity{}, errors.Join(err, dev.Close())
 	}
 	conn := swd.New(ch)
-	if err := conn.JTAGToSWD(ctx); err != nil {
-		return identity{}, errors.Join(err, ch.Close())
-	}
-	dp := dap.NewSWDP(conn)
+	dp := dap.NewDebugPort(conn)
 	defer func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
 		defer cancel()
