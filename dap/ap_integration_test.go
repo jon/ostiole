@@ -121,3 +121,37 @@ func TestTransactionOverFTDI(t *testing.T) {
 	}
 	t.Logf("transaction DPIDR=%#08x AP%d_IDR=%#08x AP%d_CSW=%#08x logical_requests=9 SWDIO_calls=2 fixed_frames=9 OK=9", dpidrValue, selector, idrValue, selector, cswValue)
 }
+
+func TestEnumerateAPsOverFTDI(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	dp, faultWire := openHardwareDebugPortWithFaultWire(t, ctx)
+	t.Cleanup(func() { releaseHardwareDebugPort(t, dp) })
+	if _, err := dp.Connect(ctx); err != nil {
+		t.Fatal(err)
+	}
+	direct, err := dp.ReadAPIDR(ctx, hardwareAP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counter := faultWire.inner.(*ackCountingWire)
+	beforeCalls := counter.calls
+	beforeFixed := counter.fixed
+	beforeOK := counter.counts[0b001]
+	ports, err := dp.EnumerateAPs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ports) == 0 || ports[0].Selector != hardwareAP || ports[0].Identity != direct {
+		t.Fatalf("enumerated APs = %+v, direct AP0 = %+v", ports, direct)
+	}
+	for _, port := range ports {
+		selector, err := port.Selector.Value()
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("AP%d IDR=%#08x", selector, port.Identity.Raw)
+	}
+	t.Logf("enumeration SWDIO_calls=%d fixed_frames=%d OK=%d", counter.calls-beforeCalls, counter.fixed-beforeFixed, counter.counts[0b001]-beforeOK)
+}

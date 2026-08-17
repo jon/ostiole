@@ -268,11 +268,22 @@ Every debug-port release completed, including restoration of the inherited
 ORUNDETECT setting. This exercises a target-generated sticky fault; it does
 not exercise an AP-originated STICKYERR or a naturally occurring WAIT.
 
+The same bench scanned APSEL 0 through 255 and found two nonzero identities:
+
+```text
+AP0 IDR = 0x24770011
+AP1 IDR = 0x02880000
+```
+
+AP0 matched a separate identity read. The scan itself used 32 SWDIO calls for
+1,022 fixed overrun-response frames, all with OK acknowledgements. It does not
+demonstrate sparse numbering; the two implemented APs are adjacent.
+
 That is enough to identify one working DP/AP/MEM-AP path and one physical
 WDATAERR recovery path. It says nothing yet about sparse APs, delayed power
-acknowledgements, physical WAIT responses, packed transfers, auto-increment
-across 1 KiB, or target writes. Those are better experiments than collecting
-more CPUID values from the same board.
+acknowledgements, physical WAIT responses, auto-increment across 1 KiB, or
+target writes. Those are better experiments than collecting more CPUID values
+from the same board.
 
 ## ADIv6 is a different job
 

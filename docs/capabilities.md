@@ -86,7 +86,7 @@ specification notes, and current physical observation.
 | Ordered transactions | Yes | A single-use queue validates every DP/AP operation before traffic and settles any earlier immediate DP write before the queue runs. Queued reads expose data through `ReadResult.Value`; queued writes expose completion through `WriteResult.Err`. DP writes and AP operations settle through RDBUFF. Ordinary fixed frames use SWD batches; DPIDR, CTRL/STAT, and ABORT remain physical boundaries. The queue retains a confirmed prefix after failure and distinguishes later unsent work from operations in a failed physical chunk. FT232H HIL completed nine requests in two SWDIO calls. |
 | WAIT handling | Yes | Retries only the physical request which returned WAIT after the SWD connection completes any required STICKYORUN cleanup. A clean FAULT ends retrying without losing framing. Extended AP stalls use DAPABORT. Failed WAIT cleanup or a later retry error leaves framing unknown, invalidates AP-derived state, and blocks all traffic except cleanup. |
 | FAULT recovery | Yes | A FAULT is never replayed. With a known response grammar and bank-zero selection, the error includes the captured CTRL/STAT value and DAP clears only the sticky conditions reported there, then verifies that they are clear. A definitely abandoned AP write does not invalidate MEM-AP state; an uncertain effect does. Failed cleanup preserves the FAULT and blocks ordinary traffic until release repairs the port. |
-| AP enumeration | No | Callers must select an access port explicitly. |
+| AP enumeration | Yes | Scans all 256 ADIv5 APSEL values in bounded transactions. IDR zero means absent; a FAULT returns the confirmed discoveries with the error. The current Cortex-M bench reports AP0 as `0x24770011` and AP1 as `0x02880000`; sparse numbering is covered by simulation. The scan used 32 SWDIO calls for 1,022 fixed frames, all with OK acknowledgements. |
 | MEM-AP acquisition | Yes | `OpenMemAP` performs AP traffic, rejects an absent or non-MEM AP, and snapshots the state which `Release` restores. |
 | Target word read | Yes | One aligned 32-bit word with address increment disabled. |
 | MEM-AP restoration | Yes | Saves and restores CSW and TAR; failed restoration remains retryable. MEM-AP restoration remains available while debug-port cleanup is pending. If framing is unknown, `Release` re-enters SWD before restoration. If DAPABORT interrupts cleanup, the next `Release` retries both saved values. The invalidated handle remains invalid. |
@@ -146,7 +146,7 @@ the volatile DAP and MEM-AP state described above.
 ## Not currently provided
 
 There is no public J-Link or CMSIS-DAP driver, JTAG protocol layer, automatic
-probe discovery policy, AP discovery, CoreSight or ROM-table discovery,
+probe discovery policy, CoreSight or ROM-table discovery,
 multi-core or SoC attachment, general target control, semihosting, trace,
 debugger protocol server, firmware flashing, FPGA programming, or Windows
 host implementation.
