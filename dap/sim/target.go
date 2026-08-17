@@ -44,7 +44,7 @@ type Target struct {
 
 type accessPort struct {
 	regs   map[uint8]uint32
-	memory map[uint32]uint32
+	memory map[uint64]byte
 	memAP  bool
 }
 
@@ -168,8 +168,8 @@ func (t *Target) AddAP(sel dap.APSel, idr uint32) error {
 	return nil
 }
 
-// AddMEMAP adds a word-readable memory access port. It rejects a non-MEM-AP
-// identity, an existing selector, and unaligned target-word addresses.
+// AddMEMAP adds a memory access port initialized from aligned words. It rejects
+// a non-MEM-AP identity, an existing selector, and unaligned fixtures.
 func (t *Target) AddMEMAP(sel dap.APSel, idr uint32, words map[uint32]uint32) error {
 	if t == nil {
 		return errors.New("dap/sim: nil target")
@@ -184,19 +184,100 @@ func (t *Target) AddMEMAP(sel dap.APSel, idr uint32, words map[uint32]uint32) er
 	if _, ok := t.aps[sel]; ok {
 		return fmt.Errorf("dap/sim: AP %d is already configured", selection)
 	}
-	memory := make(map[uint32]uint32, len(words))
+	memory := make(map[uint64]byte, len(words)*4)
 	for addr, value := range words {
 		if addr&3 != 0 {
 			return fmt.Errorf("dap/sim: unaligned target-word address %#08x", addr)
 		}
-		memory[addr] = value
+		for offset := range 4 {
+			memory[uint64(addr)+uint64(offset)] = byte(value >> uint(offset*8))
+		}
 	}
 	t.aps[sel] = &accessPort{
-		regs:   map[uint8]uint32{0xfc: idr},
+		regs:   map[uint8]uint32{0xf4: 0, 0xfc: idr},
 		memory: memory,
 		memAP:  true,
 	}
 	return nil
+}
+
+// SetMEMAPCFG changes one simulated MEM-AP's CFG register.
+func (t *Target) SetMEMAPCFG(sel dap.APSel, cfg uint32) error {
+	if t == nil {
+		return errors.New("dap/sim: nil target")
+	}
+	selection, err := sel.Value()
+	if err != nil {
+		return err
+	}
+	ap := t.aps[sel]
+	if ap == nil || !ap.memAP {
+		return fmt.Errorf("dap/sim: AP %d is not a MEM-AP", selection)
+	}
+	ap.regs[0xf4] = cfg
+	if cfg&(1<<1) == 0 {
+		ap.regs[8] = 0
+	}
+	return nil
+}
+
+// SetMEMAPBytes copies data into one simulated MEM-AP's target memory.
+func (t *Target) SetMEMAPBytes(sel dap.APSel, addr uint64, data []byte) error {
+	if t == nil {
+		return errors.New("dap/sim: nil target")
+	}
+	selection, err := sel.Value()
+	if err != nil {
+		return err
+	}
+	ap := t.aps[sel]
+	if ap == nil || !ap.memAP {
+		return fmt.Errorf("dap/sim: AP %d is not a MEM-AP", selection)
+	}
+	if _, err := memoryRangeEnd(addr, len(data)); err != nil {
+		return err
+	}
+	for i := range data {
+		ap.memory[addr+uint64(i)] = data[i]
+	}
+	return nil
+}
+
+// MEMAPBytes returns a copy of one simulated MEM-AP's target memory range.
+func (t *Target) MEMAPBytes(sel dap.APSel, addr uint64, size int) ([]byte, error) {
+	if t == nil {
+		return nil, errors.New("dap/sim: nil target")
+	}
+	selection, err := sel.Value()
+	if err != nil {
+		return nil, err
+	}
+	ap := t.aps[sel]
+	if ap == nil || !ap.memAP {
+		return nil, fmt.Errorf("dap/sim: AP %d is not a MEM-AP", selection)
+	}
+	if _, err := memoryRangeEnd(addr, size); err != nil {
+		return nil, err
+	}
+	data := make([]byte, size)
+	for i := range data {
+		data[i] = ap.memory[addr+uint64(i)]
+	}
+	return data, nil
+}
+
+func memoryRangeEnd(addr uint64, size int) (uint64, error) {
+	if size < 0 {
+		return 0, errors.New("dap/sim: negative memory range size")
+	}
+	if size == 0 {
+		return addr, nil
+	}
+	end := addr + uint64(size-1)
+	if end < addr {
+		return 0, errors.New("dap/sim: memory range overflows")
+	}
+	return end, nil
 }
 
 // Read implements swd/sim.Target.
@@ -285,16 +366,36 @@ func (t *Target) readAP(req swdsim.Request) (uint32, error) {
 		return posted, nil
 	}
 	reg := t.apReg(req)
+	if ap.memAP && reg == 8 && ap.regs[0xf4]&(1<<1) == 0 {
+		t.rdbuff = 0
+		return posted, nil
+	}
 	if ap.memAP && reg == 0x0c {
 		csw := ap.regs[0x00]
 		if csw&0x07 != 2 || csw&0x30 != 0 {
 			return 0, errors.New("dap/sim: DRW read requires 32-bit, non-incrementing CSW")
 		}
-		t.rdbuff = ap.memory[ap.regs[0x04]]
+		t.rdbuff = ap.memoryWord(ap.targetAddress())
 	} else {
 		t.rdbuff = ap.regs[reg]
 	}
 	return posted, nil
+}
+
+func (ap *accessPort) memoryWord(addr uint64) uint32 {
+	var value uint32
+	for offset := range 4 {
+		value |= uint32(ap.memory[addr+uint64(offset)]) << uint(offset*8)
+	}
+	return value
+}
+
+func (ap *accessPort) targetAddress() uint64 {
+	address := uint64(ap.regs[4])
+	if ap.regs[0xf4]&(1<<1) != 0 {
+		address |= uint64(ap.regs[8]) << 32
+	}
+	return address
 }
 
 func (t *Target) writeAP(req swdsim.Request, value uint32) error {
@@ -303,6 +404,9 @@ func (t *Target) writeAP(req swdsim.Request, value uint32) error {
 		return nil
 	}
 	reg := t.apReg(req)
+	if ap.memAP && reg == 8 && ap.regs[0xf4]&(1<<1) == 0 {
+		return nil
+	}
 	if ap.memAP && reg == 0x0c {
 		return errors.New("dap/sim: target-memory writes are not modeled")
 	}
