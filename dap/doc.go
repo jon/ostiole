@@ -4,6 +4,13 @@
 // OpenMemAP validates one access port and snapshots the register values it will
 // change. Release them in reverse order: the MemAP first, then the DebugPort.
 //
+// MemAP.ReadScalar and MemAP.WriteScalar perform aligned scalar target-memory
+// accesses. WriteScalar changes target memory at the address selected by its
+// caller; the package checks value width, alignment, and advertised MEM-AP
+// extensions, not whether that address is safe to modify. If a failed Size64
+// transfer might have started its first DRW access, release the MemAP and
+// DebugPort before reconnecting.
+//
 // DebugPort and MemAP values are not safe for concurrent use. Serialize calls
 // that share either value or the underlying swd.Conn. A DebugPort requires
 // exclusive use of that SWD transaction stream until it is no longer used;

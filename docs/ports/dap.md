@@ -219,9 +219,21 @@ and LD advertises the Large Data Extension. LA widens the target address; it
 does not widen TAR itself. When LA is set, save and restore TARHI along with
 TAR.
 
-For a single 32-bit word, set `CSW.Size` to `0b010`, select the desired
-`AddrInc` behavior, write TAR, and read or write DRW. A DRW read is still an AP
-read, so its value comes back through the posted pipeline.
+IHI 0031H chapter C2 defines the CSW.Size encodings and the DRW byte lanes.
+Only 32-bit access is mandatory. When an unsupported size is written, CSW
+reads back a size the AP does support; check that value before accessing DRW.
+For 8- and 16-bit transfers, the value does not always occupy the low bits of
+DRW: the address and CFG.BE select its lane. Sixty-four-bit access also needs
+CFG.LD and a CSW.Size readback of `0b011`. It uses two consecutive DRW
+accesses, low word first and then high word. Until the second access completes,
+only CSW and DRW may be accessed; a CSW access terminates the sequence. An
+address above 32 bits needs CFG.LA and TARHI; the two extensions are
+independent.
+
+For one scalar, set CSW.Size, disable address increment, write TAR (and TARHI
+when present), then read or write DRW. A DRW read is still an AP read, so its
+value comes back through the posted pipeline. A DRW write must still complete
+through RDBUFF before its effect can be attributed.
 
 Automatic address increment is guaranteed only across TAR bits `[9:0]`.
 Whether it crosses a 1 KiB boundary is implementation-defined in ADIv5. A
@@ -229,9 +241,11 @@ block reader has to discover or bound that behavior; it cannot assume that
 TAR advances linearly across the boundary because it worked for the first
 kilobyte.
 
-Even a memory read can change debug-side state: SELECT, CSW, TAR, and the DAP
-power requests. Saving and restoring that state matters when another debugger,
-a ROM monitor, or later code expects to find it intact.
+Even a memory read can change debug-side state: SELECT, CSW, TAR, TARHI, and
+the DAP power requests. Saving and restoring that state matters when another
+debugger, a ROM monitor, or later code expects to find it intact. A write has
+the additional and much less subtle effect of changing the target memory the
+caller selected.
 
 ## Bench note, 2026-08-09
 
@@ -285,11 +299,28 @@ AP0 matched a separate identity read. The scan itself used 32 SWDIO calls for
 1,022 fixed overrun-response frames, all with OK acknowledgements. It does not
 demonstrate sparse numbering; the two implemented APs are adjacent.
 
+A separately gated SRAM experiment saved 64 bytes at `0x20000000`, performed
+8-, 16-, and 32-bit writes, and read the full range after each write. The
+selected bytes changed and every neighboring byte retained its saved value.
+The experiment then restored and verified all 64 original bytes. AP0 did not
+advertise CFG.LD, so this run says nothing about physical 64-bit transfers. It
+counted 3,130 OK acknowledgements, no WAIT, FAULT, or invalid acknowledgement,
+and 3,122 fixed overrun-response frames. Cleanup released the MEM-AP and debug
+port, then closed the FTDI channel.
+
+```sh
+OSTIOLE_FTDI_HIL=1 \
+OSTIOLE_FTDI_HIL_WRITE=1 \
+OSTIOLE_FTDI_HIL_SCRATCH=0x20000000 \
+go test -count=1 -p 1 -tags=integration -v ./dap
+```
+
 That is enough to identify one working DP/AP/MEM-AP path and one physical
-WDATAERR recovery path. It says nothing yet about sparse APs, delayed power
+WDATAERR recovery path, and to demonstrate reversible scalar writes to one
+known SRAM range. It says nothing yet about sparse APs, delayed power
 acknowledgements, physical WAIT responses, auto-increment across 1 KiB, or
-target writes. Those are better experiments than collecting more CPUID values
-from the same board.
+64-bit transfers. Those are better experiments than collecting more CPUID
+values from the same board.
 
 ## ADIv6 is a different job
 

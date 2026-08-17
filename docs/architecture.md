@@ -37,8 +37,8 @@ debugger service.
 | `ftdi` | Own one explicitly selected FTDI MPSSE port and expose direction-safe SWD bits. |
 | `swd` | Enter SWD, establish its response grammar, and encode, execute, and validate individual or packed DP/AP register transactions. |
 | `swd/sim` | Model SWD protocol entry, register transfers, fixed-frame packing, and transfer limits without hardware. |
-| `dap` | Manage SW-DP identity and power, ordered DP/AP transactions, posted AP access, and one MEM-AP view. |
-| `dap/sim` | Model the DP, AP, and target-word state consumed by `dap`. |
+| `dap` | Manage SW-DP identity and power, ordered DP/AP transactions, posted AP access, and scalar MEM-AP access. |
+| `dap/sim` | Model the DP, AP, and byte-addressed target-memory state consumed by `dap`. |
 | `target/cortexm` | Read and decode the architectural Cortex-M CPUID value. |
 | `examples/...` | Demonstrate public package compositions as executable programs. |
 | `cmd/ost` | Provide a small command hierarchy over the same public packages. |
@@ -81,7 +81,7 @@ up and released in reverse order.
 | `*ftdi.Channel` | Takes ownership of the USB device after `ftdi.Open` succeeds. `Close` resets bit mode, sets the latency timer to 16 ms, purges the receive and transmit paths, releases the interface, and closes the device. A failed interface release leaves the channel and device open for another `Close`. It does not preserve prior FTDI settings. |
 | `*swd.Conn` | Owns one logical SWD transaction stream and the ORUNDETECT bit it adds. `Connect` establishes the target's response grammar and `Release` restores the inherited setting. It does not own a separate host resource. Calls must be serialized. |
 | `*dap.DebugPort` | Requires exclusive use of its SWD connection and owns only the debug and system power requests it adds. It records newly requested power bits before writing them so bounded cleanup can attempt to clear them even when the write's result is ambiguous. `Release` settles its final SELECT write through RDBUFF, releases power, then releases the SWD connection. |
-| `*dap.MemAP` | `OpenMemAP` validates the selected AP and saves its CSW and TAR. `Release` retries failed restoration; if DAPABORT interrupts cleanup, the next `Release` retries both saved values. Calls sharing the MEM-AP or its debug port must be serialized. |
+| `*dap.MemAP` | `OpenMemAP` validates the selected AP and saves its CSW, TAR, and optional TARHI. `Release` retries failed restoration; if DAPABORT interrupts cleanup, the next `Release` retries every saved value. Calls sharing the MEM-AP or its debug port must be serialized. |
 
 An application that reaches the MEM-AP layer releases the MEM-AP before the
 debug port, then closes the FTDI channel. Cleanup errors remain meaningful and
@@ -166,8 +166,14 @@ attempt; cleanup for an established connection uses its last successful
 DPIDR. `Connect` attempts this cleanup itself when setup fails; a cleanup
 failure remains pending for `Release`. Once `Release` starts, a failure likewise
 leaves only `MemAP.Release`, `DebugPort.Release`, and the cached identity
-available. `dap.MemAP` configures one access port for a single aligned 32-bit
-read.
+available. `dap.MemAP` reads CFG, then uses one access port for aligned 8-,
+16-, and 32-bit target-memory reads and writes when CSW accepts the selected
+size. It also permits 64-bit transfers when CFG.LD is set and CSW accepts
+Size64, and addresses above 32 bits when CFG.LA is set. If a Size64 transfer
+fails after its first DRW access might have started, ordinary debug-port
+traffic remains blocked until the MEM-AP and debug port are released. MEM-AP
+cleanup terminates an incomplete transfer through CSW before restoring TAR or
+TARHI.
 
 ADIv5 access-port enumeration scans all 256 APSEL values in bounded
 transactions. IDR zero means absent. The scan does not assume contiguous AP
@@ -204,7 +210,9 @@ replaceable while exercising the public protocol and DAP layers.
 ## Safety effects
 
 The current examples and `ost` inspection commands do not reset or halt the
-target, write target memory, or change persistent state.
+target, write target memory, or change persistent state. The `dap.MemAP` API
+does expose target-memory writes; applications choose the affected address
+and own the consequences.
 
 The layers are not entirely passive:
 
@@ -218,8 +226,8 @@ The layers are not entirely passive:
 - Raw AP access has the effects defined by the selected AP class. A raw read
   can change class-specific state, and a raw write to a MEM-AP data register
   can write target memory. `DebugPort` does not restore either operation.
-- Reading through a MEM-AP temporarily changes CSW and TAR, then restores
-  their prior values.
+- Reading or writing through a MEM-AP temporarily changes CSW, TAR, and
+  sometimes TARHI, then restores their prior values.
 
 Callers should always complete the documented release sequence, including
 when the primary operation fails.
