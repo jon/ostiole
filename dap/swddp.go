@@ -25,7 +25,7 @@ type DebugPort struct {
 }
 
 func (dp *DebugPort) selectDPBankZero(ctx context.Context) error {
-	_, err := dp.conn.Transfer(ctx, swd.Request{Addr: uint8(SELECT)}, 0)
+	err := dp.conn.WriteDP(ctx, uint8(SELECT), 0)
 	if err != nil {
 		dp.state.loseFraming()
 		return fmt.Errorf("dap: select DP bank zero before checking CTRL/STAT: %w", err)
@@ -42,8 +42,9 @@ func (dp *DebugPort) selectDPBankZero(ctx context.Context) error {
 // client is no longer used.
 //
 // The caller remains responsible for entering SWD protocol mode first. Do not
-// call conn.Transfer directly while using the returned DebugPort; doing so can
-// invalidate its cached register selection and response state.
+// call conn.ReadDP, conn.WriteDP, conn.ReadAP, or conn.WriteAP while using the
+// returned DebugPort; doing so can invalidate its cached register selection
+// and response state.
 func NewSWDP(conn *swd.Conn) *DebugPort {
 	return &DebugPort{conn: conn}
 }
@@ -95,7 +96,7 @@ func (dp *DebugPort) readDP(ctx context.Context, reg DPReg) (uint32, error) {
 	if reg == RDBUFF && dp.state.dpWritePending {
 		value, err = dp.transferDPWriteBarrier(ctx)
 	} else {
-		value, err = dp.transfer(ctx, swd.Request{Read: true, Addr: uint8(reg)}, 0)
+		value, err = dp.transfer(ctx, transferRequest{Read: true, Addr: uint8(reg)}, 0)
 	}
 	if err != nil {
 		return 0, fmt.Errorf("dap: read DP register %#02x: %w", reg, err)
@@ -231,7 +232,7 @@ func (dp *DebugPort) writeDP(ctx context.Context, reg DPReg, value uint32) error
 	if err := dp.validateRawDPWrite(reg, value); err != nil {
 		return err
 	}
-	_, err := dp.transfer(ctx, swd.Request{Addr: uint8(reg)}, value)
+	_, err := dp.transfer(ctx, transferRequest{Addr: uint8(reg)}, value)
 	if err != nil {
 		return fmt.Errorf("dap: write DP register %#02x: %w", reg, err)
 	}

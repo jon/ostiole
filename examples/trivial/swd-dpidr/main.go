@@ -59,7 +59,7 @@ func readDPIDR(ctx context.Context) (value uint32, err error) {
 	if err := conn.JTAGToSWD(ctx); err != nil {
 		return 0, err
 	}
-	value, err = conn.Transfer(ctx, swd.Request{Read: true}, 0)
+	value, err = conn.ReadDP(ctx, 0x00)
 	if err != nil {
 		return 0, err
 	}

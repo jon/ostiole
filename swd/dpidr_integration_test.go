@@ -47,7 +47,7 @@ func TestReadDPIDROverFTDI(t *testing.T) {
 	if err := conn.JTAGToSWD(ctx); err != nil {
 		t.Fatal(err)
 	}
-	dpidr, err := conn.Transfer(ctx, swd.Request{Read: true}, 0)
+	dpidr, err := conn.ReadDP(ctx, 0x00)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -218,14 +218,14 @@ type powerTarget struct {
 	dpBank       uint32
 }
 
-func (t *powerTarget) Acknowledge(_ context.Context, req swd.Request) error {
+func (t *powerTarget) Acknowledge(_ context.Context, req swdsim.Request) error {
 	if !req.AP && !req.Read && req.Addr == uint8(dap.SELECT) && t.sticky {
 		return swd.ErrFault
 	}
 	return nil
 }
 
-func (t *powerTarget) Read(_ context.Context, req swd.Request) (uint32, error) {
+func (t *powerTarget) Read(_ context.Context, req swdsim.Request) (uint32, error) {
 	if req.AP {
 		return 0, errors.New("unexpected AP read")
 	}
@@ -250,7 +250,7 @@ func (t *powerTarget) Read(_ context.Context, req swd.Request) (uint32, error) {
 	}
 }
 
-func (t *powerTarget) Write(_ context.Context, req swd.Request, value uint32) error {
+func (t *powerTarget) Write(_ context.Context, req swdsim.Request, value uint32) error {
 	if req.AP {
 		return errors.New("unexpected AP write")
 	}

@@ -9,24 +9,32 @@ import (
 	"github.com/jon/ostiole/swd"
 )
 
+// Request describes a request decoded from the simulated wire. It is supplied
+// to Target and Acknowledger and cannot be submitted to swd.Conn.
+type Request struct {
+	AP   bool
+	Read bool
+	Addr uint8
+}
+
 // Target supplies DP and AP register behavior.
 type Target interface {
-	Read(context.Context, swd.Request) (uint32, error)
-	Write(context.Context, swd.Request, uint32) error
+	Read(context.Context, Request) (uint32, error)
+	Write(context.Context, Request, uint32) error
 }
 
 // Acknowledger lets a target choose the acknowledgement before a request's
 // data phase. Returning swd.ErrWait or swd.ErrFault emits that acknowledgement
 // without executing the target read or write.
 type Acknowledger interface {
-	Acknowledge(context.Context, swd.Request) error
+	Acknowledge(context.Context, Request) error
 }
 
 // Wire validates SWD traffic without physical hardware.
 type Wire struct {
 	target     Target
 	active     bool
-	pending    *swd.Request
+	pending    *Request
 	pendingACK byte
 }
 
@@ -106,7 +114,7 @@ func (w *Wire) data(ctx context.Context, direction, output []byte, bits int) ([]
 	return w.write(ctx, direction, output, bits, req)
 }
 
-func acknowledge(ctx context.Context, target Target, req swd.Request) (byte, error) {
+func acknowledge(ctx context.Context, target Target, req Request) (byte, error) {
 	a, ok := target.(Acknowledger)
 	if !ok {
 		return 0b001, nil
@@ -132,7 +140,7 @@ func failedACK(direction, output []byte, bits int) ([]byte, error) {
 	return make([]byte, 2), nil
 }
 
-func (w *Wire) read(ctx context.Context, direction []byte, bits int, req swd.Request) ([]byte, error) {
+func (w *Wire) read(ctx context.Context, direction []byte, bits int, req Request) ([]byte, error) {
 	if bits != 42 ||
 		!allBits(direction, 0, 34, false) ||
 		!allBits(direction, 34, 8, true) {
@@ -148,7 +156,7 @@ func (w *Wire) read(ctx context.Context, direction []byte, bits int, req swd.Req
 	return input, nil
 }
 
-func (w *Wire) write(ctx context.Context, direction, output []byte, bits int, req swd.Request) ([]byte, error) {
+func (w *Wire) write(ctx context.Context, direction, output []byte, bits int, req Request) ([]byte, error) {
 	if bits != 42 ||
 		bitAt(direction, 0) ||
 		!allBits(direction, 1, 41, true) {
@@ -197,13 +205,13 @@ func byteAt(buf []byte, offset int) byte {
 	return value
 }
 
-func decodeRequest(header byte) (swd.Request, error) {
+func decodeRequest(header byte) (Request, error) {
 	fields := header >> 1 & 0x0f
 	if header&0xc1 != 0x81 ||
 		(header>>5&1 != 0) != parity32(uint32(fields)) {
-		return swd.Request{}, fmt.Errorf("swd/sim: invalid request header %#02x", header)
+		return Request{}, fmt.Errorf("swd/sim: invalid request header %#02x", header)
 	}
-	return swd.Request{
+	return Request{
 		AP:   fields&1 != 0,
 		Read: fields&2 != 0,
 		Addr: fields >> 2 << 2,

@@ -10,7 +10,7 @@ type targetWire struct {
 	ack           byte
 	readValue     uint32
 	corruptParity bool
-	request       Request
+	request       request
 	written       uint32
 	calls         int
 	cleanupErr    error
@@ -36,11 +36,7 @@ func (w *targetWire) requestPhase(direction, output []byte, bits int) ([]byte, e
 	if header&0x81 != 0x81 || header&0x40 != 0 {
 		return nil, errors.New("invalid request framing")
 	}
-	w.request = Request{
-		AP:   header&0x02 != 0,
-		Read: header&0x04 != 0,
-		Addr: (header >> 1) & 0x0c,
-	}
+	w.request = mustRequest(header&0x02 != 0, header&0x04 != 0, (header>>1)&0x0c)
 	fields := header >> 1 & 0x0f
 	if testParity32(uint32(fields)) != (header&0x20 != 0) {
 		return nil, errors.New("invalid request parity")
@@ -65,7 +61,7 @@ func (w *targetWire) dataPhase(direction, output []byte, bits int) ([]byte, erro
 	if bits != 42 {
 		return nil, errors.New("invalid data-phase length")
 	}
-	if w.request.Read {
+	if w.request.isRead() {
 		return w.readPhase(direction, bits)
 	}
 	return w.writePhase(direction, output, bits)
@@ -103,21 +99,43 @@ func (w *targetWire) writePhase(direction, output []byte, bits int) ([]byte, err
 
 func TestTransferReadsAndWritesOneRegister(t *testing.T) {
 	readWire := &targetWire{ack: 0b001, readValue: 0x2ba01477}
-	got, err := New(readWire).Transfer(t.Context(), Request{Read: true}, 0)
+	got, err := New(readWire).ReadDP(t.Context(), 0x00)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got != readWire.readValue || readWire.calls != 2 {
 		t.Fatalf("read = %#08x after %d calls", got, readWire.calls)
 	}
+	if readWire.request != mustRequest(false, true, 0x00) {
+		t.Fatalf("ReadDP() request = %#v", readWire.request)
+	}
 
 	writeWire := &targetWire{ack: 0b001}
 	const written = 0x12345678
-	if _, err := New(writeWire).Transfer(t.Context(), Request{AP: true, Addr: 0x0c}, written); err != nil {
+	if err := New(writeWire).WriteAP(t.Context(), 0x0c, written); err != nil {
 		t.Fatal(err)
 	}
 	if writeWire.written != written || writeWire.calls != 2 {
 		t.Fatalf("write = %#08x after %d calls", writeWire.written, writeWire.calls)
+	}
+	if writeWire.request != mustRequest(true, false, 0x0c) {
+		t.Fatalf("WriteAP() request = %#v", writeWire.request)
+	}
+
+	apReadWire := &targetWire{ack: 0b001}
+	if _, err := New(apReadWire).ReadAP(t.Context(), 0x08); err != nil {
+		t.Fatal(err)
+	}
+	if apReadWire.request != mustRequest(true, true, 0x08) {
+		t.Fatalf("ReadAP() request = %#v", apReadWire.request)
+	}
+
+	dpWriteWire := &targetWire{ack: 0b001}
+	if err := New(dpWriteWire).WriteDP(t.Context(), 0x04, written); err != nil {
+		t.Fatal(err)
+	}
+	if dpWriteWire.request != mustRequest(false, false, 0x04) {
+		t.Fatalf("WriteDP() request = %#v", dpWriteWire.request)
 	}
 }
 
@@ -132,7 +150,7 @@ func TestTransferClassifiesAcknowledgements(t *testing.T) {
 	}
 	for _, test := range tests {
 		w := &targetWire{ack: test.ack}
-		_, err := New(w).Transfer(t.Context(), Request{Read: true}, 0)
+		_, err := New(w).ReadDP(t.Context(), 0x00)
 		if !errors.Is(err, test.want) {
 			t.Fatalf("ACK %03b error = %v", test.ack, err)
 		}
@@ -142,9 +160,9 @@ func TestTransferClassifiesAcknowledgements(t *testing.T) {
 func TestTransferPreservesAcknowledgementWhenCleanupFails(t *testing.T) {
 	cleanupErr := errors.New("injected cleanup failure")
 	w := &targetWire{ack: 0b010, cleanupErr: cleanupErr}
-	_, err := New(w).Transfer(t.Context(), Request{Read: true}, 0)
+	_, err := New(w).ReadDP(t.Context(), 0x00)
 	if !errors.Is(err, ErrWait) || !errors.Is(err, cleanupErr) {
-		t.Fatalf("Transfer() error = %v, want WAIT and cleanup failure", err)
+		t.Fatalf("ReadDP() error = %v, want WAIT and cleanup failure", err)
 	}
 }
 
@@ -154,7 +172,7 @@ func TestTransferRejectsInvalidReadParity(t *testing.T) {
 		readValue:     0x2ba01477,
 		corruptParity: true,
 	}
-	if _, err := New(w).Transfer(t.Context(), Request{Read: true}, 0); !errors.Is(err, ErrParity) {
+	if _, err := New(w).ReadDP(t.Context(), 0x00); !errors.Is(err, ErrParity) {
 		t.Fatalf("parity error = %v", err)
 	}
 }
@@ -167,10 +185,10 @@ func (shortWire) SWDIO(context.Context, []byte, []byte, int) ([]byte, error) {
 
 func TestTransferRejectsInvalidInputs(t *testing.T) {
 	w := &targetWire{ack: 0b001}
-	if _, err := New(w).Transfer(t.Context(), Request{Read: true, Addr: 1}, 0); err == nil || w.calls != 0 {
+	if _, err := New(w).ReadDP(t.Context(), 0x01); err == nil || w.calls != 0 {
 		t.Fatalf("invalid address error = %v after %d calls", err, w.calls)
 	}
-	if _, err := New(shortWire{}).Transfer(t.Context(), Request{Read: true}, 0); err == nil {
+	if _, err := New(shortWire{}).ReadDP(t.Context(), 0x00); err == nil {
 		t.Fatal("short lower-layer response succeeded")
 	}
 }
@@ -180,7 +198,7 @@ func FuzzRequestHeader(f *testing.F) {
 	f.Add(true, true, uint8(0x0c))
 	f.Fuzz(func(t *testing.T, ap, read bool, addr uint8) {
 		addr &= 0x0c
-		header := requestByte(Request{AP: ap, Read: read, Addr: addr})
+		header := requestByte(mustRequest(ap, read, addr))
 		if header&0x81 != 0x81 || header&0x40 != 0 {
 			t.Fatalf("framing = %#02x", header)
 		}
@@ -189,6 +207,14 @@ func FuzzRequestHeader(f *testing.F) {
 			t.Fatalf("parity = %#02x", header)
 		}
 	})
+}
+
+func mustRequest(ap, read bool, addr uint8) request {
+	req, err := newRequest(ap, read, addr)
+	if err != nil {
+		panic(err)
+	}
+	return req
 }
 
 func testBit(buf []byte, bit int) bool {

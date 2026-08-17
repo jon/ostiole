@@ -206,7 +206,7 @@ func faultHasValidState(err error) bool {
 }
 
 type txnStep struct {
-	req              swd.Request
+	req              transferRequest
 	data             uint32
 	op               int
 	deliver          bool
@@ -249,7 +249,7 @@ func (p *txnPlanner) lowerDP(index int, op txnOp) {
 	}
 	invalidatesAP := op.kind == txnWriteDP && op.dpAddr.Addr == ABORT && op.data&dapAbort != 0
 	step := txnStep{
-		req: swd.Request{
+		req: transferRequest{
 			Read: op.kind == txnReadDP,
 			Addr: uint8(op.dpAddr.Addr),
 		},
@@ -273,7 +273,7 @@ func (p *txnPlanner) lowerDP(index int, op txnOp) {
 	}
 	if op.kind == txnWriteDP {
 		p.steps = append(p.steps, txnStep{
-			req:              swd.Request{Read: true, Addr: uint8(RDBUFF)},
+			req:              transferRequest{Read: true, Addr: uint8(RDBUFF)},
 			op:               index,
 			deliver:          true,
 			operationStarted: true,
@@ -289,13 +289,13 @@ func (p *txnPlanner) lowerAP(index int, op txnOp) {
 	value := uint32(op.apSel)<<24 | uint32(op.apReg&0xf0)
 	p.selectValue(index, value)
 	p.steps = append(p.steps, txnStep{
-		req:  swd.Request{AP: true, Read: op.kind == txnReadAP, Addr: uint8(op.apReg) & 0x0c},
+		req:  transferRequest{AP: true, Read: op.kind == txnReadAP, Addr: uint8(op.apReg) & 0x0c},
 		data: op.data,
 		op:   index,
 	})
 	p.selectPending = false
 	p.steps = append(p.steps, txnStep{
-		req:              swd.Request{Read: true, Addr: uint8(RDBUFF)},
+		req:              transferRequest{Read: true, Addr: uint8(RDBUFF)},
 		op:               index,
 		deliver:          true,
 		deliverValue:     op.kind == txnReadAP,
@@ -318,7 +318,7 @@ func (p *txnPlanner) selectValue(index int, value uint32) {
 		return
 	}
 	p.steps = append(p.steps, txnStep{
-		req:  swd.Request{Addr: uint8(SELECT)},
+		req:  transferRequest{Addr: uint8(SELECT)},
 		data: value,
 		op:   index,
 	})
@@ -330,11 +330,11 @@ func (p *txnPlanner) settleSELECT(index int) {
 	if !p.selectPending {
 		return
 	}
-	p.steps = append(p.steps, txnStep{req: swd.Request{Read: true, Addr: uint8(RDBUFF)}, op: index, settlesDPWrite: true})
+	p.steps = append(p.steps, txnStep{req: transferRequest{Read: true, Addr: uint8(RDBUFF)}, op: index, settlesDPWrite: true})
 	p.selectPending = false
 }
 
-func settlesSELECT(req swd.Request) bool {
+func settlesSELECT(req transferRequest) bool {
 	if req.AP || req.Addr == uint8(RDBUFF) {
 		return true
 	}

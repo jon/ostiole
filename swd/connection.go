@@ -22,12 +22,24 @@ type Wire interface {
 	SWDIO(context.Context, []byte, []byte, int) ([]byte, error)
 }
 
-// Request describes one SWD register transaction.
-type Request struct {
-	AP   bool
-	Read bool
-	Addr uint8
+type request struct {
+	ap   bool
+	read bool
+	addr uint8
 }
+
+func newRequest(ap, read bool, addr uint8) (request, error) {
+	if addr != 0x00 && addr != 0x04 && addr != 0x08 && addr != 0x0c {
+		return request{}, fmt.Errorf("swd: invalid register address %#02x", addr)
+	}
+	return request{ap: ap, read: read, addr: addr}, nil
+}
+
+func (r request) isAP() bool { return r.ap }
+
+func (r request) isRead() bool { return r.read }
+
+func (r request) address() uint8 { return r.addr }
 
 // Conn performs one serialized stream of SWD transactions over a wire. Its
 // methods are not safe for concurrent use.
