@@ -7,13 +7,15 @@ import (
 	"github.com/jon/ostiole/usb"
 )
 
-// Open takes ownership of device and returns a ready FTDI SWD channel.
-// It closes the USB device before returning any error.
+// Open returns a ready FTDI SWD channel and takes ownership of device on
+// success. After an error, the caller must call device.Close. Open has already
+// attempted cleanup, so that call either finishes cleanup or harmlessly
+// repeats it.
 func Open(ctx context.Context, device *usb.Device, config Config) (*Channel, error) {
 	if device == nil {
 		return nil, errors.New("ftdi: nil USB device")
 	}
-	return openChannel(ctx, device, config)
+	return openChannel(ctx, ownedUSBDevice{Device: device}, config)
 }
 
 func openChannel(ctx context.Context, device usbDevice, config Config) (*Channel, error) {

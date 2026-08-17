@@ -46,7 +46,6 @@ func TestDarwinBulkTransfersUseEndpointPipeRoutes(t *testing.T) {
 				transferType: darwinBulkPipe,
 			},
 		},
-		hasClaim: true,
 	}
 	if count, err := device.BulkWrite(context.Background(), 0x02, []byte{1, 2}); err != nil || count != 2 {
 		t.Fatalf("BulkWrite = %d, %v", count, err)
@@ -70,7 +69,6 @@ func TestDarwinBulkRejectsInvalidEndpoints(t *testing.T) {
 			0x01: {endpoint: 0x01, ref: 1, transferType: 3},
 			0x82: {endpoint: 0x82, ref: 2, transferType: 3},
 		},
-		hasClaim: true,
 	}
 	tests := []struct {
 		name  string
@@ -115,7 +113,6 @@ func TestDarwinBulkReturnsZeroOnNativeErrors(t *testing.T) {
 			0x02: {ref: 2, transferType: darwinBulkPipe},
 			0x81: {ref: 1, transferType: darwinBulkPipe},
 		},
-		hasClaim: true,
 	}
 	if count, err := device.BulkWrite(context.Background(), 0x02, nil); count != 0 || !errors.Is(err, want) {
 		t.Fatalf("BulkWrite = %d, %v", count, err)
@@ -133,7 +130,6 @@ func TestDarwinBulkSendsZeroLengthTransfers(t *testing.T) {
 			0x02: {ref: 2, transferType: darwinBulkPipe},
 			0x81: {ref: 1, transferType: darwinBulkPipe},
 		},
-		hasClaim: true,
 	}
 	if count, err := device.BulkWrite(context.Background(), 0x02, nil); err != nil || count != 0 {
 		t.Fatalf("BulkWrite = %d, %v", count, err)
@@ -156,7 +152,6 @@ func TestDarwinBulkValidatesContextAndSize(t *testing.T) {
 		routes: map[uint8]darwinPipe{
 			0x02: {ref: 2, transferType: darwinBulkPipe},
 		},
-		hasClaim: true,
 	}
 	var nilContext context.Context
 	if _, err := device.BulkWrite(nilContext, 0x02, nil); err == nil {

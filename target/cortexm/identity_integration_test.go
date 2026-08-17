@@ -4,6 +4,7 @@ package cortexm_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -41,7 +42,7 @@ func TestIdentifyCortexMOverFTDI(t *testing.T) {
 		Interface: ftdi.SWD,
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal(errors.Join(err, device.Close()))
 	}
 	connection := swd.New(channel)
 	if err := connection.JTAGToSWD(ctx); err != nil {

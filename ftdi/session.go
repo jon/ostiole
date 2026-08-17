@@ -19,10 +19,9 @@ type controlStep struct {
 }
 
 func (c *Channel) enterMPSSE(ctx context.Context) error {
-	if err := c.claim(); err != nil {
+	if err := c.claimUSB(); err != nil {
 		return fmt.Errorf("ftdi: claim USB interface: %w", err)
 	}
-	c.claimed = true
 	for _, step := range []controlStep{
 		{request: requestReset, value: 0},
 		{request: requestReset, value: 1},
@@ -56,13 +55,14 @@ func settleMPSSE(ctx context.Context) error {
 	}
 }
 
-// Close restores the selected port, releases it, and closes the USB device.
+// Close restores the selected port, releases it, and closes the USB device. If
+// interface release fails, the channel remains open and Close can be retried.
 func (c *Channel) Close() error {
 	if c == nil || c.device == nil {
 		return nil
 	}
 	var result error
-	if c.claimed {
+	if c.claim != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		for _, step := range []controlStep{
@@ -73,8 +73,9 @@ func (c *Channel) Close() error {
 		} {
 			result = errors.Join(result, c.runControl(ctx, step))
 		}
-		result = errors.Join(result, c.release())
-		c.claimed = false
+		if err := c.releaseUSB(); err != nil {
+			return errors.Join(result, err)
+		}
 	}
 	return errors.Join(result, c.device.Close())
 }

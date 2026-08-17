@@ -55,7 +55,7 @@ func readDPIDR(ctx context.Context) (value uint32, err error) {
 		Interface: ftdi.SWD,
 	})
 	if err != nil {
-		return 0, err
+		return 0, errors.Join(err, dev.Close())
 	}
 	defer func() {
 		err = errors.Join(err, ch.Close())

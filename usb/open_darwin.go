@@ -23,8 +23,7 @@ type Device struct {
 	handle    darwinDeviceHandle
 	iface     darwinInterfaceHandle
 	routes    map[uint8]darwinPipe
-	claimed   uint8
-	hasClaim  bool
+	claim     *ClaimedInterface
 	closeOnce sync.Once
 	closeErr  error
 }
@@ -100,22 +99,22 @@ func validateDarwinIdentity(expected, actual DeviceInfo) error {
 	return nil
 }
 
-// Close releases the open macOS USB attachment.
+// Close releases the open macOS USB attachment. If interface release fails,
+// the device remains open and Close can be retried.
 func (d *Device) Close() error {
 	if d == nil {
 		return nil
 	}
+	if d.claim != nil {
+		if err := d.claim.Close(); err != nil {
+			return err
+		}
+	}
 	d.closeOnce.Do(func() {
 		handle := d.handle
 		d.handle = nil
-		var releaseErr error
-		if d.hasClaim {
-			releaseErr = d.ReleaseInterface(d.claimed)
-		}
 		if handle != nil {
-			d.closeErr = errors.Join(releaseErr, handle.close())
-		} else {
-			d.closeErr = releaseErr
+			d.closeErr = handle.close()
 		}
 	})
 	return d.closeErr

@@ -7,22 +7,38 @@ import (
 )
 
 type fakeUSBDevice struct {
-	claimed  uint8
-	released uint8
-	request  uint8
-	value    uint16
-	index    uint16
-	wroteEP  uint8
-	readEP   uint8
-	closed   bool
-	writeN   []int
-	readData [][]byte
-	controls []controlRecord
-	writes   [][]byte
-	claimErr error
-	writeErr int
-	writesN  int
-	releases int
+	claimed    uint8
+	released   uint8
+	request    uint8
+	value      uint16
+	index      uint16
+	wroteEP    uint8
+	readEP     uint8
+	closed     bool
+	writeN     []int
+	readData   [][]byte
+	controls   []controlRecord
+	writes     [][]byte
+	claimErr   error
+	releaseErr error
+	claim      *fakeUSBClaim
+	writeErr   int
+	writesN    int
+	releases   int
+}
+
+type fakeUSBClaim struct {
+	device *fakeUSBDevice
+}
+
+func (c *fakeUSBClaim) Close() error {
+	c.device.released = c.device.claimed
+	c.device.releases++
+	if c.device.releaseErr != nil {
+		return c.device.releaseErr
+	}
+	c.device.claim = nil
+	return nil
 }
 
 type controlRecord struct {
@@ -31,18 +47,14 @@ type controlRecord struct {
 	index   uint16
 }
 
-func (d *fakeUSBDevice) ClaimInterface(iface uint8) error {
+func (d *fakeUSBDevice) claimInterface(iface uint8) (usbClaim, error) {
 	if d.claimErr != nil {
-		return d.claimErr
+		return nil, d.claimErr
 	}
 	d.claimed = iface
-	return nil
-}
-
-func (d *fakeUSBDevice) ReleaseInterface(iface uint8) error {
-	d.released = iface
-	d.releases++
-	return nil
+	claim := &fakeUSBClaim{device: d}
+	d.claim = claim
+	return claim, nil
 }
 
 func (d *fakeUSBDevice) ControlTransfer(_ context.Context, _ uint8, request uint8, value, index uint16, _ []byte) (int, error) {
@@ -95,6 +107,31 @@ func TestChannelOwnsAndRestoresMPSSEMode(t *testing.T) {
 	}
 	if raw.claimed != 0 || raw.released != 0 || !raw.closed {
 		t.Fatalf("ownership = %#v", raw)
+	}
+}
+
+func TestChannelRetainsUSBClaimAfterFailedRelease(t *testing.T) {
+	want := errors.New("release failed")
+	raw := &fakeUSBDevice{releaseErr: want}
+	channel, err := newChannel(raw, Config{ProductID: PIDFT232H, Port: PortA, Interface: SWD})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := channel.claimUSB(); err != nil {
+		t.Fatal(err)
+	}
+	if err := channel.Close(); !errors.Is(err, want) {
+		t.Fatalf("first Close() error = %v, want %v", err, want)
+	}
+	if raw.closed {
+		t.Fatal("failed interface release closed the USB device")
+	}
+	raw.releaseErr = nil
+	if err := channel.Close(); err != nil {
+		t.Fatalf("second Close(): %v", err)
+	}
+	if !raw.closed || raw.releases != 2 {
+		t.Fatalf("ownership after retry = %#v", raw)
 	}
 }
 
@@ -206,6 +243,11 @@ func TestChannelExchangesExactMPSSEPayloads(t *testing.T) {
 }
 
 func (d *fakeUSBDevice) Close() error {
+	if d.claim != nil {
+		if err := d.claim.Close(); err != nil {
+			return err
+		}
+	}
 	d.closed = true
 	return nil
 }
@@ -221,7 +263,7 @@ func TestChannelBindsOneExplicitMPSSEPort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := channel.claim(); err != nil {
+	if err := channel.claimUSB(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := channel.control(context.Background(), 0x0b, 0x0200); err != nil {
@@ -233,7 +275,7 @@ func TestChannelBindsOneExplicitMPSSEPort(t *testing.T) {
 	if _, err := channel.bulkRead(context.Background(), make([]byte, 1)); err != nil {
 		t.Fatal(err)
 	}
-	if err := channel.release(); err != nil {
+	if err := channel.releaseUSB(); err != nil {
 		t.Fatal(err)
 	}
 	if err := channel.Close(); err != nil {

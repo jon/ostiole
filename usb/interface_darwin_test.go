@@ -61,7 +61,8 @@ func TestDarwinClaimSeizesOnlyTheSelectedInterface(t *testing.T) {
 	native := &fakeDarwinInterfaceDevice{iface: nativeInterface}
 	device := &Device{handle: native}
 
-	if err := device.ClaimInterface(0); err != nil {
+	claim, err := device.ClaimInterface(0)
+	if err != nil {
 		t.Fatalf("ClaimInterface: %v", err)
 	}
 	if !reflect.DeepEqual(native.interfaces, []uint8{0}) {
@@ -73,17 +74,38 @@ func TestDarwinClaimSeizesOnlyTheSelectedInterface(t *testing.T) {
 	if got := device.routes[0x02]; got.ref != 4 {
 		t.Fatalf("endpoint route = %#v", got)
 	}
-	if err := device.ClaimInterface(1); err == nil {
+	if _, err := device.ClaimInterface(1); err == nil {
 		t.Fatal("second ClaimInterface succeeded")
 	}
-	if err := device.ReleaseInterface(1); err == nil {
-		t.Fatal("ReleaseInterface for unclaimed interface succeeded")
-	}
-	if err := device.ReleaseInterface(0); err != nil {
-		t.Fatalf("ReleaseInterface: %v", err)
+	if err := claim.Close(); err != nil {
+		t.Fatalf("ClaimedInterface.Close: %v", err)
 	}
 	if nativeInterface.closes != 1 {
 		t.Fatalf("interface closes = %d, want 1", nativeInterface.closes)
+	}
+}
+
+func TestDarwinClaimRetainsOwnershipAfterFailedRelease(t *testing.T) {
+	want := errors.New("release failed")
+	nativeInterface := &fakeDarwinInterface{closeErr: want}
+	native := &fakeDarwinInterfaceDevice{iface: nativeInterface}
+	device := &Device{handle: native}
+	claim, err := device.ClaimInterface(0)
+	if err != nil {
+		t.Fatalf("ClaimInterface: %v", err)
+	}
+	if err := claim.Close(); !errors.Is(err, want) {
+		t.Fatalf("first Close() error = %v, want %v", err, want)
+	}
+	if _, err := device.ClaimInterface(1); err == nil {
+		t.Fatal("ClaimInterface() succeeded while release was pending")
+	}
+	nativeInterface.closeErr = nil
+	if err := claim.Close(); err != nil {
+		t.Fatalf("second Close(): %v", err)
+	}
+	if _, err := device.ClaimInterface(1); err != nil {
+		t.Fatalf("ClaimInterface() after release: %v", err)
 	}
 }
 
@@ -93,13 +115,13 @@ func TestDarwinClaimCleansUpAfterPipeDiscoveryFailure(t *testing.T) {
 	native := &fakeDarwinInterfaceDevice{iface: nativeInterface}
 	device := &Device{handle: native}
 
-	if err := device.ClaimInterface(0); !errors.Is(err, want) {
+	if _, err := device.ClaimInterface(0); !errors.Is(err, want) {
 		t.Fatalf("ClaimInterface error = %v, want %v", err, want)
 	}
 	if nativeInterface.closes != 1 {
 		t.Fatalf("interface closes = %d, want 1", nativeInterface.closes)
 	}
-	if device.hasClaim {
+	if device.claim != nil {
 		t.Fatal("failed claim remained active")
 	}
 }
@@ -110,18 +132,53 @@ func TestDarwinClaimCleansUpAfterSeizureFailure(t *testing.T) {
 	native := &fakeDarwinInterfaceDevice{iface: nativeInterface}
 	device := &Device{handle: native}
 
-	if err := device.ClaimInterface(0); !errors.Is(err, want) {
+	if _, err := device.ClaimInterface(0); !errors.Is(err, want) {
 		t.Fatalf("ClaimInterface error = %v, want %v", err, want)
 	}
 	if nativeInterface.closes != 1 {
 		t.Fatalf("interface closes = %d, want 1", nativeInterface.closes)
 	}
-	if device.hasClaim {
+	if device.claim != nil {
 		t.Fatal("failed claim remained active")
 	}
 }
 
-func TestDarwinCloseJoinsInterfaceAndDeviceFailures(t *testing.T) {
+func TestDarwinClaimCleanupRemainsRetryable(t *testing.T) {
+	wantAcquire := errors.New("acquisition failed")
+	wantRelease := errors.New("release failed")
+	tests := []struct {
+		name     string
+		openErr  error
+		pipesErr error
+	}{
+		{name: "seizure", openErr: wantAcquire},
+		{name: "pipe discovery", pipesErr: wantAcquire},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			nativeInterface := &fakeDarwinInterface{openErr: test.openErr, pipesErr: test.pipesErr, closeErr: wantRelease}
+			native := &fakeDarwinInterfaceDevice{iface: nativeInterface}
+			device := &Device{handle: native}
+
+			claim, err := device.ClaimInterface(0)
+			if claim != nil || !errors.Is(err, wantAcquire) || !errors.Is(err, wantRelease) {
+				t.Fatalf("ClaimInterface() = (%T, %v), want nil and both errors", claim, err)
+			}
+			if device.claim == nil {
+				t.Fatal("failed cleanup discarded the interface claim")
+			}
+			nativeInterface.closeErr = nil
+			if err := device.Close(); err != nil {
+				t.Fatalf("Device.Close() retry: %v", err)
+			}
+			if nativeInterface.closes != 2 || native.closes != 1 {
+				t.Fatalf("close counts = interface %d, device %d", nativeInterface.closes, native.closes)
+			}
+		})
+	}
+}
+
+func TestDarwinDeviceCloseWaitsForInterfaceRelease(t *testing.T) {
 	wantRelease := errors.New("release failed")
 	wantClose := errors.New("device close failed")
 	nativeInterface := &fakeDarwinInterface{closeErr: wantRelease}
@@ -130,17 +187,21 @@ func TestDarwinCloseJoinsInterfaceAndDeviceFailures(t *testing.T) {
 		iface:            nativeInterface,
 	}
 	device := &Device{handle: native}
-	if err := device.ClaimInterface(0); err != nil {
+	if _, err := device.ClaimInterface(0); err != nil {
 		t.Fatalf("ClaimInterface: %v", err)
 	}
 	err := device.Close()
-	if !errors.Is(err, wantRelease) || !errors.Is(err, wantClose) {
-		t.Fatalf("Close error = %v", err)
+	if !errors.Is(err, wantRelease) {
+		t.Fatalf("first Close() error = %v, want %v", err, wantRelease)
 	}
-	if err := device.Close(); !errors.Is(err, wantRelease) {
-		t.Fatalf("second Close error = %v", err)
+	if native.closes != 0 {
+		t.Fatalf("device closes after failed release = %d, want 0", native.closes)
 	}
-	if nativeInterface.closes != 1 || native.closes != 1 {
+	nativeInterface.closeErr = nil
+	if err := device.Close(); !errors.Is(err, wantClose) {
+		t.Fatalf("second Close() error = %v, want %v", err, wantClose)
+	}
+	if nativeInterface.closes != 2 || native.closes != 1 {
 		t.Fatalf("close counts = interface %d, device %d", nativeInterface.closes, native.closes)
 	}
 }
@@ -152,7 +213,7 @@ func TestDarwinClaimRejectsAClosedDevice(t *testing.T) {
 	if err := device.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	if err := device.ClaimInterface(0); !errors.Is(err, errDarwinDeviceClosed) {
+	if _, err := device.ClaimInterface(0); !errors.Is(err, errDarwinDeviceClosed) {
 		t.Fatalf("ClaimInterface error = %v, want %v", err, errDarwinDeviceClosed)
 	}
 	if len(native.interfaces) != 0 {
@@ -170,7 +231,8 @@ func TestDarwinAlternateSettingReplacesPipeRoutes(t *testing.T) {
 	}}
 	native := &fakeDarwinInterfaceDevice{iface: nativeInterface}
 	device := &Device{handle: native}
-	if err := device.ClaimInterface(0); err != nil {
+	claim, err := device.ClaimInterface(0)
+	if err != nil {
 		t.Fatalf("ClaimInterface: %v", err)
 	}
 	nativeInterface.pipesValue = []darwinPipe{
@@ -180,7 +242,7 @@ func TestDarwinAlternateSettingReplacesPipeRoutes(t *testing.T) {
 			transferType: darwinBulkPipe,
 		},
 	}
-	if err := device.SetAltSetting(0, 2); err != nil {
+	if err := claim.SetAltSetting(2); err != nil {
 		t.Fatalf("SetAltSetting: %v", err)
 	}
 	if !reflect.DeepEqual(nativeInterface.alternates, []uint8{2}) {
@@ -205,18 +267,16 @@ func TestDarwinAlternateSettingInvalidatesRoutesOnFailure(t *testing.T) {
 	}}
 	native := &fakeDarwinInterfaceDevice{iface: nativeInterface}
 	device := &Device{handle: native}
-	if err := device.ClaimInterface(0); err != nil {
+	claim, err := device.ClaimInterface(0)
+	if err != nil {
 		t.Fatalf("ClaimInterface: %v", err)
 	}
 	nativeInterface.setAltErr = want
-	if err := device.SetAltSetting(0, 1); !errors.Is(err, want) {
+	if err := claim.SetAltSetting(1); !errors.Is(err, want) {
 		t.Fatalf("SetAltSetting error = %v, want %v", err, want)
 	}
 	if device.routes != nil {
 		t.Fatalf("routes after failure = %#v", device.routes)
-	}
-	if err := device.SetAltSetting(1, 0); err == nil {
-		t.Fatal("SetAltSetting for unclaimed interface succeeded")
 	}
 }
 
@@ -225,11 +285,12 @@ func TestDarwinAlternateSettingInvalidatesRoutesWhenPipesFail(t *testing.T) {
 	nativeInterface := &fakeDarwinInterface{}
 	native := &fakeDarwinInterfaceDevice{iface: nativeInterface}
 	device := &Device{handle: native}
-	if err := device.ClaimInterface(0); err != nil {
+	claim, err := device.ClaimInterface(0)
+	if err != nil {
 		t.Fatalf("ClaimInterface: %v", err)
 	}
 	nativeInterface.pipesErr = want
-	if err := device.SetAltSetting(0, 1); !errors.Is(err, want) {
+	if err := claim.SetAltSetting(1); !errors.Is(err, want) {
 		t.Fatalf("SetAltSetting error = %v, want %v", err, want)
 	}
 	if device.routes != nil {

@@ -40,9 +40,10 @@ Pass the selected product identifier into `ftdi.Config` along with the MPSSE
 port, SWD interface, and requested clock. The driver validates this
 combination; discovery does not infer it.
 
-`ftdi.Open` takes ownership of the `*usb.Device` on both success and failure.
-After a successful call, close the returned channel rather than separately
-closing the device.
+`ftdi.Open` takes ownership of the `*usb.Device` when it succeeds. Close the
+returned channel rather than separately closing the device. After an error,
+call `Device.Close`. `Open` has already attempted cleanup, so that call either
+finishes cleanup or harmlessly repeats it.
 
 ## Choose between raw SWD and DAP
 
@@ -109,9 +110,10 @@ Use a fresh, bounded cleanup context if the operation context may already be
 canceled. Join cleanup errors with the operation error so a restoration or
 close failure is not lost.
 
-The current open paths clean up host resources acquired before returning an
-error. A successfully returned value belongs to the caller until its
-documented release or close method succeeds.
+`Enumerator.Open` cleans up native resources before returning an error.
+`ftdi.Open` attempts cleanup, then leaves the original device with the caller
+for the `Device.Close` described above. A successfully returned value belongs
+to the caller until its documented release or close method succeeds.
 
 ## Keep policy at the application edge
 

@@ -3,6 +3,7 @@
 package usb
 
 import (
+	"errors"
 	"fmt"
 	"syscall"
 	"unsafe"
@@ -16,41 +17,42 @@ const (
 
 type ioctlFunc func(fd, request uintptr, argument any) (uintptr, error)
 
-// ClaimInterface claims one interface for this device.
-func (d *Device) ClaimInterface(iface uint8) error {
-	if d.hasClaim {
-		return fmt.Errorf("usb: interface %d is already claimed", d.claimed)
+// ClaimInterface claims one interface and returns the claim. If cleanup after
+// an error remains pending, Device.Close retries it.
+func (d *Device) ClaimInterface(iface uint8) (*ClaimedInterface, error) {
+	if d.claim != nil {
+		return nil, fmt.Errorf("usb: interface %d is already claimed", d.claim.number)
 	}
 	value := uint32(iface)
 	if _, err := d.runIOCTL(usbfsClaimInterface, &value); err != nil {
-		return fmt.Errorf("usb: claim interface %d: %w", iface, err)
+		return nil, fmt.Errorf("usb: claim interface %d: %w", iface, err)
 	}
-	d.claimed, d.hasClaim = iface, true
-	return nil
+	claim := &ClaimedInterface{device: d, number: iface}
+	d.claim = claim
+	return claim, nil
 }
 
-// SetAltSetting selects an alternate setting on the claimed interface.
-func (d *Device) SetAltSetting(iface, alternate uint8) error {
-	if !d.hasClaim || d.claimed != iface {
-		return fmt.Errorf("usb: interface %d is not claimed", iface)
+func (d *Device) setAltSetting(claim *ClaimedInterface, alternate uint8) error {
+	if d.claim != claim {
+		return errors.New("usb: claimed interface is not owned by this device")
 	}
-	value := [2]uint32{uint32(iface), uint32(alternate)}
+	value := [2]uint32{uint32(claim.number), uint32(alternate)}
 	if _, err := d.runIOCTL(usbfsSetInterface, &value); err != nil {
-		return fmt.Errorf("usb: select interface %d alternate %d: %w", iface, alternate, err)
+		return fmt.Errorf("usb: select interface %d alternate %d: %w", claim.number, alternate, err)
 	}
 	return nil
 }
 
-// ReleaseInterface releases the claimed interface.
-func (d *Device) ReleaseInterface(iface uint8) error {
-	if !d.hasClaim || d.claimed != iface {
-		return fmt.Errorf("usb: interface %d is not claimed", iface)
+func (d *Device) releaseInterface(claim *ClaimedInterface) error {
+	if d.claim != claim {
+		return errors.New("usb: claimed interface is not owned by this device")
 	}
-	value := uint32(iface)
+	value := uint32(claim.number)
 	if _, err := d.runIOCTL(usbfsReleaseInterface, &value); err != nil {
-		return fmt.Errorf("usb: release interface %d: %w", iface, err)
+		return fmt.Errorf("usb: release interface %d: %w", claim.number, err)
 	}
-	d.hasClaim = false
+	d.claim = nil
+	claim.device = nil
 	return nil
 }
 

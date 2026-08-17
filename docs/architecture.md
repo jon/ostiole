@@ -75,8 +75,8 @@ up and released in reverse order.
 | Value | Ownership rule |
 | --- | --- |
 | `*usb.Enumerator` | Holds inventory configuration, not an open attachment. |
-| `*usb.Device` | Owns one open attachment and at most one claimed interface. `Close` releases both. |
-| `*ftdi.Channel` | Takes ownership of the USB device passed to `ftdi.Open`. `Close` resets bit mode, sets the latency timer to 16 ms, purges the receive and transmit paths, releases the interface, and closes the device. It does not preserve prior FTDI settings. |
+| `*usb.Device` | Owns one open attachment. `ClaimInterface` returns the sole owner of one interface; that value selects alternates and releases the claim. A failed release can be retried, and `Device.Close` does not close the attachment while release remains pending. |
+| `*ftdi.Channel` | Takes ownership of the USB device after `ftdi.Open` succeeds. `Close` resets bit mode, sets the latency timer to 16 ms, purges the receive and transmit paths, releases the interface, and closes the device. A failed interface release leaves the channel and device open for another `Close`. It does not preserve prior FTDI settings. |
 | `*swd.Conn` | Represents one logical SWD transaction stream over its wire. It does not own a separate host resource. Calls on a connection must be serialized. |
 | `*dap.DebugPort` | Requires exclusive use of its SWD transaction stream. After `Connect`, it owns only the debug and system power requests it added. It records newly requested power bits before writing them so bounded cleanup can attempt to clear them even when the write's result is ambiguous. `Release` settles its final SELECT write through RDBUFF before reporting success. |
 | `*dap.MemAP` | Saves the CSW and TAR values it changes. `Release` retries failed restoration; if DAPABORT interrupts cleanup, the next `Release` retries both saved values. Calls sharing the MEM-AP or its debug port must be serialized. |
@@ -90,8 +90,10 @@ on its `swd.Conn` can make that cached state stale, so do not share the
 connection with another transaction owner while the debug port remains in
 use. No layer adds a mutex; serialization belongs to the composition.
 
-Constructors and open operations clean up resources acquired before a failed
-return. A caller owns only values returned successfully.
+Constructors and open operations attempt to clean up resources acquired before
+a failed return. `ftdi.Open` takes ownership of its input only on success. After
+an error, the caller closes the device; that call is harmless when `Open`
+already completed cleanup and retries it otherwise.
 
 ## Protocol and policy boundaries
 

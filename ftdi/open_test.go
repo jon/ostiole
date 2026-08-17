@@ -74,3 +74,31 @@ func TestOpenCleansUpEveryFailedPreparationStage(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenLeavesDeviceAvailableAfterFailedCleanup(t *testing.T) {
+	wantRelease := errors.New("release failed")
+	raw := &fakeUSBDevice{
+		readData:   [][]byte{{0x01, 0x60, 0x00, 0x00}},
+		releaseErr: wantRelease,
+	}
+	channel, err := newChannel(raw, Config{ClockHz: 400_000, ProductID: PIDFT232H, Port: PortA, Interface: SWD})
+	if err != nil {
+		t.Fatal(err)
+	}
+	channel.settle = func(context.Context) error { return nil }
+
+	ready, err := prepareChannel(context.Background(), channel)
+	if ready != nil || !errors.Is(err, wantRelease) {
+		t.Fatalf("prepareChannel() = (%T, %v), want nil and release error", ready, err)
+	}
+	if raw.closed || raw.releases != 1 {
+		t.Fatalf("ownership after failed cleanup = %#v", raw)
+	}
+	raw.releaseErr = nil
+	if err := raw.Close(); err != nil {
+		t.Fatalf("device Close() retry: %v", err)
+	}
+	if !raw.closed || raw.releases != 2 {
+		t.Fatalf("ownership after retry = %#v", raw)
+	}
+}
