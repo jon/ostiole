@@ -13,7 +13,7 @@ import (
 type targetIdentity struct {
 	dpidr     dap.DPIDRInfo
 	selection dap.APSel
-	apidr     uint32
+	apidr     dap.APIDRInfo
 	processor cortexm.Identity
 }
 
@@ -34,7 +34,7 @@ func runTarget(ctx context.Context, args []string, stdout io.Writer, ops operati
 		return err
 	}
 	_, err = fmt.Fprintf(stdout, "DPIDR=%#08x AP%d_IDR=%#08x CPUID=%#08x\n",
-		info.dpidr.Raw, selector, info.apidr, info.processor.Raw)
+		info.dpidr.Raw, selector, info.apidr.Raw, info.processor.Raw)
 	return err
 }
 
@@ -46,7 +46,7 @@ func identifyCortexM(ctx context.Context, selection dap.APSel) (_ targetIdentity
 	defer func() {
 		err = errors.Join(err, session.close())
 	}()
-	apidr, err := session.port.ReadAP(ctx, selection, dap.APIDR)
+	apidr, err := session.port.ReadAPIDR(ctx, selection)
 	if err != nil {
 		return targetIdentity{}, err
 	}

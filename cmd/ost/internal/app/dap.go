@@ -13,7 +13,7 @@ import (
 type apIdentity struct {
 	dpidr     dap.DPIDRInfo
 	selection dap.APSel
-	idr       uint32
+	idr       dap.APIDRInfo
 }
 
 func runDAP(ctx context.Context, args []string, stdout io.Writer, ops operations) error {
@@ -51,7 +51,7 @@ func runAP(ctx context.Context, args []string, stdout io.Writer, ops operations)
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(stdout, "DPIDR=%#08x AP%d_IDR=%#08x\n", info.dpidr.Raw, selector, info.idr)
+	_, err = fmt.Fprintf(stdout, "DPIDR=%#08x AP%d_IDR=%#08x\n", info.dpidr.Raw, selector, info.idr.Raw)
 	return err
 }
 
@@ -90,7 +90,7 @@ func inspectAP(ctx context.Context, selection dap.APSel) (_ apIdentity, err erro
 	defer func() {
 		err = errors.Join(err, session.close())
 	}()
-	idr, err := session.port.ReadAP(ctx, selection, dap.APIDR)
+	idr, err := session.port.ReadAPIDR(ctx, selection)
 	if err != nil {
 		return apIdentity{}, err
 	}

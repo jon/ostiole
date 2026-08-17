@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/jon/ostiole/swd"
 )
 
 // APSel identifies one access port. Its zero value is invalid; construct a
@@ -26,83 +28,177 @@ func (sel APSel) Value() (uint8, error) {
 	return uint8(sel.index - 1), nil
 }
 
-// APReg identifies one banked access-port register.
-type APReg uint8
+// APAddress identifies one register on one access port. Its zero value is
+// invalid; derive an address from an APSel with Address.
+type APAddress struct {
+	sel   APSel
+	value uint8
+}
 
-// APIDR is the access-port identification register.
-const APIDR APReg = 0xfc
+// Address returns a complete ADIv5 access-port register address without
+// sending traffic. The operation which uses the address reports an error if
+// value is not four-byte aligned or sel is the zero value.
+func (sel APSel) Address(value uint8) APAddress {
+	return APAddress{sel: sel, value: value}
+}
 
-// ReadAP reads one selected access-port register through the posted pipeline.
-// The debug port must be connected and have no pending cleanup.
-func (dp *DebugPort) ReadAP(ctx context.Context, sel APSel, reg APReg) (uint32, error) {
+const apIDRAddress = uint8(0xfc)
+
+// APIDRInfo contains the fields of an ADIv5 access-port identification
+// register.
+type APIDRInfo struct {
+	Raw      uint32
+	Revision uint8
+	Designer uint16
+	Class    uint8
+	Variant  uint8
+	Type     uint8
+}
+
+// DecodeAPIDR decodes an access-port identification register.
+func DecodeAPIDR(value uint32) APIDRInfo {
+	return APIDRInfo{
+		Raw:      value,
+		Revision: uint8(value >> 28),
+		Designer: uint16(value >> 17 & 0x7ff),
+		Class:    uint8(value >> 13 & 0x0f),
+		Variant:  uint8(value >> 4 & 0x0f),
+		Type:     uint8(value & 0x0f),
+	}
+}
+
+// ReadAPIDR reads and decodes the identification register of one access port.
+// The debug port must be connected and have no cleanup pending.
+func (dp *DebugPort) ReadAPIDR(ctx context.Context, sel APSel) (APIDRInfo, error) {
+	if err := dp.requireConnected(); err != nil {
+		return APIDRInfo{}, err
+	}
+	value, err := dp.readAP(ctx, sel, apIDRAddress)
+	if err != nil {
+		return APIDRInfo{}, err
+	}
+	return DecodeAPIDR(value), nil
+}
+
+// ReadRawAP reads the register at one complete access-port address through the
+// posted pipeline. A read that completes or might have completed invalidates
+// existing MemAP values. The caller must understand the selected AP class and
+// restore any state the read changes. The address must be four-byte aligned.
+// The debug port must be connected and have no cleanup pending.
+func (dp *DebugPort) ReadRawAP(ctx context.Context, addr APAddress) (uint32, error) {
 	if err := dp.requireConnected(); err != nil {
 		return 0, err
 	}
-	return dp.readAP(ctx, sel, reg)
-}
-
-func (dp *DebugPort) readAP(ctx context.Context, sel APSel, reg APReg) (uint32, error) {
-	if err := validateAPReg(reg); err != nil {
-		return 0, err
-	}
-	if err := dp.selectAP(ctx, sel, reg); err != nil {
-		return 0, err
-	}
-	_, err := dp.transfer(ctx, transferRequest{
-		AP:   true,
-		Read: true,
-		Addr: uint8(reg) & 0x0c,
-	}, 0)
+	value, err := validateAPAddress(addr, false)
 	if err != nil {
-		return 0, fmt.Errorf("dap: post AP register %#02x read: %w", reg, err)
+		return 0, err
 	}
-	return dp.readDP(ctx, RDBUFF)
+	generation := dp.state.apGeneration
+	possible, result, err := dp.readAPEffect(ctx, addr.sel, value)
+	if possible && dp.state.apGeneration == generation {
+		dp.state.invalidateAP()
+	}
+	return result, err
 }
 
-// WriteAP writes one selected access-port register and waits for completion.
-// The debug port must be connected and have no pending cleanup.
-func (dp *DebugPort) WriteAP(ctx context.Context, sel APSel, reg APReg, value uint32) error {
+func (dp *DebugPort) readAP(ctx context.Context, sel APSel, addr uint8) (uint32, error) {
+	_, value, err := dp.readAPEffect(ctx, sel, addr)
+	return value, err
+}
+
+func (dp *DebugPort) readAPEffect(ctx context.Context, sel APSel, addr uint8) (bool, uint32, error) {
+	if err := validateRawAPAddress(addr, false); err != nil {
+		return false, 0, err
+	}
+	if err := dp.selectAP(ctx, sel, addr); err != nil {
+		return false, 0, err
+	}
+	_, err := dp.transfer(ctx, apTransferRequest(addr&0x0c, true), 0)
+	if err != nil {
+		possible := !requestWasRejected(err) && !requestWasNotSent(err) && !errors.Is(err, swd.ErrFault)
+		return possible, 0, fmt.Errorf("dap: post raw AP read at %#02x: %w", addr, err)
+	}
+	value, err := dp.readDP(ctx, RDBUFF)
+	return true, value, err
+}
+
+// WriteRawAP writes the register at one complete access-port address and waits
+// for completion. A write that completes or might have completed invalidates
+// existing MemAP values. The caller must understand the selected AP class and
+// restore any state the write changes. Writing a MEM-AP data register can
+// write target memory. The address must be four-byte aligned. The debug port
+// must be connected and have no cleanup pending.
+func (dp *DebugPort) WriteRawAP(ctx context.Context, addr APAddress, value uint32) error {
 	if err := dp.requireConnected(); err != nil {
 		return err
 	}
-	return dp.writeAP(ctx, sel, reg, value)
+	address, err := validateAPAddress(addr, true)
+	if err != nil {
+		return err
+	}
+	generation := dp.state.apGeneration
+	possible, err := dp.writeAPEffect(ctx, addr.sel, address, value)
+	if possible && dp.state.apGeneration == generation {
+		dp.state.invalidateAP()
+	}
+	return err
 }
 
-func (dp *DebugPort) writeAP(ctx context.Context, sel APSel, reg APReg, value uint32) error {
-	if err := validateAPReg(reg); err != nil {
-		return err
+func (dp *DebugPort) writeAP(ctx context.Context, sel APSel, addr uint8, value uint32) error {
+	_, err := dp.writeAPEffect(ctx, sel, addr, value)
+	return err
+}
+
+func (dp *DebugPort) writeAPEffect(ctx context.Context, sel APSel, addr uint8, value uint32) (bool, error) {
+	if err := validateRawAPAddress(addr, true); err != nil {
+		return false, err
 	}
-	if err := dp.selectAP(ctx, sel, reg); err != nil {
-		return err
+	if err := dp.selectAP(ctx, sel, addr); err != nil {
+		return false, err
 	}
-	_, err := dp.transfer(ctx, transferRequest{
-		AP:   true,
-		Addr: uint8(reg) & 0x0c,
-	}, value)
+	_, err := dp.transfer(ctx, apTransferRequest(addr&0x0c, false), value)
 	if err != nil {
-		return fmt.Errorf("dap: write AP register %#02x: %w", reg, err)
+		possible := !requestWasRejected(err) && !requestWasNotSent(err) && !errors.Is(err, swd.ErrFault)
+		return possible, fmt.Errorf("dap: write raw AP register at %#02x: %w", addr, err)
 	}
 	if _, err := dp.readDP(ctx, RDBUFF); err != nil {
-		return fmt.Errorf("dap: complete AP register %#02x write: %w", reg, err)
+		return !faultReportsWriteDataError(err), fmt.Errorf("dap: complete raw AP write at %#02x: %w", addr, err)
 	}
-	return nil
+	return true, nil
 }
 
-func (dp *DebugPort) selectAP(ctx context.Context, sel APSel, reg APReg) error {
-	selection, err := sel.Value()
+func (dp *DebugPort) selectAP(ctx context.Context, sel APSel, addr uint8) error {
+	selection, err := validateAPSel(sel)
 	if err != nil {
 		return err
 	}
-	value := uint32(selection)<<24 | uint32(reg&0xf0)
+	value := uint32(selection)<<24 | uint32(addr&0xf0)
 	if dp.state.selectDP.valid && dp.state.selectDP.value == value {
 		return nil
 	}
 	return dp.writeDP(ctx, SELECT, value)
 }
 
-func validateAPReg(reg APReg) error {
-	if reg&3 != 0 {
-		return fmt.Errorf("dap: unaligned AP register %#02x", reg)
+func validateAPSel(sel APSel) (uint8, error) {
+	return sel.Value()
+}
+
+func validateAPAddress(addr APAddress, write bool) (uint8, error) {
+	if _, err := validateAPSel(addr.sel); err != nil {
+		return 0, err
+	}
+	if err := validateRawAPAddress(addr.value, write); err != nil {
+		return 0, err
+	}
+	return addr.value, nil
+}
+
+func validateRawAPAddress(addr uint8, write bool) error {
+	if addr&3 != 0 {
+		return fmt.Errorf("dap: unaligned AP address %#02x", addr)
+	}
+	if write && addr == apIDRAddress {
+		return errors.New("dap: APIDR is read-only")
 	}
 	return nil
 }

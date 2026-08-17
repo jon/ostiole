@@ -43,9 +43,14 @@ The `dap` package begins the next layer with ADIv5 debug-port identity, raw
 SW-DP registers, and an explicit connection lifecycle. `NewAPSel` constructs
 an access-port selector whose zero value is invalid. A connection clears
 sticky status, selects the base register bank, and restores only the power
-requests it acquired. Selected AP registers are read and written through their
-posted `RDBUFF` completion path. The simulator models the same DP and AP state
-changes. `dap.DebugPort` retries only the physical request that returned WAIT.
+requests it acquired. `ReadAPIDR` reads and decodes AP identity. For raw access,
+`APSel.Address` combines a selector with the complete eight-bit register
+address. Posted reads and writes complete through `RDBUFF`. The simulator
+models the same DP and AP state changes. Raw access has the effects defined by
+the selected AP class; writing a MEM-AP data register can write target memory.
+Any raw access which completes or might have completed invalidates existing
+`MemAP` values.
+`dap.DebugPort` retries only the physical request that returned WAIT.
 After an extended AP stall, it issues DAPABORT rather than replaying the whole
 logical access. A minimal MEM-AP client and its model can read one aligned
 32-bit target word without address incrementing, then restore the CSW and TAR

@@ -14,7 +14,14 @@
 // operations which share a physical SWD offset, enforce direction, and manage
 // DPBANKSEL without exposing a current-bank operation.
 //
-// NewAPSel constructs an access-port selector. The zero APSel is invalid.
+// NewAPSel constructs an access-port selector; the zero APSel is invalid.
+// APSel.Address combines a selector with a complete eight-bit ADIv5 AP address;
+// the resulting APAddress also has an invalid zero value. ReadAPIDR reads and
+// decodes the common read-only AP identity. ReadRawAP and WriteRawAP reject
+// invalid or unaligned addresses before traffic. Raw access has the effects
+// defined by the selected AP class; writing a MEM-AP data register can write
+// target memory. A raw access which completes or might have completed
+// invalidates existing MemAP values.
 //
 // A failed Connect attempts bounded cleanup before returning. If that cleanup
 // also fails, Release remains available but other debug-port and access-port

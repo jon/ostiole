@@ -34,9 +34,9 @@ func TestDebugPortTransactionResolvesOrderedOperations(t *testing.T) {
 
 	txn := dp.NewTxn()
 	dpidr := txn.ReadDP(dap.DPIDR)
-	idr := txn.ReadAP(apSel(0), dap.APIDR)
-	write := txn.WriteAP(apSel(0), dap.APCSW, 0x23000040)
-	csw := txn.ReadAP(apSel(0), dap.APCSW)
+	idr := txn.ReadAPIDR(apSel(0))
+	write := txn.WriteRawAP(apSel(0).Address(0x00), 0x23000040)
+	csw := txn.ReadRawAP(apSel(0).Address(0x00))
 	if _, err := dpidr.Value(); !errors.Is(err, dap.ErrResultPending) {
 		t.Fatalf("Value() before Commit error = %v, want pending", err)
 	}
@@ -153,12 +153,13 @@ func TestDebugPortTransactionValidatesBeforeTraffic(t *testing.T) {
 
 	before := len(target.requests)
 	txn := dp.NewTxn()
-	valid := txn.ReadAP(apSel(0), dap.APIDR)
-	var zero dap.APSel
-	invalidSelector := txn.ReadAP(zero, dap.APIDR)
-	invalid := txn.ReadAP(apSel(0), dap.APReg(2))
+	valid := txn.ReadAPIDR(apSel(0))
+	var zeroSel dap.APSel
+	invalidSelector := txn.ReadAPIDR(zeroSel)
+	invalid := txn.ReadRawAP(apSel(0).Address(0x02))
+	invalidWrite := txn.WriteRawAP(apSel(0).Address(0xfc), 1)
 	if err := txn.Commit(t.Context()); err == nil {
-		t.Fatal("Commit() succeeded with an unaligned AP register")
+		t.Fatal("Commit() succeeded with invalid raw AP operations")
 	}
 	if got := len(target.requests); got != before {
 		t.Fatalf("requests after failed validation = %d, want %d", got, before)
@@ -172,6 +173,9 @@ func TestDebugPortTransactionValidatesBeforeTraffic(t *testing.T) {
 	if _, err := invalid.Value(); err == nil || errors.Is(err, dap.ErrNotExecuted) {
 		t.Fatalf("invalid result error = %v, want validation error", err)
 	}
+	if _, err := invalidWrite.Value(); err == nil || errors.Is(err, dap.ErrNotExecuted) {
+		t.Fatalf("APIDR write result error = %v, want validation error", err)
+	}
 }
 
 func TestDebugPortTransactionAttributesAccessPreflightFailure(t *testing.T) {
@@ -182,7 +186,7 @@ func TestDebugPortTransactionAttributesAccessPreflightFailure(t *testing.T) {
 	before := len(target.requests)
 	txn := dp.NewTxn()
 	prefix := txn.ReadDP(dap.DPIDR)
-	inaccessible := txn.ReadAP(apSel(0), dap.APIDR)
+	inaccessible := txn.ReadAPIDR(apSel(0))
 	suffix := txn.ReadDP(dap.DPIDR)
 	if err := txn.Commit(t.Context()); err == nil {
 		t.Fatal("Commit() succeeded without a connected debug port")
@@ -331,7 +335,7 @@ func TestDebugPortTransactionKeepsConfirmedPrefix(t *testing.T) {
 	target.armFault(apRead(0x0c))
 	txn := dp.NewTxn()
 	prefix := txn.ReadDP(dap.DPIDR)
-	faulted := txn.ReadAP(apSel(0), dap.APIDR)
+	faulted := txn.ReadAPIDR(apSel(0))
 	suffix := txn.ReadDP(dap.DPIDR)
 	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrFault) {
 		t.Fatalf("Commit() error = %v, want FAULT", err)
@@ -358,7 +362,7 @@ func TestDebugPortTransactionDoesNotConfirmAbandonedDPWrite(t *testing.T) {
 	target.stickyOnDrop = testWriteDataError
 	txn := dp.NewTxn()
 	write := txn.WriteDP(dap.SELECT, 0x12000000)
-	suffix := txn.ReadAP(apSel(0), dap.APIDR)
+	suffix := txn.ReadAPIDR(apSel(0))
 	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrFault) {
 		t.Fatalf("Commit() error = %v, want FAULT", err)
 	}
@@ -405,7 +409,7 @@ func TestDebugPortTransactionKeepsFaultDeterminateWhenCleanupLosesFraming(t *tes
 	target.armFault(apRead(0x0c))
 	target.ctrlStatErr = cleanupErr
 	txn := dp.NewTxn()
-	faulted := txn.ReadAP(apSel(0), dap.APIDR)
+	faulted := txn.ReadAPIDR(apSel(0))
 	suffix := txn.ReadDP(dap.DPIDR)
 	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrFault) || !errors.Is(err, cleanupErr) {
 		t.Fatalf("Commit() error = %v, want FAULT and CTRL/STAT read failure", err)
@@ -433,7 +437,7 @@ func TestDebugPortTransactionKeepsWAITDeterminateWhenDAPABORTFails(t *testing.T)
 	target.abortErr = abortErr
 	target.arm(apRead(0x0c), -1)
 	txn := dp.NewTxn()
-	waited := txn.ReadAP(apSel(0), dap.APIDR)
+	waited := txn.ReadAPIDR(apSel(0))
 	suffix := txn.ReadDP(dap.DPIDR)
 	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrWait) || !errors.Is(err, abortErr) {
 		t.Fatalf("Commit() error = %v, want WAIT and DAPABORT failure", err)
@@ -601,24 +605,34 @@ func TestDebugPortTransactionDoesNotInvalidateAPForDPWriteBarrierFAULT(t *testin
 
 func TestDebugPortTransactionKeepsRejectedAPWriteDeterminate(t *testing.T) {
 	target := newWaitTarget()
-	target.AddAP(0, 0x24770011)
+	target.AddMEMAP(0, 0x24770011, map[uint32]uint32{0: 1})
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
+	mem, err := dap.NewMemAP(t.Context(), dp, apSel(0))
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	target.dropWriteFor = apWrite(uint8(dap.APCSW & 0x0c))
+	target.dropWriteFor = apWrite(0x00 & 0x0c)
 	target.dropWrite = true
 	target.stickyOnDrop = testWriteDataError
 	txn := dp.NewTxn()
-	write := txn.WriteAP(apSel(0), dap.APCSW, 0x23000040)
+	write := txn.WriteRawAP(apSel(0).Address(0x00), 0x23000040)
 	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrFault) || errors.Is(err, dap.ErrIndeterminate) {
 		t.Fatalf("Commit() error = %v, want rejected AP write", err)
 	}
 	if _, err := write.Value(); !errors.Is(err, swd.ErrFault) || errors.Is(err, dap.ErrIndeterminate) {
 		t.Fatalf("AP write result error = %v, want rejected write", err)
 	}
-	value, err := dp.ReadAP(t.Context(), apSel(0), dap.APCSW)
+	if _, err := mem.ReadWord(t.Context(), 0); err != nil {
+		t.Fatalf("ReadWord() after rejected queued write: %v", err)
+	}
+	if err := mem.Release(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	value, err := dp.ReadRawAP(t.Context(), apSel(0).Address(0x00))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -865,14 +879,14 @@ func TestDebugPortTransactionCompletesAPWriteWhenBarrierDataParityFails(t *testi
 
 	wire.armed = true
 	txn := dp.NewTxn()
-	write := txn.WriteAP(apSel(0), dap.APCSW, 0x23000040)
+	write := txn.WriteRawAP(apSel(0).Address(0x00), 0x23000040)
 	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrParity) || errors.Is(err, dap.ErrIndeterminate) {
 		t.Fatalf("Commit() error = %v, want determinate parity error", err)
 	}
 	if _, err := write.Value(); !errors.Is(err, swd.ErrParity) || errors.Is(err, dap.ErrIndeterminate) {
 		t.Fatalf("AP write result error = %v, want determinate parity error", err)
 	}
-	value, err := dp.ReadAP(t.Context(), apSel(0), dap.APCSW)
+	value, err := dp.ReadRawAP(t.Context(), apSel(0).Address(0x00))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -892,7 +906,7 @@ func TestDebugPortTransactionAttributesRDBUFFFailure(t *testing.T) {
 	apRead := apRead(0x0c)
 	target.armFault(dpRead(0x0c))
 	txn := dp.NewTxn()
-	faulted := txn.ReadAP(apSel(0), dap.APIDR)
+	faulted := txn.ReadAPIDR(apSel(0))
 	suffix := txn.ReadDP(dap.DPIDR)
 	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrFault) {
 		t.Fatalf("Commit() error = %v, want FAULT", err)
@@ -921,7 +935,7 @@ func TestDebugPortTransactionMarksAPWriteIndeterminateWhenBarrierFails(t *testin
 
 	target.armFault(dpRead(0x0c))
 	txn := dp.NewTxn()
-	write := txn.WriteAP(apSel(0), dap.APCSW, 0x23000040)
+	write := txn.WriteRawAP(apSel(0).Address(0x00), 0x23000040)
 	suffix := txn.ReadDP(dap.DPIDR)
 	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrFault) || !errors.Is(err, dap.ErrIndeterminate) {
 		t.Fatalf("Commit() error = %v, want FAULT and indeterminate outcome", err)
@@ -932,7 +946,7 @@ func TestDebugPortTransactionMarksAPWriteIndeterminateWhenBarrierFails(t *testin
 	if _, err := suffix.Value(); !errors.Is(err, dap.ErrNotExecuted) {
 		t.Fatalf("suffix result error = %v, want not executed", err)
 	}
-	value, err := dp.ReadAP(t.Context(), apSel(0), dap.APCSW)
+	value, err := dp.ReadRawAP(t.Context(), apSel(0).Address(0x00))
 	if err != nil {
 		t.Fatal(err)
 	}

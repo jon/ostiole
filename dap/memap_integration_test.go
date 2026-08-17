@@ -33,11 +33,11 @@ func TestReadMEMAPWordOverFTDI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	savedCSW, err := dp.ReadAP(ctx, hardwareAP, dap.APCSW)
+	savedCSW, err := dp.ReadRawAP(ctx, hardwareAP.Address(0x00))
 	if err != nil {
 		t.Fatal(err)
 	}
-	savedTAR, err := dp.ReadAP(ctx, hardwareAP, dap.APTAR)
+	savedTAR, err := dp.ReadRawAP(ctx, hardwareAP.Address(0x04))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,18 +55,18 @@ func TestReadMEMAPWordOverFTDI(t *testing.T) {
 	if err := mem.Release(ctx); err != nil {
 		t.Fatal(err)
 	}
-	assertHardwareAPRegister(t, ctx, dp, dap.APCSW, savedCSW)
-	assertHardwareAPRegister(t, ctx, dp, dap.APTAR, savedTAR)
+	assertHardwareAPRegister(t, ctx, dp, 0x00, savedCSW)
+	assertHardwareAPRegister(t, ctx, dp, 0x04, savedTAR)
 	t.Logf("DPIDR=%#08x CPUID=%#08x", info.Raw, cpuid)
 }
 
-func assertHardwareAPRegister(t *testing.T, ctx context.Context, dp *dap.DebugPort, reg dap.APReg, want uint32) {
+func assertHardwareAPRegister(t *testing.T, ctx context.Context, dp *dap.DebugPort, address uint8, want uint32) {
 	t.Helper()
-	got, err := dp.ReadAP(ctx, hardwareAP, reg)
+	got, err := dp.ReadRawAP(ctx, hardwareAP.Address(address))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got != want {
-		t.Fatalf("AP0 register %#02x = %#08x, want %#08x", reg, got, want)
+		t.Fatalf("AP0 register %#02x = %#08x, want %#08x", address, got, want)
 	}
 }

@@ -42,16 +42,16 @@ func TestRecoverTargetGeneratedFAULTOverFTDI(t *testing.T) {
 	if err := dp.WriteDP(ctx, dap.SELECT, 0); err != nil {
 		t.Fatal(err)
 	}
-	_, err := dp.ReadAP(ctx, hardwareAP, dap.APIDR)
+	_, err := dp.ReadAPIDR(ctx, hardwareAP)
 	var fault *dap.FaultError
 	if !errors.As(err, &fault) || !errors.Is(err, swd.ErrFault) {
-		t.Fatalf("ReadAP() error after corrupted write parity = %v, want typed FAULT", err)
+		t.Fatalf("ReadAPIDR() error after corrupted write parity = %v, want typed FAULT", err)
 	}
 	if !fault.StateValid || fault.CTRLSTAT&(1<<7) == 0 {
 		t.Fatalf("FaultError = %+v, want captured WDATAERR", fault)
 	}
 	t.Logf("target-generated FAULT: CTRL/STAT=%#08x", fault.CTRLSTAT)
-	if _, err := dp.ReadAP(ctx, hardwareAP, dap.APIDR); err != nil {
+	if _, err := dp.ReadAPIDR(ctx, hardwareAP); err != nil {
 		t.Fatalf("AP read after clearing WDATAERR: %v", err)
 	}
 	state, err := dp.ReadDP(ctx, dap.CTRLSTAT)

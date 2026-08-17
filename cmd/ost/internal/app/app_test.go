@@ -59,7 +59,7 @@ func TestRunIdentifiesSelectedCortexMTarget(t *testing.T) {
 			return targetIdentity{
 				dpidr:     info,
 				selection: selection,
-				apidr:     0x24770011,
+				apidr:     dap.DecodeAPIDR(0x24770011),
 				processor: cortexm.Identity{Raw: 0x410fc241},
 			}, nil
 		},
@@ -89,7 +89,7 @@ func TestRunInspectsSelectedAccessPort(t *testing.T) {
 	ops := operations{
 		inspectAP: func(_ context.Context, selection dap.APSel) (apIdentity, error) {
 			selected = selection
-			return apIdentity{dpidr: info, selection: selection, idr: 0x24770011}, nil
+			return apIdentity{dpidr: info, selection: selection, idr: dap.DecodeAPIDR(0x24770011)}, nil
 		},
 	}
 	err = run(t.Context(), []string{"dap", "ap", "id", "--ap", "3"}, &stdout, ops)
