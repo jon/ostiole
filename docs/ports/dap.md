@@ -336,6 +336,13 @@ go test -count=1 -p 1 -tags=integration -v ./dap \
   -run '^TestReadMEMAPBlockOverFTDI$'
 ```
 
+The effectful run also wrote an aligned 64-byte pattern and an unaligned
+31-byte pattern. Both read back exactly; the bytes neighboring the unaligned
+range retained their saved values. The test restored and verified the original
+64 bytes before releasing the MEM-AP. It counted 777 OK acknowledgements, no
+WAIT, FAULT, or invalid acknowledgement, and 769 fixed overrun-response frames
+in 207 SWDIO calls. The bench did not exercise indeterminate partial writes.
+
 That is enough to identify one working DP/AP/MEM-AP path and one physical
 WDATAERR recovery path, and to demonstrate reversible scalar and block writes
 to one known SRAM range. It says nothing yet about sparse APs, delayed power
