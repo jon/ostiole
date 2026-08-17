@@ -168,6 +168,10 @@ failure remains pending for `Release`. Once `Release` starts, a failure likewise
 leaves only `MemAP.Release`, `DebugPort.Release`, and the cached identity
 available. `dap.MemAP` configures one access port for a single aligned 32-bit
 read.
+
+ADIv5 access-port enumeration scans all 256 APSEL values in bounded
+transactions. IDR zero means absent. The scan does not assume contiguous AP
+numbers and reads no class-specific register.
 See [Arm Debug Access Ports](ports/dap.md) for the ADIv5 register protocol and
 the awkward parts of posted and memory access.
 

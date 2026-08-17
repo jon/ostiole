@@ -82,13 +82,14 @@ an active connection.
 without exposing a current-bank API. `NewAPSel` constructs an AP selector whose
 zero value is invalid. `APSel.Address` combines it with a complete eight-bit
 register address; the resulting `APAddress` also has an invalid zero value.
-`ReadAPIDR` reads and decodes the common read-only AP identity. Raw AP access
-rejects an invalid or unaligned address before traffic. Use it only when the
-caller understands the selected AP class and will restore any state the access
-changes. A raw MEM-AP data-register write can write target memory. This layer
-owns posted AP read and write completion and retries only the physical request
-that returned WAIT. A raw AP read or write which completes, or might have
-completed, invalidates existing `MemAP` values. After an extended AP stall,
+`ReadAPIDR` reads and decodes the common read-only AP identity. `EnumerateAPs`
+scans every ADIv5 AP selector without reading class-specific registers. Raw AP
+access rejects an invalid or unaligned address before traffic. Use it only when
+the caller understands the selected AP class and will restore any state the
+access changes. A raw MEM-AP data-register write can write target memory. This
+layer owns posted AP read and write completion and retries only the physical
+request that returned WAIT. A raw AP read or write which completes, or might
+have completed, invalidates existing `MemAP` values. After an extended AP stall,
 `dap.DebugPort` issues DAPABORT; existing
 `dap.MemAP` values reject further reads, though `dap.MemAP.Release` still
 attempts to restore their saved state. The SWD connection reads DPIDR, clears

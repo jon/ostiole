@@ -23,6 +23,9 @@
 // target memory. A raw access which completes or might have completed
 // invalidates existing MemAP values.
 //
+// EnumerateAPs scans every ADIv5 AP selector and reports each nonzero identity.
+// It does not read class-specific registers.
+//
 // Public DP, AP, transaction, and MEM-AP operations require a successful
 // Connect. The underlying SWD connection establishes the simple or fixed
 // response grammar, tries to enable ORUNDETECT, and restores that change during
