@@ -43,10 +43,21 @@ type Target struct {
 }
 
 type accessPort struct {
-	regs   map[uint8]uint32
-	memory map[uint64]byte
-	memAP  bool
+	regs       map[uint8]uint32
+	memory     map[uint64]byte
+	memAP      bool
+	sizes      uint8
+	largePhase largeDataPhase
+	largeWord  uint32
 }
+
+type largeDataPhase uint8
+
+const (
+	largeDataIdle largeDataPhase = iota
+	largeDataRead
+	largeDataWrite
+)
 
 // New returns an SW-DP target with the supplied identity.
 func New(dpidr uint32) *Target {
@@ -197,6 +208,7 @@ func (t *Target) AddMEMAP(sel dap.APSel, idr uint32, words map[uint32]uint32) er
 		regs:   map[uint8]uint32{0xf4: 0, 0xfc: idr},
 		memory: memory,
 		memAP:  true,
+		sizes:  1<<0 | 1<<1 | 1<<2,
 	}
 	return nil
 }
@@ -218,6 +230,43 @@ func (t *Target) SetMEMAPCFG(sel dap.APSel, cfg uint32) error {
 	if cfg&(1<<1) == 0 {
 		ap.regs[8] = 0
 	}
+	if cfg&(1<<2) != 0 {
+		ap.sizes |= 1 << 3
+	} else {
+		ap.sizes &^= 1 << 3
+	}
+	ap.largePhase = largeDataIdle
+	return nil
+}
+
+// SetMEMAPSizes changes the transfer sizes accepted by one simulated MEM-AP.
+// Size32 is always retained, as required by ADIv5.
+func (t *Target) SetMEMAPSizes(sel dap.APSel, sizes ...dap.TransferSize) error {
+	if t == nil {
+		return errors.New("dap/sim: nil target")
+	}
+	selection, err := sel.Value()
+	if err != nil {
+		return err
+	}
+	ap := t.aps[sel]
+	if ap == nil || !ap.memAP {
+		return fmt.Errorf("dap/sim: AP %d is not a MEM-AP", selection)
+	}
+	accepted := uint8(1 << 2)
+	for _, size := range sizes {
+		encoding, ok := transferSizeEncoding(size)
+		if !ok {
+			return fmt.Errorf("dap/sim: invalid MEM-AP transfer size %d", size)
+		}
+		if size == dap.Size64 && ap.regs[0xf4]&(1<<2) == 0 {
+			return errors.New("dap/sim: Size64 requires CFG.LD")
+		}
+		accepted |= 1 << encoding
+	}
+	ap.sizes = accepted
+	ap.regs[0] = ap.regs[0]&^uint32(7) | 2
+	ap.largePhase = largeDataIdle
 	return nil
 }
 
@@ -366,28 +415,126 @@ func (t *Target) readAP(req swdsim.Request) (uint32, error) {
 		return posted, nil
 	}
 	reg := t.apReg(req)
-	if ap.memAP && reg == 8 && ap.regs[0xf4]&(1<<1) == 0 {
-		t.rdbuff = 0
-		return posted, nil
+	value, err := ap.readRegister(reg)
+	if err != nil {
+		return 0, err
 	}
-	if ap.memAP && reg == 0x0c {
-		csw := ap.regs[0x00]
-		if csw&0x07 != 2 || csw&0x30 != 0 {
-			return 0, errors.New("dap/sim: DRW read requires 32-bit, non-incrementing CSW")
-		}
-		t.rdbuff = ap.memoryWord(ap.targetAddress())
-	} else {
-		t.rdbuff = ap.regs[reg]
-	}
+	t.rdbuff = value
 	return posted, nil
 }
 
-func (ap *accessPort) memoryWord(addr uint64) uint32 {
-	var value uint32
-	for offset := range 4 {
-		value |= uint32(ap.memory[addr+uint64(offset)]) << uint(offset*8)
+func (t *Target) writeAP(req swdsim.Request, value uint32) error {
+	ap := t.aps[dap.NewAPSel(uint8(t.selectDP>>24))]
+	if ap == nil {
+		return nil
 	}
-	return value
+	return ap.writeRegister(t.apReg(req), value)
+}
+
+func (ap *accessPort) readRegister(reg uint8) (uint32, error) {
+	if !ap.memAP {
+		return ap.regs[reg], nil
+	}
+	if err := ap.validateLargeDataRegister(reg, "read"); err != nil {
+		return 0, err
+	}
+	if reg == 8 && ap.regs[0xf4]&(1<<1) == 0 {
+		return 0, nil
+	}
+	if reg == 0x0c {
+		return ap.readDRW()
+	}
+	if reg == 0 {
+		ap.largePhase = largeDataIdle
+	}
+	return ap.regs[reg], nil
+}
+
+func (ap *accessPort) writeRegister(reg uint8, value uint32) error {
+	if !ap.memAP {
+		ap.regs[reg] = value
+		return nil
+	}
+	if err := ap.validateLargeDataRegister(reg, "write"); err != nil {
+		return err
+	}
+	if reg == 8 && ap.regs[0xf4]&(1<<1) == 0 {
+		return nil
+	}
+	if reg == 0x0c {
+		return ap.writeDRW(value)
+	}
+	if reg == 0 && ap.sizes&(1<<uint8(value&7)) == 0 {
+		value = value&^uint32(7) | ap.regs[0]&7
+	}
+	ap.regs[reg] = value
+	if reg == 0 {
+		ap.largePhase = largeDataIdle
+	}
+	return nil
+}
+
+func (ap *accessPort) validateLargeDataRegister(reg uint8, operation string) error {
+	if ap.largePhase == largeDataIdle || reg == 0 || reg == 0x0c {
+		return nil
+	}
+	return fmt.Errorf("dap/sim: MEM-AP register %#02x %s during incomplete 64-bit transfer", reg, operation)
+}
+
+func (ap *accessPort) readDRW() (uint32, error) {
+	size := uint8(ap.regs[0] & 7)
+	if size > 3 || ap.regs[0]&0x30 != 0 {
+		return 0, errors.New("dap/sim: DRW read has unsupported CSW.Size or AddrInc")
+	}
+	if size == 3 {
+		if ap.regs[0xf4]&(1<<2) == 0 {
+			return 0, errors.New("dap/sim: 64-bit DRW read requires CFG.LD")
+		}
+		switch ap.largePhase {
+		case largeDataIdle:
+			value := ap.memoryValue(ap.targetAddress(), 8)
+			ap.largeWord = uint32(value >> 32)
+			ap.largePhase = largeDataRead
+			return uint32(value), nil
+		case largeDataRead:
+			value := ap.largeWord
+			ap.largePhase = largeDataIdle
+			return value, nil
+		default:
+			return 0, errors.New("dap/sim: 64-bit DRW read interrupted a write")
+		}
+	}
+	width := 1 << size
+	value := uint32(ap.memoryValue(ap.targetAddress(), width))
+	return value << ap.laneShift(width), nil
+}
+
+func (ap *accessPort) writeDRW(value uint32) error {
+	size := uint8(ap.regs[0] & 7)
+	if size > 3 || ap.regs[0]&0x30 != 0 {
+		return errors.New("dap/sim: DRW write has unsupported CSW.Size or AddrInc")
+	}
+	if size == 3 {
+		if ap.regs[0xf4]&(1<<2) == 0 {
+			return errors.New("dap/sim: 64-bit DRW write requires CFG.LD")
+		}
+		switch ap.largePhase {
+		case largeDataIdle:
+			ap.largeWord = value
+			ap.largePhase = largeDataWrite
+			return nil
+		case largeDataWrite:
+			ap.writeMemoryValue(ap.targetAddress(), 8, uint64(ap.largeWord)|uint64(value)<<32)
+			ap.largePhase = largeDataIdle
+			return nil
+		default:
+			return errors.New("dap/sim: 64-bit DRW write interrupted a read")
+		}
+	}
+	width := 1 << size
+	data := uint64(value >> ap.laneShift(width))
+	ap.writeMemoryValue(ap.targetAddress(), width, data)
+	return nil
 }
 
 func (ap *accessPort) targetAddress() uint64 {
@@ -398,25 +545,56 @@ func (ap *accessPort) targetAddress() uint64 {
 	return address
 }
 
-func (t *Target) writeAP(req swdsim.Request, value uint32) error {
-	ap := t.aps[dap.NewAPSel(uint8(t.selectDP>>24))]
-	if ap == nil {
-		return nil
+func (ap *accessPort) laneShift(width int) uint {
+	lane := int(ap.targetAddress() & 3)
+	if ap.regs[0xf4]&1 != 0 {
+		lane = 4 - width - lane
 	}
-	reg := t.apReg(req)
-	if ap.memAP && reg == 8 && ap.regs[0xf4]&(1<<1) == 0 {
-		return nil
+	return uint(lane * 8)
+}
+
+func (ap *accessPort) memoryValue(addr uint64, width int) uint64 {
+	var value uint64
+	if ap.regs[0xf4]&1 != 0 {
+		for offset := range width {
+			value = value<<8 | uint64(ap.memory[addr+uint64(offset)])
+		}
+		return value
 	}
-	if ap.memAP && reg == 0x0c {
-		return errors.New("dap/sim: target-memory writes are not modeled")
+	for offset := range width {
+		value |= uint64(ap.memory[addr+uint64(offset)]) << uint(offset*8)
 	}
-	ap.regs[reg] = value
-	return nil
+	return value
+}
+
+func (ap *accessPort) writeMemoryValue(addr uint64, width int, value uint64) {
+	for offset := range width {
+		shift := offset * 8
+		if ap.regs[0xf4]&1 != 0 {
+			shift = (width - 1 - offset) * 8
+		}
+		ap.memory[addr+uint64(offset)] = byte(value >> uint(shift))
+	}
 }
 
 func (t *Target) apReg(req swdsim.Request) uint8 {
 	bank := uint8(t.selectDP>>4) & 0x0f
 	return bank<<4 | req.Addr
+}
+
+func transferSizeEncoding(size dap.TransferSize) (uint8, bool) {
+	switch size {
+	case dap.Size8:
+		return 0, true
+	case dap.Size16:
+		return 1, true
+	case dap.Size32:
+		return 2, true
+	case dap.Size64:
+		return 3, true
+	default:
+		return 0, false
+	}
 }
 
 func (t *Target) clearSticky(value uint32) {

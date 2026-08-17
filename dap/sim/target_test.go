@@ -93,6 +93,77 @@ func TestTargetSetsMEMAPCFG(t *testing.T) {
 	}
 }
 
+func TestTargetSnapshotsSize64ReadData(t *testing.T) {
+	target := New(0x2ba01477)
+	sel := dap.NewAPSel(0)
+	if err := target.AddMEMAP(sel, 0x00010001, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := target.SetMEMAPCFG(sel, 1<<2); err != nil {
+		t.Fatal(err)
+	}
+	if err := target.SetMEMAPBytes(sel, 0x100, []byte{0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11}); err != nil {
+		t.Fatal(err)
+	}
+	ap := target.aps[sel]
+	ap.regs[0] = 3
+	ap.regs[4] = 0x100
+	low, err := ap.readDRW()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := target.SetMEMAPBytes(sel, 0x104, []byte{0xaa, 0xbb, 0xcc, 0xdd}); err != nil {
+		t.Fatal(err)
+	}
+	high, err := ap.readDRW()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if low != 0x55667788 || high != 0x11223344 {
+		t.Fatalf("Size64 DRW words = %#08x, %#08x; want 0x55667788, 0x11223344", low, high)
+	}
+}
+
+func TestTargetRequiresCSWToTerminateIncompleteSize64Transfer(t *testing.T) {
+	target := New(0x2ba01477)
+	sel := dap.NewAPSel(0)
+	if err := target.AddMEMAP(sel, 0x00010001, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := target.SetMEMAPCFG(sel, 1<<2); err != nil {
+		t.Fatal(err)
+	}
+	ap := target.aps[sel]
+	ap.regs[0] = 3
+	if _, err := ap.readDRW(); err != nil {
+		t.Fatal(err)
+	}
+	if err := target.Write(t.Context(), swdsim.Request{AP: true, Addr: 0x04}, 0x100); err == nil {
+		t.Fatal("TAR write succeeded during incomplete Size64 read")
+	}
+	if err := ap.writeDRW(0); err == nil {
+		t.Fatal("DRW write succeeded during incomplete Size64 read")
+	}
+	if err := target.Write(t.Context(), swdsim.Request{AP: true, Addr: 0x00}, 3); err != nil {
+		t.Fatal(err)
+	}
+	if err := ap.writeDRW(0x55667788); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := target.Read(t.Context(), swdsim.Request{AP: true, Read: true, Addr: 0x04}); err == nil {
+		t.Fatal("TAR read succeeded during incomplete Size64 write")
+	}
+	if _, err := ap.readDRW(); err == nil {
+		t.Fatal("DRW read succeeded during incomplete Size64 write")
+	}
+	if _, err := target.Read(t.Context(), swdsim.Request{AP: true, Read: true, Addr: 0x00}); err != nil {
+		t.Fatal(err)
+	}
+	if err := target.Write(t.Context(), swdsim.Request{AP: true, Addr: 0x04}, 0x100); err != nil {
+		t.Fatalf("TAR write after terminating Size64 through CSW: %v", err)
+	}
+}
+
 func TestTargetUsesTARHIOnlyWithLargeAddressExtension(t *testing.T) {
 	target := New(0x2ba01477)
 	sel := dap.NewAPSel(0)

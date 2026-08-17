@@ -25,8 +25,7 @@ const (
 	cfgLargeData = uint32(1 << 2)
 )
 
-// TransferSize names the width of one MEM-AP scalar transfer. Its zero value
-// is invalid.
+// TransferSize is a MEM-AP CSW.Size encoding.
 type TransferSize uint8
 
 const (
