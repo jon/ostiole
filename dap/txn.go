@@ -59,6 +59,7 @@ const (
 	txnReadAPIDR
 	txnReadRawAP
 	txnWriteRawAP
+	txnReadAPSequential
 )
 
 type txnOp struct {
@@ -132,6 +133,10 @@ func (t *Txn) writeAP(sel APSel, addr uint8, value uint32) *WriteResult {
 	return &WriteResult{result: t.queue(txnOp{kind: txnWriteRawAP, apSel: sel, apAddr: addr, data: value, preserveAP: true})}
 }
 
+func (t *Txn) readAPSequential(sel APSel, addr uint8) *ReadResult {
+	return &ReadResult{result: t.queue(txnOp{kind: txnReadAPSequential, apSel: sel, apAddr: addr, preserveAP: true})}
+}
+
 func (t *Txn) queue(op txnOp) *txnResult {
 	result := &txnResult{}
 	op.result = result
@@ -199,7 +204,7 @@ func (t *Txn) validate() error {
 			_, op.err = t.dp.validateDPWrite(op.dpReg, op.data)
 		case txnReadAPIDR:
 			_, op.err = validateAPSel(op.apSel)
-		case txnReadRawAP:
+		case txnReadRawAP, txnReadAPSequential:
 			_, op.err = validateAPAddress(APAddress{sel: op.apSel, value: op.apAddr}, false)
 		case txnWriteRawAP:
 			_, op.err = validateAPAddress(APAddress{sel: op.apSel, value: op.apAddr}, true)
@@ -214,7 +219,7 @@ func (t *Txn) validate() error {
 func (t *Txn) checkAccess() error {
 	for i := range t.ops {
 		op := &t.ops[i]
-		if op.kind == txnReadAPIDR || op.kind == txnReadRawAP || op.kind == txnWriteRawAP {
+		if op.kind == txnReadAPIDR || op.kind == txnReadRawAP || op.kind == txnWriteRawAP || op.kind == txnReadAPSequential {
 			op.err = t.dp.requireConnected()
 		} else {
 			op.err = t.dp.requireOperational()
@@ -279,10 +284,24 @@ func newTxnPlanner(dp *DebugPort) *txnPlanner {
 }
 
 func (p *txnPlanner) plan(ops []txnOp) []txnStep {
-	for i := range ops {
-		p.lower(i, ops[i])
+	for i := 0; i < len(ops); {
+		if ops[i].kind != txnReadAPSequential {
+			p.lower(i, ops[i])
+			i++
+			continue
+		}
+		end := i + 1
+		for end < len(ops) && sameSequentialAP(ops[i], ops[end]) {
+			end++
+		}
+		p.lowerSequentialAP(i, ops[i:end])
+		i = end
 	}
 	return p.steps
+}
+
+func sameSequentialAP(first, next txnOp) bool {
+	return next.kind == txnReadAPSequential && first.apSel == next.apSel && first.apAddr == next.apAddr
 }
 
 func (p *txnPlanner) lower(index int, op txnOp) {
@@ -292,6 +311,24 @@ func (p *txnPlanner) lower(index int, op txnOp) {
 	case txnReadAPIDR, txnReadRawAP, txnWriteRawAP:
 		p.lowerAP(index, op)
 	}
+}
+
+func (p *txnPlanner) lowerSequentialAP(start int, ops []txnOp) {
+	selection, _ := ops[0].apSel.Value()
+	value := uint32(selection)<<24 | uint32(ops[0].apAddr&0xf0)
+	p.selectValue(start, value)
+	p.settleSELECT(start)
+	for i := range ops {
+		step := txnStep{req: apTransferRequest(ops[i].apAddr&0x0c, true), op: start + i, apRead: true}
+		if i > 0 {
+			step.op--
+			step.deliver = true
+			step.deliverValue = true
+			step.operationStarted = true
+		}
+		p.steps = append(p.steps, step)
+	}
+	p.steps = append(p.steps, txnStep{req: dpTransferRequest(RDBUFF, true), dpReg: RDBUFF, op: start + len(ops) - 1, deliver: true, deliverValue: true, operationStarted: true, apRead: true})
 }
 
 func (p *txnPlanner) lowerDP(index int, op txnOp) {

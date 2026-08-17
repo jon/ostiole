@@ -37,6 +37,7 @@ type waitTarget struct {
 	waits             int
 	waitSkip          int
 	fault             bool
+	faultAfter        int
 	armed             bool
 	accepted          bool
 	attempts          int
@@ -144,6 +145,7 @@ func (t *waitTarget) arm(req swdsim.Request, waits int) {
 	t.waitFor = req
 	t.waits = waits
 	t.fault = false
+	t.faultAfter = 0
 	t.armed = true
 	t.accepted = false
 	t.attempts = 0
@@ -153,6 +155,11 @@ func (t *waitTarget) arm(req swdsim.Request, waits int) {
 func (t *waitTarget) armFault(req swdsim.Request) {
 	t.arm(req, 0)
 	t.fault = true
+}
+
+func (t *waitTarget) armFaultAfter(req swdsim.Request, successful int) {
+	t.armFault(req)
+	t.faultAfter = successful
 }
 
 func (t *waitTarget) Acknowledge(ctx context.Context, req swdsim.Request) error {
@@ -177,7 +184,15 @@ func (t *waitTarget) Acknowledge(ctx context.Context, req swdsim.Request) error 
 		t.waitSkip--
 		return nil
 	}
+	return t.acknowledgeArmedRequest()
+}
+
+func (t *waitTarget) acknowledgeArmedRequest() error {
 	t.attempts++
+	if t.fault && t.faultAfter > 0 {
+		t.faultAfter--
+		return nil
+	}
 	if t.retryErr != nil && t.attempts == 2 {
 		return t.retryErr
 	}

@@ -130,6 +130,12 @@ implementation-defined, so each access verifies that CSW accepted its size
 before touching memory. CFG.LD makes 64-bit access possible; CFG.LA permits
 addresses above 32 bits. `target/cortexm` uses `ReadWord` for its 32-bit reads.
 
+`MemAP.ReadBlock` accepts empty, unaligned, and mixed-width ranges. It returns
+the contiguous prefix definitely read before an error and leaves the rest of
+the destination unchanged. No auto-incrementing word run crosses a 1 KiB TAR
+boundary; unaligned edges still require the MEM-AP to accept byte or halfword
+CSW sizes.
+
 `MemAP.WriteScalar` changes target memory at the selected address. The library
 rejects a value which does not fit the selected size and validates alignment
 and advertised extensions, but deciding whether an address is safe to write
