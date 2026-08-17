@@ -213,6 +213,12 @@ class `0b1000` in IDR. A single-word memory access uses three registers:
 | TAR | `0x04` | Target address |
 | DRW | `0x0c` | Data access at TAR |
 
+CFG at `0xf4` supplies three details needed before widening that operation:
+BE selects the legacy big-endian byte-lane mapping, LA adds TARHI at `0x08`,
+and LD advertises the Large Data Extension. LA widens the target address; it
+does not widen TAR itself. When LA is set, save and restore TARHI along with
+TAR.
+
 For a single 32-bit word, set `CSW.Size` to `0b010`, select the desired
 `AddrInc` behavior, write TAR, and read or write DRW. A DRW read is still an AP
 read, so its value comes back through the posted pipeline.

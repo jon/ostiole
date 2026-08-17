@@ -7,9 +7,11 @@ import (
 )
 
 const (
-	memAPCSW = uint8(0x00)
-	memAPTAR = uint8(0x04)
-	memAPDRW = uint8(0x0c)
+	memAPCSW   = uint8(0x00)
+	memAPTAR   = uint8(0x04)
+	memAPTARHI = uint8(0x08)
+	memAPDRW   = uint8(0x0c)
+	memAPCFG   = uint8(0xf4)
 )
 
 const (
@@ -17,6 +19,21 @@ const (
 	cswSize    = uint32(0x07)
 	cswAddrInc = uint32(0x30)
 	cswSize32  = uint32(0x02)
+
+	cfgBigEndian = uint32(1 << 0)
+	cfgLargeAddr = uint32(1 << 1)
+	cfgLargeData = uint32(1 << 2)
+)
+
+// TransferSize names the width of one MEM-AP scalar transfer. Its zero value
+// is invalid.
+type TransferSize uint8
+
+const (
+	Size8 TransferSize = 1 << iota
+	Size16
+	Size32
+	Size64
 )
 
 // MemAP reads aligned target words through one memory access port.
@@ -31,8 +48,13 @@ type MemAP struct {
 	csw          uint32
 	savedCSW     uint32
 	savedTAR     uint32
+	savedTARHI   uint32
+	bigEndian    bool
+	largeAddress bool
+	largeData    bool
 	restoreCSW   bool
 	restoreTAR   bool
+	restoreTARHI bool
 }
 
 // OpenMemAP validates sel and saves the state changed by target reads. It
@@ -53,9 +75,20 @@ func OpenMemAP(ctx context.Context, dp *DebugPort, sel APSel) (*MemAP, error) {
 	if idr.Class != memAPClass {
 		return nil, fmt.Errorf("dap: AP %d is not a MEM-AP", selection)
 	}
+	cfg, err := dp.readAP(ctx, sel, memAPCFG)
+	if err != nil {
+		return nil, err
+	}
 	csw, err := dp.readAP(ctx, sel, memAPCSW)
 	if err != nil {
 		return nil, err
+	}
+	var tarhi uint32
+	if cfg&cfgLargeAddr != 0 {
+		tarhi, err = dp.readAP(ctx, sel, memAPTARHI)
+		if err != nil {
+			return nil, err
+		}
 	}
 	tar, err := dp.readAP(ctx, sel, memAPTAR)
 	if err != nil {
@@ -71,6 +104,10 @@ func OpenMemAP(ctx context.Context, dp *DebugPort, sel APSel) (*MemAP, error) {
 		csw:          configuredCSW,
 		savedCSW:     csw,
 		savedTAR:     tar,
+		savedTARHI:   tarhi,
+		bigEndian:    cfg&cfgBigEndian != 0,
+		largeAddress: cfg&cfgLargeAddr != 0,
+		largeData:    cfg&cfgLargeData != 0,
 	}, nil
 }
 
@@ -109,7 +146,7 @@ func (m *MemAP) Release(ctx context.Context) error {
 	if m == nil || m.dp == nil {
 		return nil
 	}
-	if !m.restoreCSW && !m.restoreTAR {
+	if !m.restoreCSW && !m.restoreTAR && !m.restoreTARHI {
 		return nil
 	}
 	releaseCtx, cancel, err := m.prepareRelease(ctx)
@@ -119,27 +156,57 @@ func (m *MemAP) Release(ctx context.Context) error {
 	defer cancel()
 	if m.restoreEpoch != m.dp.state.apGeneration {
 		m.restoreTAR = true
+		m.restoreTARHI = m.largeAddress
 		m.restoreCSW = true
 		m.restoreEpoch = m.dp.state.apGeneration
 	}
-	var tarErr, cswErr error
-	if m.restoreTAR {
-		tarErr = m.dp.writeAP(releaseCtx, m.sel, memAPTAR, m.savedTAR)
-		if tarErr != nil {
-			tarErr = fmt.Errorf("dap: restore MEM-AP TAR: %w", tarErr)
-		} else {
-			m.restoreTAR = false
-		}
+	tarhiErr := m.restoreRegister(releaseCtx, &m.restoreTARHI, memAPTARHI, m.savedTARHI, "TARHI")
+	tarErr := m.restoreRegister(releaseCtx, &m.restoreTAR, memAPTAR, m.savedTAR, "TAR")
+	cswErr := m.restoreRegister(releaseCtx, &m.restoreCSW, memAPCSW, m.savedCSW, "CSW")
+	return errors.Join(tarhiErr, tarErr, cswErr)
+}
+
+func (m *MemAP) restoreRegister(ctx context.Context, pending *bool, reg uint8, value uint32, name string) error {
+	if !*pending {
+		return nil
 	}
-	if m.restoreCSW {
-		cswErr = m.dp.writeAP(releaseCtx, m.sel, memAPCSW, m.savedCSW)
-		if cswErr != nil {
-			cswErr = fmt.Errorf("dap: restore MEM-AP CSW: %w", cswErr)
-		} else {
-			m.restoreCSW = false
-		}
+	if err := m.dp.writeAP(ctx, m.sel, reg, value); err != nil {
+		return fmt.Errorf("dap: restore MEM-AP %s: %w", name, err)
 	}
-	return errors.Join(tarErr, cswErr)
+	*pending = false
+	return nil
+}
+
+func validateScalarAccess(addr uint64, size TransferSize, largeAddress bool) error {
+	width, err := sizeBytes(size)
+	if err != nil {
+		return err
+	}
+	if addr&uint64(width-1) != 0 {
+		return fmt.Errorf("dap: address %#x is not %d-byte aligned", addr, width)
+	}
+	if uint64(width-1) > ^addr {
+		return fmt.Errorf("dap: address range at %#x overflows", addr)
+	}
+	if !largeAddress && addr+uint64(width-1) > uint64(^uint32(0)) {
+		return fmt.Errorf("dap: address range at %#x requires CFG.LA", addr)
+	}
+	return nil
+}
+
+func sizeBytes(size TransferSize) (int, error) {
+	switch size {
+	case Size8:
+		return 1, nil
+	case Size16:
+		return 2, nil
+	case Size32:
+		return 4, nil
+	case Size64:
+		return 8, nil
+	default:
+		return 0, fmt.Errorf("dap: invalid MEM-AP transfer size %d", size)
+	}
 }
 
 func (m *MemAP) prepareRelease(ctx context.Context) (context.Context, context.CancelFunc, error) {

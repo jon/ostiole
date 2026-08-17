@@ -72,6 +72,59 @@ func TestTargetRejectsInvalidRequestAddress(t *testing.T) {
 	}
 }
 
+func TestTargetSetsMEMAPCFG(t *testing.T) {
+	target := New(0x2ba01477)
+	sel := dap.NewAPSel(0)
+	if err := target.AddMEMAP(sel, 0x00010001, nil); err != nil {
+		t.Fatal(err)
+	}
+	const cfg = uint32(0x07)
+	if err := target.SetMEMAPCFG(sel, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := target.aps[sel].regs[0xf4]; got != cfg {
+		t.Fatalf("CFG = %#08x, want %#08x", got, cfg)
+	}
+	if err := target.SetMEMAPCFG(dap.APSel{}, cfg); err == nil {
+		t.Fatal("SetMEMAPCFG() accepted a zero APSel")
+	}
+	if err := (*Target)(nil).SetMEMAPCFG(sel, cfg); err == nil {
+		t.Fatal("SetMEMAPCFG() succeeded on a nil target")
+	}
+}
+
+func TestTargetUsesTARHIOnlyWithLargeAddressExtension(t *testing.T) {
+	target := New(0x2ba01477)
+	sel := dap.NewAPSel(0)
+	if err := target.AddMEMAP(sel, 0x00010001, nil); err != nil {
+		t.Fatal(err)
+	}
+	ap := target.aps[sel]
+	ap.regs[4] = 0x100
+	if err := target.Write(t.Context(), swdsim.Request{AP: true, Addr: 0x08}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if ap.regs[8] != 0 || ap.targetAddress() != 0x100 {
+		t.Fatalf("address without CFG.LA = %#x with TARHI %#x; want 0x100 with TARHI zero", ap.targetAddress(), ap.regs[8])
+	}
+	if _, err := target.Read(t.Context(), swdsim.Request{AP: true, Read: true, Addr: 0x08}); err != nil {
+		t.Fatal(err)
+	}
+	value, err := target.Read(t.Context(), readDPRequest(0x0c))
+	if err != nil || value != 0 {
+		t.Fatalf("TARHI without CFG.LA = %#08x, %v; want zero, nil", value, err)
+	}
+	if err := target.SetMEMAPCFG(sel, 1<<1); err != nil {
+		t.Fatal(err)
+	}
+	if err := target.Write(t.Context(), swdsim.Request{AP: true, Addr: 0x08}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if ap.targetAddress() != 0x100000100 {
+		t.Fatalf("address with CFG.LA = %#x, want 0x100000100", ap.targetAddress())
+	}
+}
+
 func TestTargetModelsLogicalDPRegisters(t *testing.T) {
 	target := New(0x2ba01477)
 	ctx := context.Background()

@@ -2,6 +2,8 @@ package sim_test
 
 import (
 	"context"
+	"math"
+	"slices"
 	"testing"
 
 	"github.com/jon/ostiole/dap"
@@ -54,6 +56,45 @@ func TestMEMAPCopiesTargetWords(t *testing.T) {
 	}
 	if value != wordData {
 		t.Fatalf("DRW = %#08x after source mutation, want %#08x", value, wordData)
+	}
+}
+
+func TestMEMAPCopiesArbitraryByteRanges(t *testing.T) {
+	target := dapsim.New(0x2ba01477)
+	addMEMAPFixture(t, target, 0, memAPIDR, nil)
+	data := []byte{1, 2, 3, 4}
+	if err := target.SetMEMAPBytes(apSel(0), 0x101, data); err != nil {
+		t.Fatal(err)
+	}
+	data[0] = 0xff
+	got, err := target.MEMAPBytes(apSel(0), 0x101, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got, []byte{1, 2, 3, 4}) {
+		t.Fatalf("target bytes = %v, want [1 2 3 4]", got)
+	}
+	got[0] = 0xff
+	again, err := target.MEMAPBytes(apSel(0), 0x101, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(again, []byte{1, 2, 3, 4}) {
+		t.Fatalf("target bytes after result mutation = %v, want [1 2 3 4]", again)
+	}
+}
+
+func TestMEMAPRejectsInvalidByteRanges(t *testing.T) {
+	target := dapsim.New(0x2ba01477)
+	addMEMAPFixture(t, target, 0, memAPIDR, nil)
+	if _, err := target.MEMAPBytes(apSel(0), 0, -1); err == nil {
+		t.Fatal("MEMAPBytes() accepted a negative size")
+	}
+	if err := target.SetMEMAPBytes(apSel(0), math.MaxUint64, []byte{1, 2}); err == nil {
+		t.Fatal("SetMEMAPBytes() accepted an overflowing range")
+	}
+	if _, err := target.MEMAPBytes(dap.APSel{}, 0, 1); err == nil {
+		t.Fatal("MEMAPBytes() accepted a zero APSel")
 	}
 }
 
