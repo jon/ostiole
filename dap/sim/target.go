@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/jon/ostiole/dap"
 	swdsim "github.com/jon/ostiole/swd/sim"
 )
 
@@ -30,12 +31,13 @@ const (
 
 // Target models the initial SW-DP register state.
 type Target struct {
-	dpidr    uint32
-	ctrlStat uint32
-	dpBanks  [16]uint32
-	selectDP uint32
-	rdbuff   uint32
-	aps      map[uint8]*accessPort
+	dpidr     uint32
+	ctrlStat  uint32
+	dpBanks   [16]uint32
+	dpBankSet [16]bool
+	selectDP  uint32
+	rdbuff    uint32
+	aps       map[uint8]*accessPort
 }
 
 type accessPort struct {
@@ -49,18 +51,32 @@ func New(dpidr uint32) *Target {
 	return &Target{dpidr: dpidr, aps: make(map[uint8]*accessPort)}
 }
 
-// SetBankedDPRegister sets the simulated register at offset 0x04 in bank.
-func (t *Target) SetBankedDPRegister(bank uint8, value uint32) error {
+// SetDPRegister sets one simulated banked debug-port register.
+func (t *Target) SetDPRegister(reg dap.DPRegister, value uint32) error {
 	if t == nil {
 		return errors.New("dap/sim: nil target")
 	}
-	if bank == 0 || bank > 0x0f {
-		return fmt.Errorf("dap/sim: invalid banked DP register bank %d", bank)
+	var bank uint8
+	switch reg {
+	case dap.DLCR:
+		bank = 1
+	case dap.TARGETID:
+		bank = 2
+	case dap.DLPIDR:
+		bank = 3
+	case dap.EVENTSTAT:
+		bank = 4
+	default:
+		return fmt.Errorf("dap/sim: %s has no banked fixture", reg)
 	}
-	if bank == 1 && value&dlcrTurnaroundMask != 0 {
+	if reg == dap.DLCR && value&dlcrTurnaroundMask != 0 {
 		return errors.New("dap/sim: variable SWD turnaround is not modeled")
 	}
+	if t.dpBankSet[bank] {
+		return fmt.Errorf("dap/sim: %s is already configured", reg)
+	}
 	t.dpBanks[bank] = value
+	t.dpBankSet[bank] = true
 	return nil
 }
 
@@ -93,6 +109,9 @@ func (t *Target) Read(ctx context.Context, req swdsim.Request) (uint32, error) {
 	if t == nil {
 		return 0, errors.New("dap/sim: nil target")
 	}
+	if err := validateRequest(req, true); err != nil {
+		return 0, err
+	}
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
@@ -108,6 +127,8 @@ func (t *Target) Read(ctx context.Context, req swdsim.Request) (uint32, error) {
 			return t.ctrlStat, nil
 		}
 		return t.dpBanks[bank], nil
+	case 0x08:
+		return t.rdbuff, nil
 	case 0x0c:
 		return t.rdbuff, nil
 	default:
@@ -119,6 +140,9 @@ func (t *Target) Read(ctx context.Context, req swdsim.Request) (uint32, error) {
 func (t *Target) Write(ctx context.Context, req swdsim.Request, value uint32) error {
 	if t == nil {
 		return errors.New("dap/sim: nil target")
+	}
+	if err := validateRequest(req, false); err != nil {
+		return err
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -144,6 +168,16 @@ func (t *Target) Write(ctx context.Context, req swdsim.Request, value uint32) er
 		t.selectDP = value
 	default:
 		return fmt.Errorf("dap/sim: unsupported DP write %#02x", req.Addr)
+	}
+	return nil
+}
+
+func validateRequest(req swdsim.Request, read bool) error {
+	if req.Addr&3 != 0 || req.Addr > 0x0c {
+		return fmt.Errorf("dap/sim: invalid request address %#02x", req.Addr)
+	}
+	if req.Read != read {
+		return errors.New("dap/sim: invalid request direction")
 	}
 	return nil
 }

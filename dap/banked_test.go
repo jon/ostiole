@@ -11,7 +11,7 @@ func TestBankedDPAccessPreservesSELECTFields(t *testing.T) {
 	target := newWaitTarget()
 	target.AddAP(0x12, 0x24770011)
 	const dlcr = uint32(0xa5a50000)
-	if err := target.SetBankedDPRegister(1, dlcr); err != nil {
+	if err := target.SetDPRegister(dap.DLCR, dlcr); err != nil {
 		t.Fatal(err)
 	}
 	dp := enteredDP(t, target)
@@ -22,14 +22,14 @@ func TestBankedDPAccessPreservesSELECTFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	beforeBankedRead := len(target.requests)
-	value, err := dp.ReadDPAt(t.Context(), dap.DLCRAddr)
+	value, err := dp.ReadDP(t.Context(), dap.DLCR)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if value != dlcr {
 		t.Fatalf("DLCR = %#08x, want %#08x", value, dlcr)
 	}
-	wantRequests := []swdsim.Request{{Addr: uint8(dap.SELECT)}, {Read: true, Addr: uint8(dap.RDBUFF)}, {Read: true, Addr: uint8(dap.CTRLSTAT)}}
+	wantRequests := []swdsim.Request{dpWrite(0x08), dpRead(0x0c), dpRead(0x04)}
 	if got := target.requests[beforeBankedRead : beforeBankedRead+len(wantRequests)]; !equalRequests(got, wantRequests) {
 		t.Fatalf("banked DP requests = %#v, want %#v", got, wantRequests)
 	}
@@ -67,7 +67,7 @@ func TestBankedDPAccessRejectsUnsupportedVersionWithoutTraffic(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := len(target.requests)
-	if _, err := dp.ReadDPAt(t.Context(), dap.TARGETIDAddr); err == nil {
+	if _, err := dp.ReadDP(t.Context(), dap.TARGETID); err == nil {
 		t.Fatal("DPv1 TARGETID read succeeded")
 	}
 	if got := len(target.requests); got != before {
@@ -84,7 +84,7 @@ func TestBankedDPAccessRejectsDPv3WithoutTraffic(t *testing.T) {
 	}
 
 	before := len(target.requests)
-	if _, err := dp.ReadDPAt(t.Context(), dap.DLCRAddr); err == nil {
+	if _, err := dp.ReadDP(t.Context(), dap.DLCR); err == nil {
 		t.Fatal("DPv3 DLCR read succeeded through the ADIv5 address map")
 	}
 	if got := len(target.requests); got != before {
@@ -97,14 +97,14 @@ func TestBankedDPAccessAllowsMinimalDebugPort(t *testing.T) {
 	target := newWaitTarget()
 	target.dpidrOverride = 0x2ba11477
 	const dlcr = uint32(0xa5a50000)
-	if err := target.SetBankedDPRegister(1, dlcr); err != nil {
+	if err := target.SetDPRegister(dap.DLCR, dlcr); err != nil {
 		t.Fatal(err)
 	}
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	value, err := dp.ReadDPAt(t.Context(), dap.DLCRAddr)
+	value, err := dp.ReadDP(t.Context(), dap.DLCR)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestBankedDPAccessAllowsMinimalDebugPort(t *testing.T) {
 	}
 }
 
-func TestExplicitDPAccessRejectsReadOnlyWriteWithoutTraffic(t *testing.T) {
+func TestLogicalDPAccessRejectsReadOnlyWriteWithoutTraffic(t *testing.T) {
 	target := newWaitTarget()
 	target.dpidrOverride = 0x2ba02477
 	dp := enteredDP(t, target)
@@ -121,45 +121,39 @@ func TestExplicitDPAccessRejectsReadOnlyWriteWithoutTraffic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, addr := range []dap.DPAddress{dap.RDBUFFAddr, dap.TARGETIDAddr, dap.DLPIDRAddr, dap.EVENTSTATAddr} {
+	for _, reg := range []dap.DPRegister{dap.DPIDR, dap.TARGETID, dap.DLPIDR, dap.EVENTSTAT, dap.RESEND, dap.RDBUFF} {
 		before := len(target.requests)
-		if err := dp.WriteDPAt(t.Context(), addr, 0); err == nil {
-			t.Fatalf("WriteDPAt(%+v) succeeded", addr)
+		if err := dp.WriteDP(t.Context(), reg, 0); err == nil {
+			t.Fatalf("WriteDP(%s) succeeded", reg)
 		}
 		if got := len(target.requests); got != before {
-			t.Fatalf("requests after rejected explicit write = %d, want %d", got, before)
+			t.Fatalf("requests after rejected logical write = %d, want %d", got, before)
 		}
 	}
 }
 
-func TestExplicitDPAccessRejectsUnsupportedFramingBeforeTraffic(t *testing.T) {
+func TestLogicalDPAccessRejectsUnsupportedFramingBeforeTraffic(t *testing.T) {
 	target := newWaitTarget()
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := dp.ReadDPAt(t.Context(), dap.DLCRAddr); err != nil {
+	if _, err := dp.ReadDP(t.Context(), dap.DLCR); err != nil {
 		t.Fatal(err)
 	}
 
 	before := len(target.requests)
-	if err := dp.WriteDPAt(t.Context(), dap.CTRLSTATAddr, overrunDetect); err == nil {
-		t.Fatal("WriteDPAt(CTRLSTAT) accepted unsupported ORUNDETECT")
+	if err := dp.WriteDP(t.Context(), dap.CTRLSTAT, overrunDetect); err == nil {
+		t.Fatal("WriteDP(CTRLSTAT) accepted unsupported ORUNDETECT")
 	}
 	if got := len(target.requests); got != before {
 		t.Fatalf("requests after rejected CTRL/STAT write = %d, want %d", got, before)
 	}
 
-	if err := dp.WriteDPAt(t.Context(), dap.DLCRAddr, 1<<8); err == nil {
-		t.Fatal("WriteDPAt(DLCR) accepted unsupported turnaround")
+	if err := dp.WriteDP(t.Context(), dap.DLCR, 1<<8); err == nil {
+		t.Fatal("WriteDP(DLCR) accepted unsupported turnaround")
 	}
 	if got := len(target.requests); got != before {
 		t.Fatalf("requests after rejected DLCR write = %d, want %d", got, before)
-	}
-	if err := dp.WriteDP(t.Context(), dap.CTRLSTAT, 1<<8); err == nil {
-		t.Fatal("WriteDP(CTRLSTAT) accepted unsupported turnaround in DP bank 1")
-	}
-	if got := len(target.requests); got != before {
-		t.Fatalf("requests after rejected raw DLCR write = %d, want %d", got, before)
 	}
 }

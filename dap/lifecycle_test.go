@@ -219,7 +219,7 @@ type powerTarget struct {
 }
 
 func (t *powerTarget) Acknowledge(_ context.Context, req swdsim.Request) error {
-	if !req.AP && !req.Read && req.Addr == uint8(dap.SELECT) && t.sticky {
+	if !req.AP && !req.Read && req.Addr == 0x08 && t.sticky {
 		return swd.ErrFault
 	}
 	return nil

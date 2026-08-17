@@ -10,6 +10,10 @@
 // direct transfers can invalidate its cached register selection and response
 // state.
 //
+// ReadDP and WriteDP accept logical ADIv5 register names. They distinguish
+// operations which share a physical SWD offset, enforce direction, and manage
+// DPBANKSEL without exposing a current-bank operation.
+//
 // A failed Connect attempts bounded cleanup before returning. If that cleanup
 // also fails, Release remains available but other debug-port and access-port
 // operations fail until cleanup succeeds. A failed Release has the same
@@ -23,7 +27,8 @@
 // cleanup-only state as a failed release.
 //
 // A Txn queues an ordered group of DP and AP operations. Commit validates the
-// complete queue, settles any earlier raw DP write, then sends queued traffic.
+// complete queue, settles any earlier immediate DP write, then sends queued
+// traffic.
 // DP writes and AP operations settle through RDBUFF. If an operation fails,
 // earlier confirmed results remain available and later operations report that
 // they were not executed. If traffic was clocked but completion cannot be

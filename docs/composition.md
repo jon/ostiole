@@ -57,11 +57,13 @@ Use `dap.DebugPort` when the application needs debug-port identity, power
 ownership, bank selection, or AP access. Call `Connect` before AP operations
 and `Release` afterward. Give the debug port exclusive, serialized use of its
 `swd.Conn`; direct transfers on that connection can invalidate cached DAP
-state. This layer owns posted AP read and write completion and retries only the
-physical request that returned WAIT. After an extended AP
-stall, `dap.DebugPort` issues DAPABORT; existing `dap.MemAP` values reject
-further reads, though `dap.MemAP.Release` still attempts to restore their saved
-state. `Connect` reads DPIDR, clears supported sticky conditions with ABORT,
+state. `ReadDP` and `WriteDP` take logical ADIv5 register names and manage
+DPBANKSEL without exposing a current-bank API. This layer owns posted AP read
+and write completion and retries only the physical request that returned WAIT.
+After an extended AP stall, `dap.DebugPort` issues DAPABORT; existing
+`dap.MemAP` values reject further reads, though `dap.MemAP.Release` still
+attempts to restore their saved state. `Connect` reads DPIDR, clears supported
+sticky conditions with ABORT,
 and writes zero to SELECT once without retrying. It confirms the write through
 RDBUFF, then reads CTRL/STAT and rejects ORUNDETECT because the current SWD
 transfer does not implement the overrun-detection response grammar. If WAIT
@@ -78,7 +80,7 @@ The [DAP guide](ports/dap.md) describes the ADIv5 register protocol behind
 that lifecycle.
 
 Use `DebugPort.NewTxn` when several DP or AP accesses need ordered results.
-`Commit` validates the complete queue, settles an earlier raw DP write if
+`Commit` validates the complete queue, settles an earlier immediate DP write if
 necessary, then executes one SWD request at a time. DP writes and AP operations
 settle through RDBUFF before reporting success. If the earlier write cannot be
 settled, none of the queued operations runs. Otherwise, confirmed results remain

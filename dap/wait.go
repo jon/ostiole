@@ -34,6 +34,15 @@ type transferRequest struct {
 	Addr uint8
 }
 
+func dpTransferRequest(reg DPRegister, read bool) transferRequest {
+	info, _ := describeDPRegister(reg)
+	return transferRequest{Read: read, Addr: info.offset}
+}
+
+func apTransferRequest(addr uint8, read bool) transferRequest {
+	return transferRequest{AP: true, Read: read, Addr: addr}
+}
+
 func (dp *DebugPort) transfer(ctx context.Context, req transferRequest, data uint32) (uint32, error) {
 	return dp.transferWithAPRecovery(ctx, req, data, waitMayAffectAP(req), true)
 }
@@ -52,7 +61,7 @@ func (dp *DebugPort) transferOnce(ctx context.Context, req transferRequest, data
 }
 
 func (dp *DebugPort) transferDPWriteBarrier(ctx context.Context) (uint32, error) {
-	value, err := dp.transferWithAPRecovery(ctx, transferRequest{Read: true, Addr: uint8(RDBUFF)}, 0, false, false)
+	value, err := dp.transferWithAPRecovery(ctx, dpTransferRequest(RDBUFF, true), 0, false, false)
 	if err == nil || errors.Is(err, swd.ErrParity) || faultHasValidState(err) {
 		dp.state.settleDPWrite()
 	}
@@ -94,7 +103,7 @@ func responseSettlesPreviousDPWrite(req transferRequest, err error) bool {
 	if err != nil && err != swd.ErrWait && err != swd.ErrParity {
 		return false
 	}
-	return req.AP || req.Read && req.Addr != uint8(DPIDR)
+	return req.AP || req.Read && req.Addr != dpRegisterOffset(DPIDR)
 }
 
 func (dp *DebugPort) resolveSELECT(req transferRequest, value uint32, err error) {
@@ -122,15 +131,15 @@ func (dp *DebugPort) resolveSELECTAfterABORT(err error) {
 }
 
 func isABORTWrite(req transferRequest) bool {
-	return !req.AP && !req.Read && req.Addr == uint8(ABORT)
+	return !req.AP && !req.Read && req.Addr == dpRegisterOffset(ABORT)
 }
 
 func isDPIDRRead(req transferRequest) bool {
-	return !req.AP && req.Read && req.Addr == uint8(DPIDR)
+	return !req.AP && req.Read && req.Addr == dpRegisterOffset(DPIDR)
 }
 
 func isCTRLSTATRead(req transferRequest) bool {
-	return !req.AP && req.Read && req.Addr == uint8(CTRLSTAT)
+	return !req.AP && req.Read && req.Addr == dpRegisterOffset(CTRLSTAT)
 }
 
 func (dp *DebugPort) stopWaiting(waits int, cause error, apWork bool) error {
@@ -163,7 +172,7 @@ func (dp *DebugPort) handleFault(req transferRequest, apWork bool) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), waitRecoveryTimeout)
 	defer cancel()
-	state, err := dp.transferOnce(ctx, transferRequest{Read: true, Addr: uint8(CTRLSTAT)}, 0)
+	state, err := dp.transferOnce(ctx, dpTransferRequest(CTRLSTAT, true), 0)
 	if err != nil {
 		dp.state.loseFraming()
 		return errors.Join(fault, fmt.Errorf("dap: read CTRL/STAT after FAULT: %w", err))
@@ -186,11 +195,11 @@ func (dp *DebugPort) handleFault(req transferRequest, apWork bool) error {
 
 func (dp *DebugPort) clearFaultState(ctx context.Context, fault *FaultError, minimal bool, apWork bool) error {
 	clear := stickyClearForState(fault.CTRLSTAT, minimal)
-	if _, err := dp.transferOnce(ctx, transferRequest{Addr: uint8(ABORT)}, clear); err != nil {
+	if _, err := dp.transferOnce(ctx, dpTransferRequest(ABORT, false), clear); err != nil {
 		dp.state.loseFraming()
 		return errors.Join(fault, fmt.Errorf("dap: clear sticky state after FAULT: %w", err))
 	}
-	state, err := dp.transferOnce(ctx, transferRequest{Read: true, Addr: uint8(CTRLSTAT)}, 0)
+	state, err := dp.transferOnce(ctx, dpTransferRequest(CTRLSTAT, true), 0)
 	if err != nil {
 		dp.state.loseFraming()
 		return errors.Join(fault, fmt.Errorf("dap: verify sticky state after FAULT: %w", err))
@@ -242,9 +251,9 @@ func (dp *DebugPort) waitForbidden(req transferRequest) bool {
 	if req.AP {
 		return false
 	}
-	return req.Read && (req.Addr == uint8(DPIDR) ||
-		(req.Addr == uint8(CTRLSTAT) && dp.state.selectDP.valid && dp.state.dpBank() == 0)) ||
-		!req.Read && req.Addr == uint8(ABORT)
+	return req.Read && (req.Addr == dpRegisterOffset(DPIDR) ||
+		(req.Addr == dpRegisterOffset(CTRLSTAT) && dp.state.selectDP.valid && dp.state.dpBank() == 0)) ||
+		!req.Read && req.Addr == dpRegisterOffset(ABORT)
 }
 
 type rejectedRequestError struct {
@@ -274,7 +283,7 @@ func (dp *DebugPort) invalidateWait(cause error) error {
 }
 
 func waitMayAffectAP(req transferRequest) bool {
-	return req.AP || req.Read && req.Addr == uint8(RDBUFF)
+	return req.AP || req.Read && req.Addr == dpRegisterOffset(RDBUFF)
 }
 
 func (dp *DebugPort) abortWait(cause error) error {
@@ -282,7 +291,7 @@ func (dp *DebugPort) abortWait(cause error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), waitRecoveryTimeout)
 	defer cancel()
 
-	_, err := dp.transferOnce(ctx, transferRequest{}, dapAbort)
+	_, err := dp.transferOnce(ctx, dpTransferRequest(ABORT, false), dapAbort)
 	if err != nil {
 		dp.state.loseFraming()
 		return errors.Join(cause, fmt.Errorf("dap: DAPABORT after extended WAIT: %w", err))
@@ -295,7 +304,7 @@ func (dp *DebugPort) abortWait(cause error) error {
 }
 
 func (dp *DebugPort) restoreAfterAbort(ctx context.Context) error {
-	state, err := dp.transferOnce(ctx, transferRequest{Read: true, Addr: uint8(CTRLSTAT)}, 0)
+	state, err := dp.transferOnce(ctx, dpTransferRequest(CTRLSTAT, true), 0)
 	if err != nil {
 		return fmt.Errorf("dap: read sticky state after DAP abort: %w", err)
 	}
@@ -305,7 +314,7 @@ func (dp *DebugPort) restoreAfterAbort(ctx context.Context) error {
 	}
 	clear := stickyClearForState(state, dp.identity.Minimal)
 	if clear != 0 {
-		if _, err := dp.transferOnce(ctx, transferRequest{}, clear); err != nil {
+		if _, err := dp.transferOnce(ctx, dpTransferRequest(ABORT, false), clear); err != nil {
 			return fmt.Errorf("dap: clear sticky state after DAP abort: %w", err)
 		}
 	}
