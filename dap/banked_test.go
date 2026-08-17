@@ -9,7 +9,7 @@ import (
 
 func TestBankedDPAccessPreservesSELECTFields(t *testing.T) {
 	target := newWaitTarget()
-	target.AddAP(0x12, 0x24770011)
+	addAP(t, target, 0x12, 0x24770011)
 	const dlcr = uint32(0xa5a50000)
 	if err := target.SetDPRegister(dap.DLCR, dlcr); err != nil {
 		t.Fatal(err)

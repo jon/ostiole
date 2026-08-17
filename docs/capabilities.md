@@ -90,7 +90,7 @@ specification notes, and current physical observation.
 | Managed target-memory writes | No | `MemAP` has no write operation. `WriteRawAP` is an unmanaged escape hatch and can write target memory through a class-specific data register. |
 | Block or sub-word access | No | No burst, auto-increment, 8-bit, or 16-bit operation exists. |
 | ADIv6 or JTAG-DP | No | The public implementation is the current minimal ADIv5 SW-DP path. |
-| Behavioral simulation | Yes | DP identity/power, posted AP access, and configured target words. |
+| Behavioral simulation | Yes | DP identity/power, posted AP access, and configured target words. AP fixtures take `dap.APSel` values and reject duplicate selectors, zero APIDRs, non-MEM-AP identities passed to `AddMEMAP`, and unaligned target-word addresses. |
 | AP and MEM-AP reads | HIL | Opt-in FTDI integration tests against an explicitly selected AP. A separately gated test corrupts write parity, observes a target-generated FAULT with WDATAERR, and verifies recovery. |
 
 Connecting and reading a MEM-AP changes volatile debug state even though it

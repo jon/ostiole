@@ -302,7 +302,7 @@ func TestDebugPortRetriesOnlyTheWAITedTransfer(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			target := newWaitTarget()
-			target.AddAP(0, 0x24770011)
+			addAP(t, target, 0, 0x24770011)
 			dp := enteredDP(t, target)
 			if _, err := dp.Connect(t.Context()); err != nil {
 				t.Fatal(err)
@@ -322,7 +322,7 @@ func TestDebugPortRetriesOnlyTheWAITedTransfer(t *testing.T) {
 
 func TestDebugPortDoesNotDelayWAITRetries(t *testing.T) {
 	target := newWaitTarget()
-	target.AddAP(0, 0x24770011)
+	addAP(t, target, 0, 0x24770011)
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -363,7 +363,7 @@ func TestInvalidDPRegisterDoesNotLoseFraming(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			target := newWaitTarget()
-			target.AddMEMAP(0, 0x24770011, map[uint32]uint32{0: 1})
+			addMEMAP(t, target, 0, 0x24770011, map[uint32]uint32{0: 1})
 			dp := enteredDP(t, target)
 			if _, err := dp.Connect(t.Context()); err != nil {
 				t.Fatal(err)
@@ -496,7 +496,7 @@ func TestConnectCanRetryAfterBootstrapRepair(t *testing.T) {
 
 func TestFailedConnectRepairBlocksOperations(t *testing.T) {
 	target := newWaitTarget()
-	target.AddAP(0, 0x24770011)
+	addAP(t, target, 0, 0x24770011)
 	repairErr := errors.New("injected protocol re-entry failure")
 	wire := &reentryFailWire{inner: swdsim.New(target), reentryErr: repairErr}
 	conn := swd.New(wire)
@@ -655,7 +655,7 @@ func TestDebugPortRetriesBankedDPRegisterWAIT(t *testing.T) {
 
 func TestDebugPortReusesFullSELECTValue(t *testing.T) {
 	target := newWaitTarget()
-	target.AddAP(2, 0x24770011)
+	addAP(t, target, 2, 0x24770011)
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -675,7 +675,7 @@ func TestDebugPortReusesFullSELECTValue(t *testing.T) {
 
 func TestDebugPortAbortsExtendedWAITAndClearsAbandonedWrite(t *testing.T) {
 	target := newWaitTarget()
-	target.AddAP(0, 0x24770011)
+	addAP(t, target, 0, 0x24770011)
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -712,7 +712,7 @@ func TestDebugPortAbortsExtendedWAITAndClearsAbandonedWrite(t *testing.T) {
 
 func TestDebugPortDoesNotAbortExtendedDPWAIT(t *testing.T) {
 	target := newWaitTarget()
-	target.AddAP(0, 0x24770011)
+	addAP(t, target, 0, 0x24770011)
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -732,7 +732,7 @@ func TestDebugPortDoesNotAbortExtendedDPWAIT(t *testing.T) {
 
 func TestDebugPortDoesNotRetryFAULT(t *testing.T) {
 	target := newWaitTarget()
-	target.AddAP(0, 0x24770011)
+	addAP(t, target, 0, 0x24770011)
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -751,7 +751,7 @@ func TestDebugPortDoesNotRetryFAULT(t *testing.T) {
 
 func TestDebugPortReportsAndClearsFAULT(t *testing.T) {
 	target := newWaitTarget()
-	target.AddAP(0, 0x24770011)
+	addAP(t, target, 0, 0x24770011)
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -812,7 +812,7 @@ func TestDebugPortClearsObservedSTICKYCMPWithoutIdentity(t *testing.T) {
 
 func TestDebugPortUsesPreviousSELECTAfterWriteDataFAULT(t *testing.T) {
 	target := newWaitTarget()
-	target.AddAP(0, 0x24770011)
+	addAP(t, target, 0, 0x24770011)
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -844,7 +844,7 @@ func TestDebugPortUsesPreviousSELECTAfterWriteDataFAULT(t *testing.T) {
 
 func TestDebugPortDoesNotReadCTRLSTATAfterAbandonedBankZeroSELECT(t *testing.T) {
 	target := newWaitTarget()
-	target.AddAP(0, 0x24770011)
+	addAP(t, target, 0, 0x24770011)
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -985,7 +985,7 @@ func TestDebugPortRejectsAmbiguousCTRLSTATReadBeforeTraffic(t *testing.T) {
 
 func TestDebugPortReestablishesSELECTAfterABORT(t *testing.T) {
 	target := newWaitTarget()
-	target.AddAP(0, 0x24770011)
+	addAP(t, target, 0, 0x24770011)
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -1015,7 +1015,7 @@ func TestDebugPortReestablishesSELECTAfterABORT(t *testing.T) {
 
 func TestDebugPortRequiresRepairWhenStickyClearDoesNotTakeEffect(t *testing.T) {
 	target := newWaitTarget()
-	target.AddMEMAP(0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
+	addMEMAP(t, target, 0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -1056,7 +1056,7 @@ func TestDebugPortRequiresRepairWhenStickyClearDoesNotTakeEffect(t *testing.T) {
 
 func TestDebugPortPreservesFAULTWhenCleanupFails(t *testing.T) {
 	target := newWaitTarget()
-	target.AddAP(0, 0x24770011)
+	addAP(t, target, 0, 0x24770011)
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -1083,7 +1083,7 @@ func TestDebugPortPreservesFAULTWhenCleanupFails(t *testing.T) {
 
 func TestDebugPortReportsFAULTWithoutStateWhenCTRLSTATReadFails(t *testing.T) {
 	target := newWaitTarget()
-	target.AddAP(0, 0x24770011)
+	addAP(t, target, 0, 0x24770011)
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -1112,7 +1112,7 @@ func TestDebugPortReportsFAULTWithoutStateWhenCTRLSTATReadFails(t *testing.T) {
 
 func TestDebugPortKeepsFramingAfterWAITThenFAULT(t *testing.T) {
 	target := newWaitTarget()
-	target.AddMEMAP(0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
+	addMEMAP(t, target, 0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -1150,7 +1150,7 @@ func TestDebugPortKeepsFramingAfterWAITThenFAULT(t *testing.T) {
 
 func TestDebugPortPreservesWAITAndAbortFailure(t *testing.T) {
 	target := newWaitTarget()
-	target.AddAP(0, 0x24770011)
+	addAP(t, target, 0, 0x24770011)
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -1167,7 +1167,7 @@ func TestDebugPortPreservesWAITAndAbortFailure(t *testing.T) {
 
 func TestDebugPortDoesNotReplayAfterWAITCleanupFailure(t *testing.T) {
 	target := newWaitTarget()
-	target.AddMEMAP(0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
+	addMEMAP(t, target, 0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
 	cleanupErr := errors.New("injected WAIT cleanup failure")
 	wire := &cleanupFailWire{inner: swdsim.New(target), err: cleanupErr}
 	conn := swd.New(wire)
@@ -1208,7 +1208,7 @@ func TestDebugPortDoesNotReplayAfterWAITCleanupFailure(t *testing.T) {
 
 func TestMEMAPReleaseReentersAfterDPWAITCleanupFailure(t *testing.T) {
 	target := newWaitTarget()
-	target.AddMEMAP(0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
+	addMEMAP(t, target, 0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
 	cleanupErr := errors.New("injected WAIT cleanup failure")
 	wire := &cleanupFailWire{inner: swdsim.New(target), err: cleanupErr}
 	conn := swd.New(wire)
@@ -1280,7 +1280,7 @@ func TestDebugPortInvalidatesAPStateWhenWAITRetryFails(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			target := newWaitTarget()
-			target.AddMEMAP(0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
+			addMEMAP(t, target, 0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
 			dp := enteredDP(t, target)
 			if _, err := dp.Connect(t.Context()); err != nil {
 				t.Fatal(err)
@@ -1314,7 +1314,7 @@ func TestDebugPortInvalidatesAPStateWhenWAITRetryFails(t *testing.T) {
 
 func TestDebugPortStopsRecoveryAfterStickyCleanupFailure(t *testing.T) {
 	target := newWaitTarget()
-	target.AddAP(0, 0x24770011)
+	addAP(t, target, 0, 0x24770011)
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -1337,7 +1337,7 @@ func TestDebugPortStopsRecoveryAfterStickyCleanupFailure(t *testing.T) {
 
 func TestDebugPortStopsRecoveryAfterStickyStateReadFailure(t *testing.T) {
 	target := newWaitTarget()
-	target.AddAP(0, 0x24770011)
+	addAP(t, target, 0, 0x24770011)
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -1503,7 +1503,7 @@ func TestConnectRetainsAmbiguousPowerAfterFailedRollback(t *testing.T) {
 
 func TestReleaseFailureAllowsCleanupOnly(t *testing.T) {
 	target := newWaitTarget()
-	target.AddMEMAP(0, 0x24770011, map[uint32]uint32{0: 1})
+	addMEMAP(t, target, 0, 0x24770011, map[uint32]uint32{0: 1})
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -1579,7 +1579,7 @@ func TestReleaseRepairsAbandonedSELECTWithInheritedPower(t *testing.T) {
 
 func TestReentryRejectsChangedDebugPort(t *testing.T) {
 	target := newWaitTarget()
-	target.AddAP(0, 0x24770011)
+	addAP(t, target, 0, 0x24770011)
 	cleanupErr := errors.New("injected WAIT cleanup failure")
 	wire := &cleanupFailWire{inner: swdsim.New(target), err: cleanupErr}
 	conn := swd.New(wire)
@@ -1620,7 +1620,7 @@ func TestReentryRejectsChangedDebugPort(t *testing.T) {
 
 func TestDebugPortRetriesSELECTAfterDAPAbort(t *testing.T) {
 	target := newWaitTarget()
-	target.AddAP(0, 0x24770011)
+	addAP(t, target, 0, 0x24770011)
 	target.selectWaits = 2
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
@@ -1644,7 +1644,7 @@ func TestDebugPortRetriesSELECTAfterDAPAbort(t *testing.T) {
 
 func TestDebugPortAbortsWAITAfterContextCancellation(t *testing.T) {
 	target := newWaitTarget()
-	target.AddAP(0, 0x24770011)
+	addAP(t, target, 0, 0x24770011)
 	wire := &cleanupFailWire{inner: swdsim.New(target)}
 	conn := swd.New(wire)
 	if err := conn.JTAGToSWD(t.Context()); err != nil {
@@ -1670,7 +1670,7 @@ func TestDebugPortAbortsWAITAfterContextCancellation(t *testing.T) {
 
 func TestDAPAbortInvalidatesExistingMEMAP(t *testing.T) {
 	target := newWaitTarget()
-	target.AddMEMAP(0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
+	addMEMAP(t, target, 0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -1712,7 +1712,7 @@ func assertMEMAPInvalidated(t *testing.T, mem *dap.MemAP) {
 
 func TestMEMAPReleaseRearmsRestorationAfterDAPAbort(t *testing.T) {
 	target := newWaitTarget()
-	target.AddMEMAP(0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
+	addMEMAP(t, target, 0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -1755,7 +1755,7 @@ func TestMEMAPReleaseRearmsRestorationAfterDAPAbort(t *testing.T) {
 
 func TestImmediateDAPAbortInvalidatesAndRearmsMEMAP(t *testing.T) {
 	target := newWaitTarget()
-	target.AddMEMAP(0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
+	addMEMAP(t, target, 0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)

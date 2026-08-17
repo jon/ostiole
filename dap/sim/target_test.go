@@ -163,3 +163,45 @@ func TestTargetPostsZeroForAnAbsentAccessPort(t *testing.T) {
 		t.Fatalf("absent AP posted %#08x and buffered %#08x", value, target.rdbuff)
 	}
 }
+
+func TestTargetRejectsInvalidAccessPortFixtures(t *testing.T) {
+	target := New(0x2ba01477)
+	var zero dap.APSel
+	if err := target.AddAP(zero, 0x04770031); err == nil {
+		t.Fatal("AddAP() accepted a zero APSel")
+	}
+	if err := target.AddMEMAP(zero, 0x00010001, nil); err == nil {
+		t.Fatal("AddMEMAP() accepted a zero APSel")
+	}
+	if err := target.AddAP(dap.NewAPSel(0), 0); err == nil {
+		t.Fatal("AddAP() accepted a zero APIDR")
+	}
+	if err := target.AddAP(dap.NewAPSel(0), 0x04770031); err != nil {
+		t.Fatal(err)
+	}
+	if err := target.AddAP(dap.NewAPSel(0), 0x04770032); err == nil {
+		t.Fatal("AddAP() replaced an existing AP")
+	}
+	if err := target.AddMEMAP(dap.NewAPSel(1), 0x00000001, nil); err == nil {
+		t.Fatal("AddMEMAP() accepted a non-MEM-AP identity")
+	}
+	if err := target.AddMEMAP(dap.NewAPSel(1), 0x00010001, map[uint32]uint32{2: 1}); err == nil {
+		t.Fatal("AddMEMAP() accepted an unaligned target-word address")
+	}
+	if err := target.AddMEMAP(dap.NewAPSel(1), 0x00010001, map[uint32]uint32{0: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := target.AddMEMAP(dap.NewAPSel(1), 0x00010001, nil); err == nil {
+		t.Fatal("AddMEMAP() replaced an existing AP")
+	}
+}
+
+func TestNilTargetRejectsAccessPortFixtures(t *testing.T) {
+	var target *Target
+	if err := target.AddAP(dap.NewAPSel(0), 1); err == nil {
+		t.Fatal("AddAP() succeeded on a nil target")
+	}
+	if err := target.AddMEMAP(dap.NewAPSel(0), 0x00010001, nil); err == nil {
+		t.Fatal("AddMEMAP() succeeded on a nil target")
+	}
+}
