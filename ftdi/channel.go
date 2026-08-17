@@ -35,25 +35,14 @@ const (
 	PortB
 )
 
-// Interface identifies the wire interface assigned to a port.
-type Interface uint8
-
-const (
-	// InterfaceUnspecified leaves the wire interface unselected.
-	InterfaceUnspecified Interface = iota
-	// SWD selects the Serial Wire Debug interface.
-	SWD
-)
-
-// Config explicitly selects one FTDI product, port, interface, and clock.
+// Config selects one MPSSE port and the maximum requested SWD clock.
 type Config struct {
-	ClockHz   uint32
-	ProductID uint16
-	Port      Port
-	Interface Interface
+	Port       Port
+	MaxClockHz uint32
 }
 
 type usbDevice interface {
+	Identity() usb.DeviceInfo
 	claimInterface(iface uint8) (usbClaim, error)
 	ControlTransfer(ctx context.Context, requestType, request uint8, value, index uint16, data []byte) (int, error)
 	BulkWrite(ctx context.Context, endpoint uint8, data []byte) (int, error)
@@ -80,6 +69,7 @@ type Channel struct {
 	index      uint16
 	bulkIn     uint8
 	bulkOut    uint8
+	divisor    uint16
 	clockHz    uint32
 	packetSize int
 	claim      usbClaim
@@ -90,13 +80,14 @@ func newChannel(device usbDevice, config Config) (*Channel, error) {
 	if device == nil {
 		return nil, errors.New("ftdi: nil USB device")
 	}
-	if config.Interface != SWD {
-		return nil, errors.New("ftdi: SWD interface is required")
-	}
 	if config.Port != PortA && config.Port != PortB {
 		return nil, errors.New("ftdi: port A or B is required")
 	}
-	if err := validateSelection(config.ProductID, config.Port); err != nil {
+	if err := validateSelection(device.Identity(), config.Port); err != nil {
+		return nil, err
+	}
+	divisor, err := clockDivisor(config.MaxClockHz)
+	if err != nil {
 		return nil, err
 	}
 	iface := uint8(config.Port - PortA)
@@ -106,23 +97,35 @@ func newChannel(device usbDevice, config Config) (*Channel, error) {
 		index:      uint16(iface) + 1,
 		bulkIn:     0x81 + 2*iface,
 		bulkOut:    0x02 + 2*iface,
-		clockHz:    config.ClockHz,
+		divisor:    divisor,
+		clockHz:    baseClockHz / (2 * (uint32(divisor) + 1)),
 		packetSize: 512,
 		settle:     settleMPSSE,
 	}, nil
 }
 
-func validateSelection(product uint16, port Port) error {
-	switch product {
+func validateSelection(identity usb.DeviceInfo, port Port) error {
+	if identity.VID != VID {
+		return fmt.Errorf("ftdi: unsupported USB vendor %#04x", identity.VID)
+	}
+	switch identity.PID {
 	case PIDFT232H:
 		if port != PortA {
 			return errors.New("ftdi: FT232H supports only port A")
 		}
 	case PIDFT2232H, PIDFT4232H:
 	default:
-		return fmt.Errorf("ftdi: unsupported USB product %#04x", product)
+		return fmt.Errorf("ftdi: unsupported USB product %#04x", identity.PID)
 	}
 	return nil
+}
+
+// ClockHz reports the SWD clock selected during Open.
+func (c *Channel) ClockHz() uint32 {
+	if c == nil {
+		return 0
+	}
+	return c.clockHz
 }
 
 func (c *Channel) claimUSB() error {

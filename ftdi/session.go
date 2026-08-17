@@ -55,8 +55,10 @@ func settleMPSSE(ctx context.Context) error {
 	}
 }
 
-// Close restores the selected port, releases it, and closes the USB device. If
-// interface release fails, the channel remains open and Close can be retried.
+// Close resets bit mode, sets the latency timer to 16 ms, purges the receive
+// and transmit paths, releases the selected port, and closes the USB device. It
+// does not restore the function's prior settings. If interface release fails,
+// the channel remains open and Close can be retried.
 func (c *Channel) Close() error {
 	if c == nil || c.device == nil {
 		return nil

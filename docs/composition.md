@@ -36,9 +36,9 @@ application can present the returned identities to a user, but it should
 still make one explicit selection before calling `Open`. Do not silently pick
 the first result from an ambiguous inventory.
 
-Pass the selected product identifier into `ftdi.Config` along with the MPSSE
-port, SWD interface, and requested clock. The driver validates this
-combination; discovery does not infer it.
+Pass the opened device to `ftdi.Open` with the MPSSE port and maximum requested
+clock. The driver reads and validates the product from the device identity;
+discovery does not choose the port or clock.
 
 `ftdi.Open` takes ownership of the `*usb.Device` when it succeeds. Close the
 returned channel rather than separately closing the device. After an error,

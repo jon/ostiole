@@ -30,6 +30,9 @@ func TestOpenRevalidatesAndOwnsExactUSBDevice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if got := device.Identity(); got != info {
+		t.Fatalf("Identity() = %+v, want %+v", got, info)
+	}
 	if err := device.Close(); err != nil {
 		t.Fatal(err)
 	}

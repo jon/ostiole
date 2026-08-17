@@ -57,12 +57,14 @@ vendor, without opening a device. The caller selects exactly one
 `usb.DeviceInfo` and passes it back to `Open`.
 
 `Open` revalidates the bus address and USB identity before and after acquiring
-the attachment. A device that disappeared or changed identity returns
-`usb.ErrStaleCandidate` instead of silently opening a replacement.
+the attachment, then retains that identity for the driver. A device that
+disappeared or changed identity returns `usb.ErrStaleCandidate` instead of
+silently opening a replacement.
 
-`ftdi.SupportedDevices` provides the USB identifiers understood by the FTDI
-driver. It does not select a device. `ftdi.Open` still requires an explicit
-product, MPSSE port, SWD interface, and clock in `ftdi.Config`.
+`ftdi.SupportedDevices` provides the USB identities understood by the FTDI
+driver. It does not select a device. `ftdi.Open` derives the product from the
+opened USB device; `ftdi.Config` selects the MPSSE port and a maximum SWD
+clock. The channel reports the attainable clock it configured.
 
 This split keeps inventory policy in the application. Listing hardware does
 not claim an interface or send adapter or target traffic.

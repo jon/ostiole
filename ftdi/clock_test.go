@@ -28,3 +28,17 @@ func TestClockDivisorRejectsUnattainablySlowRates(t *testing.T) {
 		}
 	}
 }
+
+func TestChannelReportsTheConfiguredClock(t *testing.T) {
+	raw := &fakeUSBDevice{}
+	channel, err := newChannel(raw, Config{Port: PortA, MaxClockHz: 1_000_001})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := channel.configure(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := channel.ClockHz(); got != 1_000_000 {
+		t.Fatalf("ClockHz() = %d, want 1000000", got)
+	}
+}

@@ -21,6 +21,7 @@ type darwinOpener interface {
 // Device is one open macOS USB attachment.
 type Device struct {
 	handle    darwinDeviceHandle
+	identity  DeviceInfo
 	iface     darwinInterfaceHandle
 	routes    map[uint8]darwinPipe
 	claim     *ClaimedInterface
@@ -65,7 +66,15 @@ func (e *Enumerator) Open(ctx context.Context, expected DeviceInfo) (*Device, er
 	if err := validateDarwinIdentity(expected, actual.info()); err != nil {
 		return nil, errors.Join(err, handle.close())
 	}
-	return &Device{handle: handle}, nil
+	return &Device{handle: handle, identity: actual.info()}, nil
+}
+
+// Identity returns the attachment identity established by Open.
+func (d *Device) Identity() DeviceInfo {
+	if d == nil {
+		return DeviceInfo{}
+	}
+	return d.identity
 }
 
 func (e *Enumerator) find(ctx context.Context, expected DeviceInfo) (darwinAttachment, error) {

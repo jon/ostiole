@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/jon/ostiole/usb"
 )
 
 type fakeUSBDevice struct {
+	identity   usb.DeviceInfo
 	claimed    uint8
 	released   uint8
 	request    uint8
@@ -25,6 +28,13 @@ type fakeUSBDevice struct {
 	writeErr   int
 	writesN    int
 	releases   int
+}
+
+func (d *fakeUSBDevice) Identity() usb.DeviceInfo {
+	if d.identity == (usb.DeviceInfo{}) {
+		return usb.DeviceInfo{VID: VID, PID: PIDFT232H}
+	}
+	return d.identity
 }
 
 type fakeUSBClaim struct {
@@ -67,13 +77,9 @@ func (d *fakeUSBDevice) ControlTransfer(_ context.Context, _ uint8, request uint
 	return 0, nil
 }
 
-func TestChannelOwnsAndRestoresMPSSEMode(t *testing.T) {
+func TestChannelOwnsAndClosesMPSSEMode(t *testing.T) {
 	raw := &fakeUSBDevice{}
-	channel, err := newChannel(raw, Config{
-		ProductID: PIDFT232H,
-		Port:      PortA,
-		Interface: SWD,
-	})
+	channel, err := newChannel(raw, Config{Port: PortA, MaxClockHz: 400_000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +119,7 @@ func TestChannelOwnsAndRestoresMPSSEMode(t *testing.T) {
 func TestChannelRetainsUSBClaimAfterFailedRelease(t *testing.T) {
 	want := errors.New("release failed")
 	raw := &fakeUSBDevice{releaseErr: want}
-	channel, err := newChannel(raw, Config{ProductID: PIDFT232H, Port: PortA, Interface: SWD})
+	channel, err := newChannel(raw, Config{Port: PortA, MaxClockHz: 400_000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,11 +160,7 @@ func TestChannelSynchronizesTheMPSSECommandStream(t *testing.T) {
 	raw := &fakeUSBDevice{
 		readData: [][]byte{{0x01, 0x60, 0xfa, 0xab}},
 	}
-	channel, err := newChannel(raw, Config{
-		ProductID: PIDFT232H,
-		Port:      PortA,
-		Interface: SWD,
-	})
+	channel, err := newChannel(raw, Config{Port: PortA, MaxClockHz: 400_000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,12 +176,7 @@ func TestChannelSynchronizesTheMPSSECommandStream(t *testing.T) {
 
 func TestChannelConfiguresAConservativeMPSSEClock(t *testing.T) {
 	raw := &fakeUSBDevice{}
-	channel, err := newChannel(raw, Config{
-		ClockHz:   400_000,
-		ProductID: PIDFT232H,
-		Port:      PortA,
-		Interface: SWD,
-	})
+	channel, err := newChannel(raw, Config{Port: PortA, MaxClockHz: 400_000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,11 +218,7 @@ func TestChannelExchangesExactMPSSEPayloads(t *testing.T) {
 			{0x01, 0x60, 0xcc},
 		},
 	}
-	channel, err := newChannel(raw, Config{
-		ProductID: PIDFT232H,
-		Port:      PortA,
-		Interface: SWD,
-	})
+	channel, err := newChannel(raw, Config{Port: PortA, MaxClockHz: 400_000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,12 +247,7 @@ func (d *fakeUSBDevice) Close() error {
 
 func TestChannelBindsOneExplicitMPSSEPort(t *testing.T) {
 	raw := &fakeUSBDevice{}
-	channel, err := newChannel(raw, Config{
-		ProductID: PIDFT232H,
-		Port:      PortA,
-		Interface: SWD,
-		ClockHz:   400_000,
-	})
+	channel, err := newChannel(raw, Config{Port: PortA, MaxClockHz: 400_000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,14 +277,28 @@ func TestChannelBindsOneExplicitMPSSEPort(t *testing.T) {
 }
 
 func TestChannelRejectsUnsupportedSelections(t *testing.T) {
-	tests := []Config{
-		{ProductID: 0xffff, Port: PortA, Interface: SWD},
-		{ProductID: PIDFT232H, Port: PortB, Interface: SWD},
-		{ProductID: PIDFT232H, Port: PortA},
-	}
-	for _, config := range tests {
-		if _, err := newChannel(&fakeUSBDevice{}, config); err == nil {
-			t.Fatalf("newChannel(%#v) succeeded", config)
+	for _, port := range []Port{PortUnspecified, Port(3)} {
+		if _, err := newChannel(&fakeUSBDevice{}, Config{Port: port, MaxClockHz: 400_000}); err == nil {
+			t.Fatalf("newChannel(Port(%d)) succeeded", port)
 		}
+	}
+}
+
+func TestChannelDerivesProductFromUSBIdentity(t *testing.T) {
+	tests := []struct {
+		name     string
+		identity usb.DeviceInfo
+		port     Port
+	}{
+		{name: "another vendor", identity: usb.DeviceInfo{VID: 0x1234, PID: PIDFT232H}, port: PortA},
+		{name: "unsupported product", identity: usb.DeviceInfo{VID: VID, PID: 0xffff}, port: PortA},
+		{name: "FT232H port B", identity: usb.DeviceInfo{VID: VID, PID: PIDFT232H}, port: PortB},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := newChannel(&fakeUSBDevice{identity: test.identity}, Config{Port: test.port, MaxClockHz: 400_000}); err == nil {
+				t.Fatal("newChannel() succeeded")
+			}
+		})
 	}
 }

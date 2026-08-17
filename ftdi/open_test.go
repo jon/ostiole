@@ -4,19 +4,27 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/jon/ostiole/usb"
 )
 
 func TestOpenClosesAnInvalidSelection(t *testing.T) {
 	raw := &fakeUSBDevice{}
-
-	channel, err := openChannel(context.Background(), raw, Config{
-		ClockHz:   400_000,
-		ProductID: 0xffff,
-		Port:      PortA,
-		Interface: SWD,
-	})
+	raw.identity = usb.DeviceInfo{VID: VID, PID: 0xffff}
+	channel, err := openChannel(context.Background(), raw, Config{Port: PortA, MaxClockHz: 400_000})
 	if channel != nil || err == nil || !raw.closed {
 		t.Fatalf("openChannel() = (%T, %v), raw = %#v", channel, err, raw)
+	}
+}
+
+func TestOpenRejectsInvalidClockBeforeAdapterTraffic(t *testing.T) {
+	raw := &fakeUSBDevice{}
+	channel, err := openChannel(t.Context(), raw, Config{Port: PortA})
+	if channel != nil || err == nil || !raw.closed {
+		t.Fatalf("openChannel() = (%T, %v), raw = %#v", channel, err, raw)
+	}
+	if len(raw.controls) != 0 || raw.releases != 0 {
+		t.Fatalf("adapter traffic after invalid clock = controls %#v, releases %d", raw.controls, raw.releases)
 	}
 }
 
@@ -53,12 +61,7 @@ func TestOpenCleansUpEveryFailedPreparationStage(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			channel, err := newChannel(test.raw, Config{
-				ClockHz:   400_000,
-				ProductID: PIDFT232H,
-				Port:      PortA,
-				Interface: SWD,
-			})
+			channel, err := newChannel(test.raw, Config{Port: PortA, MaxClockHz: 400_000})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -81,7 +84,7 @@ func TestOpenLeavesDeviceAvailableAfterFailedCleanup(t *testing.T) {
 		readData:   [][]byte{{0x01, 0x60, 0x00, 0x00}},
 		releaseErr: wantRelease,
 	}
-	channel, err := newChannel(raw, Config{ClockHz: 400_000, ProductID: PIDFT232H, Port: PortA, Interface: SWD})
+	channel, err := newChannel(raw, Config{Port: PortA, MaxClockHz: 400_000})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -17,7 +17,7 @@ family or every feature of a protocol.
 | Linux host access | Yes | Pure-Go sysfs inventory and usbfs transfers; Linux CI and FT232H HIL. Permission setup and manual release of a bound kernel driver are host prerequisites. |
 | macOS host access | Yes | IOKit and IOUSBLib through cgo; macOS 26 arm64 and Intel CI with a macOS 12 deployment target. |
 | Filtered enumeration | Yes | Explicit exact-product and vendor-only filters, including an exact product ID of zero; deterministic bus/address ordering and context checks. |
-| Exact open | Yes | Revalidates bus, address, vendor, and product before and after opening. |
+| Exact open | Yes | Revalidates bus, address, vendor, and product before and after opening, then retains that identity on the device. |
 | Interface ownership | Yes | `ClaimedInterface` selects alternate settings and releases the interface; a failed release can be retried. `Device.Close` waits for that release. Linux reports contention rather than detaching a bound kernel driver. |
 | Control transfers | Yes | Synchronous, deadline-bounded endpoint-zero transfers. |
 | Bulk transfers | Yes | Synchronous, deadline-bounded bulk IN and OUT transfers. |
@@ -40,7 +40,7 @@ for the host setup required by physical Linux USB operations.
 | FT232H | Yes | Port A; full MPSSE and SWD HIL on Linux and macOS. |
 | FT2232H | Yes | Ports A and B using the standard H-series interface and endpoint layout. |
 | FT4232H | Yes | Ports A and B using the standard H-series interface and endpoint layout. |
-| Explicit clock | Yes | Divisor selects a rate no faster than requested; examples use 400 kHz. |
+| Explicit clock | Yes | `MaxClockHz` is a ceiling; `Channel.ClockHz` reports the attainable configured rate. Examples request 400 kHz. |
 | MPSSE lifecycle | Yes | Claim, reset, synchronize, configure pins/clock, reset bit mode, set the latency timer to 16 ms, purge the receive and transmit paths, release, and close. |
 | SWD bit streams | Yes | Direction-safe output and input runs with exact bulk exchange. |
 | JTAG | No | No public JTAG engine or FTDI JTAG interface exists. |

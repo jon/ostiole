@@ -35,12 +35,7 @@ func TestIdentifyCortexMOverFTDI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	channel, err := ftdi.Open(ctx, device, ftdi.Config{
-		ClockHz:   400_000,
-		ProductID: devices[0].PID,
-		Port:      ftdi.PortA,
-		Interface: ftdi.SWD,
-	})
+	channel, err := ftdi.Open(ctx, device, ftdi.Config{Port: ftdi.PortA, MaxClockHz: 400_000})
 	if err != nil {
 		t.Fatal(errors.Join(err, device.Close()))
 	}

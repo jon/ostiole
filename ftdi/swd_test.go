@@ -10,11 +10,7 @@ func TestChannelExecutesDirectionSafeSWDRuns(t *testing.T) {
 	raw := &fakeUSBDevice{
 		readData: [][]byte{{0x01, 0x60, 0b10100000}},
 	}
-	channel, err := newChannel(raw, Config{
-		ProductID: PIDFT232H,
-		Port:      PortA,
-		Interface: SWD,
-	})
+	channel, err := newChannel(raw, Config{Port: PortA, MaxClockHz: 400_000})
 	if err != nil {
 		t.Fatal(err)
 	}

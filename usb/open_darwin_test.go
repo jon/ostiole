@@ -59,6 +59,9 @@ func TestDarwinOpenRevalidatesBeforeAndAfterOpening(t *testing.T) {
 	if len(host.openedAt) != 1 || host.openedAt[0] != attachment.location {
 		t.Fatalf("opened locations = %#v", host.openedAt)
 	}
+	if got, want := device.Identity(), attachment.info(); got != want {
+		t.Fatalf("Identity() = %+v, want %+v", got, want)
+	}
 	if err := device.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}

@@ -14,6 +14,7 @@ import (
 // Device is one open Linux usbfs attachment.
 type Device struct {
 	file      *os.File
+	identity  DeviceInfo
 	ioctl     ioctlFunc
 	claim     *ClaimedInterface
 	closeOnce sync.Once
@@ -42,7 +43,15 @@ func (e *Enumerator) Open(ctx context.Context, info DeviceInfo) (*Device, error)
 	if err := e.revalidate(ctx, info); err != nil {
 		return nil, errors.Join(err, file.Close())
 	}
-	return &Device{file: file}, nil
+	return &Device{file: file, identity: info}, nil
+}
+
+// Identity returns the attachment identity established by Open.
+func (d *Device) Identity() DeviceInfo {
+	if d == nil {
+		return DeviceInfo{}
+	}
+	return d.identity
 }
 
 func (e *Enumerator) revalidate(ctx context.Context, expected DeviceInfo) error {
