@@ -14,7 +14,7 @@ func TestBankedDPAccessPreservesSELECTFields(t *testing.T) {
 	if err := target.SetDPRegister(dap.DLCR, dlcr); err != nil {
 		t.Fatal(err)
 	}
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func equalRequests(got, want []swdsim.Request) bool {
 
 func TestBankedDPAccessRejectsUnsupportedVersionWithoutTraffic(t *testing.T) {
 	target := newWaitTarget()
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestBankedDPAccessRejectsUnsupportedVersionWithoutTraffic(t *testing.T) {
 func TestBankedDPAccessRejectsDPv3WithoutTraffic(t *testing.T) {
 	target := newWaitTarget()
 	target.dpidrOverride = 0x2ba03477
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestBankedDPAccessAllowsMinimalDebugPort(t *testing.T) {
 	if err := target.SetDPRegister(dap.DLCR, dlcr); err != nil {
 		t.Fatal(err)
 	}
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestBankedDPAccessAllowsMinimalDebugPort(t *testing.T) {
 func TestLogicalDPAccessRejectsReadOnlyWriteWithoutTraffic(t *testing.T) {
 	target := newWaitTarget()
 	target.dpidrOverride = 0x2ba02477
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestLogicalDPAccessRejectsReadOnlyWriteWithoutTraffic(t *testing.T) {
 
 func TestLogicalDPAccessRejectsUnsupportedFramingBeforeTraffic(t *testing.T) {
 	target := newWaitTarget()
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}

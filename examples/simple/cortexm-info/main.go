@@ -52,10 +52,7 @@ func readIdentity(ctx context.Context) (_ identity, err error) {
 		return identity{}, err
 	}
 	conn := swd.New(ch)
-	if err := conn.JTAGToSWD(ctx); err != nil {
-		return identity{}, errors.Join(err, ch.Close())
-	}
-	dp := dap.NewSWDP(conn)
+	dp := dap.NewDebugPort(conn)
 	var mem *dap.MemAP
 	defer func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
@@ -72,7 +69,7 @@ func readIdentity(ctx context.Context) (_ identity, err error) {
 	if err != nil {
 		return identity{}, err
 	}
-	mem, err = dap.NewMemAP(ctx, dp, accessPort)
+	mem, err = dap.OpenMemAP(ctx, dp, accessPort)
 	if err != nil {
 		return identity{}, err
 	}

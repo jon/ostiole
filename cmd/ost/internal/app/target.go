@@ -50,7 +50,7 @@ func identifyCortexM(ctx context.Context, selection dap.APSel) (_ targetIdentity
 	if err != nil {
 		return targetIdentity{}, err
 	}
-	session.memory, err = dap.NewMemAP(ctx, session.port, selection)
+	session.memory, err = dap.OpenMemAP(ctx, session.port, selection)
 	if err != nil {
 		return targetIdentity{}, err
 	}

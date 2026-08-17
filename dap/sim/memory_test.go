@@ -81,10 +81,7 @@ func TestMEMAPDoesNotModelTargetWrites(t *testing.T) {
 func enteredDAP(t *testing.T, target *dapsim.Target) *dap.DebugPort {
 	t.Helper()
 	conn := swd.New(swdsim.New(target))
-	if err := conn.JTAGToSWD(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	dp := dap.NewSWDP(conn)
+	dp := dap.NewDebugPort(conn)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}

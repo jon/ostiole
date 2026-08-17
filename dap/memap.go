@@ -35,9 +35,10 @@ type MemAP struct {
 	restoreTAR   bool
 }
 
-// NewMemAP validates sel and saves the state changed by target reads.
-// The debug port must be connected and must not have cleanup pending.
-func NewMemAP(ctx context.Context, dp *DebugPort, sel APSel) (*MemAP, error) {
+// OpenMemAP validates sel and saves the state changed by target reads. It
+// performs AP traffic. A returned MemAP must be paired with MemAP.Release. The
+// debug port must be connected and must not have cleanup pending.
+func OpenMemAP(ctx context.Context, dp *DebugPort, sel APSel) (*MemAP, error) {
 	selection, err := validateAPSel(sel)
 	if err != nil {
 		return nil, err

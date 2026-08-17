@@ -25,6 +25,17 @@ type dapSession struct {
 }
 
 func openSWD(ctx context.Context) (*swdSession, error) {
+	session, err := openSWDTransport(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := session.connection.JTAGToSWD(ctx); err != nil {
+		return nil, errors.Join(err, session.close())
+	}
+	return session, nil
+}
+
+func openSWDTransport(ctx context.Context) (*swdSession, error) {
 	enumerator := usb.New()
 	devices, err := enumerator.List(ctx, ftdi.SupportedDevices())
 	if err != nil {
@@ -42,9 +53,6 @@ func openSWD(ctx context.Context) (*swdSession, error) {
 		return nil, errors.Join(err, device.Close())
 	}
 	connection := swd.New(channel)
-	if err := connection.JTAGToSWD(ctx); err != nil {
-		return nil, errors.Join(err, channel.Close())
-	}
 	return &swdSession{channel: channel, connection: connection}, nil
 }
 
@@ -56,11 +64,11 @@ func (s *swdSession) close() error {
 }
 
 func openDAP(ctx context.Context) (*dapSession, error) {
-	wire, err := openSWD(ctx)
+	wire, err := openSWDTransport(ctx)
 	if err != nil {
 		return nil, err
 	}
-	session := &dapSession{wire: wire, port: dap.NewSWDP(wire.connection)}
+	session := &dapSession{wire: wire, port: dap.NewDebugPort(wire.connection)}
 	session.identity, err = session.port.Connect(ctx)
 	if err != nil {
 		return nil, errors.Join(err, session.close())

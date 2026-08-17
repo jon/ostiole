@@ -19,10 +19,10 @@ data-register write can write target memory.
 | List USB attachments understood by the FTDI driver | `usb.New`, `ftdi.SupportedDevices`, `Enumerator.List` | `ost ftdi list` |
 | Open one FTDI MPSSE SWD port | `Enumerator.Open`, `ftdi.Open` | `examples/trivial/swd-dpidr` |
 | Enter SWD mode or transfer one DP/AP register | `swd.New`, `Conn.JTAGToSWD`, `Conn.ReadDP`, `Conn.WriteDP`, `Conn.ReadAP`, `Conn.WriteAP` | `examples/trivial/swd-dpidr` |
-| Decode a DPIDR and manage SW-DP power | `dap.NewSWDP`, `DebugPort.Connect`, `DebugPort.Release` | `ost dap dp id` |
+| Enter SWD, decode a DPIDR, and manage SW-DP power | `dap.NewDebugPort`, `DebugPort.Connect`, `DebugPort.Release` | `ost dap dp id` |
 | Identify one explicitly selected AP | `DebugPort.ReadAPIDR`, `DecodeAPIDR` | `examples/simple/ap-id` |
 | Access another AP register by its full ADIv5 address | `DebugPort.ReadRawAP`, `DebugPort.WriteRawAP` | Package tests |
-| Read one aligned target word through a MEM-AP | `dap.NewMemAP`, `MemAP.ReadWord`, `MemAP.Release` | `examples/simple/cortexm-info` |
+| Read one aligned target word through a MEM-AP | `dap.OpenMemAP`, `MemAP.ReadWord`, `MemAP.Release` | `examples/simple/cortexm-info` |
 | Identify a Cortex-M through any compatible word reader | `cortexm.Identify` | `examples/simple/cortexm-info` |
 | Test SWD and DAP behavior without hardware | `swd/sim`, `dap/sim` | Package tests |
 
@@ -59,20 +59,22 @@ the specification details which are easiest to misread.
 
 Use `dap.DebugPort` when the application needs debug-port identity, power
 ownership, bank selection, or AP access. Call `Connect` before AP operations
-and `Release` afterward. Give the debug port exclusive, serialized use of its
-`swd.Conn`; direct transfers on that connection can invalidate cached DAP
-state. `ReadDP` and `WriteDP` take logical ADIv5 register names and manage
-DPBANKSEL without exposing a current-bank API. `NewAPSel` constructs an AP
-selector whose zero value is invalid. `APSel.Address` combines it with a
-complete eight-bit register address; the resulting `APAddress` also has an
-invalid zero value. `ReadAPIDR` reads and decodes the common read-only AP
-identity. Raw AP access rejects an invalid or unaligned address before traffic.
-Use it only when the caller understands the selected AP class and will restore
-any state the access changes. A raw MEM-AP data-register write can write target
-memory. This layer owns posted AP read and write completion and retries only the
-physical request that returned WAIT. A raw AP read or write which completes, or
-might have completed, invalidates existing `MemAP` values. After an extended AP
-stall, `dap.DebugPort` issues DAPABORT; existing
+and `Release` afterward. `Connect` performs the SWD entry sequence; do not enter
+the connection separately. Give the debug port exclusive, serialized use of
+its `swd.Conn`; direct transfers on that connection can invalidate cached DAP
+state. DP, AP, transaction, and MEM-AP operations require an active connection.
+`ReadDP` and `WriteDP` take logical ADIv5 register names and manage DPBANKSEL
+without exposing a current-bank API. `NewAPSel` constructs an AP selector whose
+zero value is invalid. `APSel.Address` combines it with a complete eight-bit
+register address; the resulting `APAddress` also has an invalid zero value.
+`ReadAPIDR` reads and decodes the common read-only AP identity. Raw AP access
+rejects an invalid or unaligned address before traffic. Use it only when the
+caller understands the selected AP class and will restore any state the access
+changes. A raw MEM-AP data-register write can write target memory. This layer
+owns posted AP read and write completion and retries only the physical request
+that returned WAIT. A raw AP read or write which completes, or might have
+completed, invalidates existing `MemAP` values. After an extended AP stall,
+`dap.DebugPort` issues DAPABORT; existing
 `dap.MemAP` values reject further reads, though `dap.MemAP.Release` still
 attempts to restore their saved state. `Connect` reads DPIDR, clears supported
 sticky conditions with ABORT,
@@ -100,7 +102,7 @@ available after a failure; a clocked operation whose completion is uncertain
 reports `ErrIndeterminate`, and later operations report `ErrNotExecuted`. A
 transaction acquires no additional state and does not change the release order.
 
-Use `dap.MemAP` when the application needs the currently supported target
+Use `dap.OpenMemAP` when the application needs the currently supported target
 memory operation: one aligned 32-bit read through an explicitly selected
 MEM-AP. Keep the debug port connected until `MemAP.Release` restores CSW and
 TAR. Calls sharing a MEM-AP, its debug port, or their SWD connection must be
@@ -116,7 +118,7 @@ A complete Cortex-M identity composition acquires and releases state in this
 order:
 
 ```text
-acquire: USB device → FTDI channel → SWD mode → debug port → MEM-AP
+acquire: USB device → FTDI channel → debug port (enters SWD) → MEM-AP
 release: MEM-AP → debug port → FTDI channel
 ```
 

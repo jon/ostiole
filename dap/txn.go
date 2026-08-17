@@ -63,7 +63,8 @@ type Txn struct {
 	committed bool
 }
 
-// NewTxn returns an empty transaction for dp.
+// NewTxn returns an empty transaction for dp. Commit requires an active
+// connection.
 func (dp *DebugPort) NewTxn() *Txn {
 	return &Txn{dp: dp}
 }

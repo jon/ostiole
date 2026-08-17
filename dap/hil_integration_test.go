@@ -15,8 +15,9 @@ import (
 )
 
 type ackCountingWire struct {
-	inner  swd.Wire
-	counts [8]int
+	inner   swd.Wire
+	counts  [8]int
+	entries int
 }
 
 type parityFaultWire struct {
@@ -36,6 +37,9 @@ func (w *parityFaultWire) SWDIO(ctx context.Context, direction, output []byte, b
 
 func (w *ackCountingWire) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
 	input, err := w.inner.SWDIO(ctx, direction, output, bits)
+	if err == nil && bits == 136 {
+		w.entries++
+	}
 	if err == nil && bits == 12 && len(input) >= 2 {
 		var ack byte
 		for bit := range 3 {
@@ -84,9 +88,6 @@ func openHardwareDebugPortWithFaultWire(t *testing.T, ctx context.Context) (*dap
 	wire := &ackCountingWire{inner: ch}
 	faultWire := &parityFaultWire{inner: wire}
 	conn := swd.New(faultWire)
-	if err := conn.JTAGToSWD(ctx); err != nil {
-		t.Fatal(err)
-	}
 	t.Cleanup(func() {
 		invalid := 0
 		for ack, count := range wire.counts {
@@ -94,8 +95,8 @@ func openHardwareDebugPortWithFaultWire(t *testing.T, ctx context.Context) (*dap
 				invalid += count
 			}
 		}
-		t.Logf("physical ACKs: OK=%d WAIT=%d FAULT=%d invalid=%d",
+		t.Logf("SWD entries=%d physical ACKs: OK=%d WAIT=%d FAULT=%d invalid=%d", wire.entries,
 			wire.counts[0b001], wire.counts[0b010], wire.counts[0b100], invalid)
 	})
-	return dap.NewSWDP(conn), faultWire
+	return dap.NewDebugPort(conn), faultWire
 }

@@ -27,7 +27,7 @@ func (w *readParityWire) SWDIO(ctx context.Context, direction, output []byte, bi
 func TestDebugPortTransactionResolvesOrderedOperations(t *testing.T) {
 	target := newWaitTarget()
 	addAP(t, target, 0, 0x24770011)
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestDebugPortTransactionResolvesOrderedOperations(t *testing.T) {
 
 func TestDebugPortTransactionSettlesSELECTBeforeBankedDPAccess(t *testing.T) {
 	target := newWaitTarget()
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestDebugPortTransactionSettlesSELECTBeforeBankedDPAccess(t *testing.T) {
 
 func TestDebugPortTransactionDistinguishesBankIndependentAndBankZero(t *testing.T) {
 	target := newWaitTarget()
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestDebugPortTransactionPreservesConfirmedSELECTAfterABORT(t *testing.T) {
 	if err := target.SetDPRegister(dap.DLCR, dlcr); err != nil {
 		t.Fatal(err)
 	}
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestDebugPortTransactionPreservesConfirmedSELECTAfterABORT(t *testing.T) {
 func TestDebugPortTransactionValidatesBeforeTraffic(t *testing.T) {
 	target := newWaitTarget()
 	addAP(t, target, 0, 0x24770011)
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestDebugPortTransactionValidatesBeforeTraffic(t *testing.T) {
 func TestDebugPortTransactionAttributesAccessPreflightFailure(t *testing.T) {
 	target := newWaitTarget()
 	addAP(t, target, 0, 0x24770011)
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 
 	before := len(target.requests)
 	txn := dp.NewTxn()
@@ -194,11 +194,11 @@ func TestDebugPortTransactionAttributesAccessPreflightFailure(t *testing.T) {
 	if got := len(target.requests); got != before {
 		t.Fatalf("requests after failed access preflight = %d, want %d", got, before)
 	}
-	if _, err := prefix.Value(); err != dap.ErrNotExecuted {
-		t.Fatalf("prefix result error = %v, want not executed", err)
+	if _, err := prefix.Value(); err == nil || errors.Is(err, dap.ErrNotExecuted) {
+		t.Fatalf("prefix result error = %v, want connection error", err)
 	}
-	if _, err := inaccessible.Value(); err == nil || errors.Is(err, dap.ErrNotExecuted) {
-		t.Fatalf("inaccessible AP result error = %v, want connection error", err)
+	if _, err := inaccessible.Value(); err != dap.ErrNotExecuted {
+		t.Fatalf("inaccessible AP result error = %v, want not executed", err)
 	}
 	if _, err := suffix.Value(); err != dap.ErrNotExecuted {
 		t.Fatalf("suffix result error = %v, want not executed", err)
@@ -208,7 +208,7 @@ func TestDebugPortTransactionAttributesAccessPreflightFailure(t *testing.T) {
 func TestDebugPortTransactionRejectsReadOnlyDPWriteBeforeTraffic(t *testing.T) {
 	target := newWaitTarget()
 	target.dpidrOverride = 0x2ba02477
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +246,7 @@ func TestDebugPortTransactionRejectsReadOnlyDPWriteBeforeTraffic(t *testing.T) {
 
 func TestDebugPortTransactionRejectsUnknownDPRegistersBeforeTraffic(t *testing.T) {
 	target := newWaitTarget()
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 
 	before := len(target.requests)
 	txn := dp.NewTxn()
@@ -268,7 +268,7 @@ func TestDebugPortTransactionRejectsUnknownDPRegistersBeforeTraffic(t *testing.T
 
 func TestDebugPortTransactionRejectsUnsupportedFramingBeforeTraffic(t *testing.T) {
 	target := newWaitTarget()
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +305,7 @@ func TestDebugPortTransactionRejectsUnsupportedFramingBeforeTraffic(t *testing.T
 func TestDebugPortTransactionRejectsDPv3BankWithoutTraffic(t *testing.T) {
 	target := newWaitTarget()
 	target.dpidrOverride = 0x2ba03477
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +327,7 @@ func TestDebugPortTransactionRejectsDPv3BankWithoutTraffic(t *testing.T) {
 func TestDebugPortTransactionKeepsConfirmedPrefix(t *testing.T) {
 	target := newWaitTarget()
 	addAP(t, target, 0, 0x24770011)
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +352,7 @@ func TestDebugPortTransactionKeepsConfirmedPrefix(t *testing.T) {
 func TestDebugPortTransactionDoesNotConfirmAbandonedDPWrite(t *testing.T) {
 	target := newWaitTarget()
 	addAP(t, target, 0, 0x24770011)
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -379,7 +379,7 @@ func TestDebugPortTransactionDoesNotConfirmAbandonedDPWrite(t *testing.T) {
 
 func TestDebugPortTransactionSettlesDPWriteThroughRDBUFF(t *testing.T) {
 	target := newWaitTarget()
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -400,7 +400,7 @@ func TestDebugPortTransactionSettlesDPWriteThroughRDBUFF(t *testing.T) {
 func TestDebugPortTransactionKeepsFaultDeterminateWhenCleanupLosesFraming(t *testing.T) {
 	target := newWaitTarget()
 	addAP(t, target, 0, 0x24770011)
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -428,7 +428,7 @@ func TestDebugPortTransactionKeepsFaultDeterminateWhenCleanupLosesFraming(t *tes
 func TestDebugPortTransactionKeepsWAITDeterminateWhenDAPABORTFails(t *testing.T) {
 	target := newWaitTarget()
 	addAP(t, target, 0, 0x24770011)
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -455,7 +455,7 @@ func TestDebugPortTransactionKeepsWAITDeterminateWhenDAPABORTFails(t *testing.T)
 
 func TestDebugPortTransactionSettlesPreviousImmediateDPWriteBeforeTraffic(t *testing.T) {
 	target := newWaitTarget()
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -484,11 +484,11 @@ func TestDebugPortTransactionSettlesPreviousImmediateDPWriteBeforeTraffic(t *tes
 func TestDebugPortTransactionDoesNotIssueDAPABORTForDPWriteBarrierWAIT(t *testing.T) {
 	target := newWaitTarget()
 	addMEMAP(t, target, 0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	mem, err := dap.NewMemAP(t.Context(), dp, apSel(0))
+	mem, err := dap.OpenMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,11 +516,11 @@ func TestDebugPortTransactionDoesNotIssueDAPABORTForDPWriteBarrierWAIT(t *testin
 func TestDebugPortTransactionDoesNotIssueDAPABORTForSELECTBarrierWAIT(t *testing.T) {
 	target := newWaitTarget()
 	addMEMAP(t, target, 0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	mem, err := dap.NewMemAP(t.Context(), dp, apSel(0))
+	mem, err := dap.OpenMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -548,11 +548,11 @@ func TestDebugPortTransactionDoesNotIssueDAPABORTForSELECTBarrierWAIT(t *testing
 func TestDebugPortImmediateRDBUFFDoesNotIssueDAPABORTForDPWriteWAIT(t *testing.T) {
 	target := newWaitTarget()
 	addMEMAP(t, target, 0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	mem, err := dap.NewMemAP(t.Context(), dp, apSel(0))
+	mem, err := dap.OpenMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -578,11 +578,11 @@ func TestDebugPortImmediateRDBUFFDoesNotIssueDAPABORTForDPWriteWAIT(t *testing.T
 func TestDebugPortTransactionDoesNotInvalidateAPForDPWriteBarrierFAULT(t *testing.T) {
 	target := newWaitTarget()
 	addMEMAP(t, target, 0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	mem, err := dap.NewMemAP(t.Context(), dp, apSel(0))
+	mem, err := dap.OpenMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -606,11 +606,11 @@ func TestDebugPortTransactionDoesNotInvalidateAPForDPWriteBarrierFAULT(t *testin
 func TestDebugPortTransactionKeepsRejectedAPWriteDeterminate(t *testing.T) {
 	target := newWaitTarget()
 	addMEMAP(t, target, 0, 0x24770011, map[uint32]uint32{0: 1})
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	mem, err := dap.NewMemAP(t.Context(), dp, apSel(0))
+	mem, err := dap.OpenMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -644,11 +644,11 @@ func TestDebugPortTransactionKeepsRejectedAPWriteDeterminate(t *testing.T) {
 func TestDebugPortTransactionDoesNotInvalidateAPForRejectedDAPABORT(t *testing.T) {
 	target := newWaitTarget()
 	addMEMAP(t, target, 0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	mem, err := dap.NewMemAP(t.Context(), dp, apSel(0))
+	mem, err := dap.OpenMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -672,11 +672,11 @@ func TestDebugPortTransactionDoesNotInvalidateAPForRejectedDAPABORT(t *testing.T
 func TestDebugPortTransactionInvalidatesAPForIndeterminateDAPABORT(t *testing.T) {
 	target := newWaitTarget()
 	addMEMAP(t, target, 0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	mem, err := dap.NewMemAP(t.Context(), dp, apSel(0))
+	mem, err := dap.OpenMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -699,14 +699,11 @@ func TestDebugPortTransactionInvalidatesAPWhenDAPABORTBarrierDataParityFails(t *
 	addMEMAP(t, target, 0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
 	wire := &readParityWire{inner: swdsim.New(target)}
 	conn := swd.New(wire)
-	if err := conn.JTAGToSWD(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	dp := dap.NewSWDP(conn)
+	dp := dap.NewDebugPort(conn)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	mem, err := dap.NewMemAP(t.Context(), dp, apSel(0))
+	mem, err := dap.OpenMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -727,10 +724,7 @@ func TestDebugPortTransactionSettlesDPWriteWhenBarrierDataParityFails(t *testing
 	target := newWaitTarget()
 	wire := &readParityWire{inner: swdsim.New(target)}
 	conn := swd.New(wire)
-	if err := conn.JTAGToSWD(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	dp := dap.NewSWDP(conn)
+	dp := dap.NewDebugPort(conn)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -762,10 +756,7 @@ func TestDebugPortTransactionTreatsSELECTBarrierDataParityAsDeterminate(t *testi
 	target := newWaitTarget()
 	wire := &readParityWire{inner: swdsim.New(target)}
 	conn := swd.New(wire)
-	if err := conn.JTAGToSWD(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	dp := dap.NewSWDP(conn)
+	dp := dap.NewDebugPort(conn)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -797,10 +788,7 @@ func TestDebugPortTransactionSettlesPreviousDPWriteWhenBarrierDataParityFails(t 
 	target := newWaitTarget()
 	wire := &readParityWire{inner: swdsim.New(target)}
 	conn := swd.New(wire)
-	if err := conn.JTAGToSWD(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	dp := dap.NewSWDP(conn)
+	dp := dap.NewDebugPort(conn)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -835,10 +823,7 @@ func TestDebugPortImmediateRDBUFFSettlesDPWriteWhenDataParityFails(t *testing.T)
 	target := newWaitTarget()
 	wire := &readParityWire{inner: swdsim.New(target)}
 	conn := swd.New(wire)
-	if err := conn.JTAGToSWD(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	dp := dap.NewSWDP(conn)
+	dp := dap.NewDebugPort(conn)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -869,10 +854,7 @@ func TestDebugPortTransactionCompletesAPWriteWhenBarrierDataParityFails(t *testi
 	addAP(t, target, 0, 0x24770011)
 	wire := &readParityWire{inner: swdsim.New(target)}
 	conn := swd.New(wire)
-	if err := conn.JTAGToSWD(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	dp := dap.NewSWDP(conn)
+	dp := dap.NewDebugPort(conn)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -898,7 +880,7 @@ func TestDebugPortTransactionCompletesAPWriteWhenBarrierDataParityFails(t *testi
 func TestDebugPortTransactionAttributesRDBUFFFailure(t *testing.T) {
 	target := newWaitTarget()
 	addAP(t, target, 0, 0x24770011)
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -928,7 +910,7 @@ func TestDebugPortTransactionAttributesRDBUFFFailure(t *testing.T) {
 func TestDebugPortTransactionMarksAPWriteIndeterminateWhenBarrierFails(t *testing.T) {
 	target := newWaitTarget()
 	addAP(t, target, 0, 0x24770011)
-	dp := enteredDP(t, target)
+	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -960,10 +942,7 @@ func TestDebugPortTransactionMarksAmbiguousOperation(t *testing.T) {
 	transferErr := errors.New("injected transaction transport failure")
 	wire := &cleanupFailWire{inner: swdsim.New(target), err: transferErr, failBits: 42}
 	conn := swd.New(wire)
-	if err := conn.JTAGToSWD(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	dp := dap.NewSWDP(conn)
+	dp := dap.NewDebugPort(conn)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}

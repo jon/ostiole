@@ -75,7 +75,7 @@ specification notes, and current physical observation.
 | Capability | Implemented | Validation and boundary |
 | --- | --- | --- |
 | DPIDR decoding | Yes | Validates the constant bit and exposes raw identity fields. |
-| SW-DP connection | Yes | `Connect` reads DPIDR, clears supported sticky conditions with ABORT, writes zero to SELECT once without retrying, confirms the write through RDBUFF, then reads CTRL/STAT and rejects ORUNDETECT. It requests acknowledged power, records newly requested power bits before writing them, and performs bounded cleanup after failed setup. Failed cleanup remains retryable through `Release`. |
+| SW-DP connection | Yes | `Connect` performs JTAG-to-SWD entry, reads DPIDR, clears supported sticky conditions with ABORT, writes zero to SELECT once without retrying, confirms the write through RDBUFF, then reads CTRL/STAT and rejects ORUNDETECT. It requests acknowledged power, records newly requested power bits before writing them, and performs bounded cleanup after failed setup. `Connect` attempts bounded repair after entry or later setup fails; failed cleanup remains retryable through `Release`. |
 | SW-DP release | Yes | Restores SELECT to bank zero, settles that write through RDBUFF, and clears only power requests acquired by the connection. If framing is unknown, cleanup first performs bounded SWD re-entry and verifies DPIDR against the connection being cleaned up. Failed release can be retried and blocks ordinary operations in the meantime. |
 | DP register access | Yes | Logical ADIv5 registers distinguish operations which share a wire offset, including DPIDR from ABORT and SELECT from RESEND. Access selects the required bank while preserving known AP fields. Wrong directions, unknown registers, unavailable DP versions, and writes requiring unsupported framing fail before traffic. DAPABORT invalidates AP-derived state. Access is blocked while cleanup is pending. |
 | AP identity | Yes | `NewAPSel` constructs an AP selector whose zero value is invalid. `ReadAPIDR` reads the common read-only IDR, and `DecodeAPIDR` exposes its ADIv5 fields. |
@@ -84,13 +84,14 @@ specification notes, and current physical observation.
 | WAIT handling | Yes | Retries only the physical request which returned WAIT, and only after confirming ORUNDETECT is clear. A clean FAULT ends retrying without losing framing. Extended AP stalls use DAPABORT. Failed WAIT cleanup or a later retry error leaves framing unknown, invalidates AP-derived state, and blocks all traffic except cleanup. |
 | FAULT recovery | Yes | A FAULT is never replayed. When simple bank-zero framing is known, the error includes the captured CTRL/STAT value and DAP clears only the sticky conditions reported there, then verifies that they are clear. A definitely abandoned AP write does not invalidate MEM-AP state; an uncertain effect does. Failed cleanup preserves the FAULT and blocks ordinary traffic until release repairs the port. |
 | AP enumeration | No | Callers must select an access port explicitly. |
-| MEM-AP validation | Yes | Rejects an absent AP or an AP whose IDR is not a MEM-AP. |
+| MEM-AP acquisition | Yes | `OpenMemAP` performs AP traffic, rejects an absent or non-MEM AP, and snapshots the state which `Release` restores. |
 | Target word read | Yes | One aligned 32-bit word with address increment disabled. |
 | MEM-AP restoration | Yes | Saves and restores CSW and TAR; failed restoration remains retryable. MEM-AP restoration remains available while debug-port cleanup is pending. If framing is unknown, `Release` re-enters SWD before restoration. If DAPABORT interrupts cleanup, the next `Release` retries both saved values. The invalidated handle remains invalid. |
 | Managed target-memory writes | No | `MemAP` has no write operation. `WriteRawAP` is an unmanaged escape hatch and can write target memory through a class-specific data register. |
 | Block or sub-word access | No | No burst, auto-increment, 8-bit, or 16-bit operation exists. |
 | ADIv6 or JTAG-DP | No | The public implementation is the current minimal ADIv5 SW-DP path. |
 | Behavioral simulation | Yes | DP identity/power, posted AP access, and configured target words. AP fixtures take `dap.APSel` values and reject duplicate selectors, zero APIDRs, non-MEM-AP identities passed to `AddMEMAP`, and unaligned target-word addresses. |
+| DAP-owned SWD entry | HIL | The FT232H/Cortex-M AP, transaction, and MEM-AP tests each counted one entry performed by `Connect`; the reconnect test counted two. |
 | AP and MEM-AP reads | HIL | Opt-in FTDI integration tests against an explicitly selected AP. A separately gated test corrupts write parity, observes a target-generated FAULT with WDATAERR, and verifies recovery. |
 
 Connecting and reading a MEM-AP changes volatile debug state even though it

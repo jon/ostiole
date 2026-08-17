@@ -14,10 +14,10 @@ func TestImmediateDebugPortAccess(t *testing.T) {
 	ctx := context.Background()
 	target := sim.New(0x2ba01477)
 	conn := swd.New(swdsim.New(target))
-	if err := conn.JTAGToSWD(ctx); err != nil {
+	dp := dap.NewDebugPort(conn)
+	if _, err := dp.Connect(ctx); err != nil {
 		t.Fatal(err)
 	}
-	dp := dap.NewSWDP(conn)
 
 	value, err := dp.ReadDP(ctx, dap.DPIDR)
 	if err != nil {
@@ -40,8 +40,24 @@ func TestImmediateDebugPortAccess(t *testing.T) {
 	}
 }
 
+func TestDebugPortOperationsRequireConnect(t *testing.T) {
+	target := newWaitTarget()
+	wire := &entryFailureWire{inner: swdsim.New(target)}
+	dp := dap.NewDebugPort(swd.New(wire))
+	before := wire.calls
+	if _, err := dp.ReadDP(t.Context(), dap.DPIDR); err == nil {
+		t.Fatal("ReadDP() succeeded before Connect()")
+	}
+	if err := dp.WriteDP(t.Context(), dap.ABORT, 0); err == nil {
+		t.Fatal("WriteDP() succeeded before Connect()")
+	}
+	if wire.calls != before {
+		t.Fatalf("operations before Connect() sent %d wire calls", wire.calls-before)
+	}
+}
+
 func TestNilDebugPortAccess(t *testing.T) {
-	dp := dap.NewSWDP(nil)
+	dp := dap.NewDebugPort(nil)
 	if _, err := dp.ReadDP(context.Background(), dap.DPIDR); err == nil {
 		t.Fatal("ReadDP() succeeded without an SWD connection")
 	}

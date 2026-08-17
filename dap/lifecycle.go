@@ -18,13 +18,12 @@ const (
 	powerRequests = debugPowerRequest | systemPowerRequest
 )
 
-// Connect validates the SW-DP and acquires its debug power requests.
-//
-// The SWD connection must already be in SWD protocol mode. Release restores
-// the request bits acquired by this client. If connection setup fails,
-// Connect attempts bounded cleanup before returning the original error. A
-// cleanup failure is joined to that error; Release may then be retried, while
-// other DP and AP operations remain blocked.
+// Connect enters SWD, validates the SW-DP, and acquires its debug power
+// requests. Release restores the request bits acquired by this client. If
+// connection setup fails, Connect attempts bounded cleanup before returning
+// the original error. A cleanup failure is joined to that error; Release may
+// then be retried, while other DP, AP, transaction, and MEM-AP operations
+// remain blocked.
 func (dp *DebugPort) Connect(ctx context.Context) (DPIDRInfo, error) {
 	if dp == nil || dp.conn == nil {
 		return DPIDRInfo{}, errors.New("dap: nil SWD connection")
@@ -36,6 +35,9 @@ func (dp *DebugPort) Connect(ctx context.Context) (DPIDRInfo, error) {
 		return DPIDRInfo{}, errors.New("dap: debug-port cleanup is pending")
 	}
 	dp.beginConnect()
+	if err := dp.enterSWD(ctx); err != nil {
+		return DPIDRInfo{}, dp.failConnect(fmt.Errorf("dap: enter SWD protocol: %w", err))
+	}
 	info, state, err := dp.initialize(ctx)
 	if err != nil {
 		return DPIDRInfo{}, dp.failConnect(err)
@@ -144,8 +146,7 @@ func (dp *DebugPort) Release(ctx context.Context) error {
 
 func (dp *DebugPort) reenter(ctx context.Context) error {
 	dp.state.beginProtocolEntry()
-	if err := dp.conn.JTAGToSWD(ctx); err != nil {
-		dp.state.loseFraming()
+	if err := dp.enterSWD(ctx); err != nil {
 		return err
 	}
 	info, err := dp.identify(ctx)
@@ -173,6 +174,14 @@ func (dp *DebugPort) reenter(ctx context.Context) error {
 	}
 	if state&overrunDetect != 0 {
 		return errors.New("dap: CTRL/STAT.ORUNDETECT is enabled; overrun responses are not supported")
+	}
+	return nil
+}
+
+func (dp *DebugPort) enterSWD(ctx context.Context) error {
+	if err := dp.conn.JTAGToSWD(ctx); err != nil {
+		dp.state.loseFraming()
+		return err
 	}
 	return nil
 }
