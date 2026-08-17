@@ -56,6 +56,9 @@ func (e *Enumerator) List(ctx context.Context, filters []DeviceFilter) ([]Device
 	if e.inventory == nil {
 		return nil, errors.New("usb: uninitialized enumerator")
 	}
+	if err := validateFilters(filters); err != nil {
+		return nil, err
+	}
 	attachments, err := e.inventory.snapshot()
 	if err != nil {
 		return nil, fmt.Errorf("usb: read USB inventory: %w", err)
@@ -81,8 +84,7 @@ func (e *Enumerator) List(ctx context.Context, filters []DeviceFilter) ([]Device
 
 func matchesAnyDarwin(info DeviceInfo, filters []DeviceFilter) bool {
 	for _, filter := range filters {
-		if info.VID == filter.VID &&
-			(filter.PID == 0 || info.PID == filter.PID) {
+		if filter.matches(info) {
 			return true
 		}
 	}

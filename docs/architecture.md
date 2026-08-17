@@ -52,8 +52,9 @@ framing.
 ## Discovery and opening
 
 `usb.New` constructs access to the host USB inventory. `List` returns a
-snapshot filtered by vendor and product identifiers without opening a device.
-The caller selects exactly one `usb.DeviceInfo` and passes it back to `Open`.
+snapshot matching either one exact vendor/product pair or every product from a
+vendor, without opening a device. The caller selects exactly one
+`usb.DeviceInfo` and passes it back to `Open`.
 
 `Open` revalidates the bus address and USB identity before and after acquiring
 the attachment. A device that disappeared or changed identity returns
