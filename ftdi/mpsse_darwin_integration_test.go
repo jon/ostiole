@@ -4,6 +4,7 @@ package ftdi_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -39,7 +40,7 @@ func TestHILDarwinFT232HMPSSEHandshake(t *testing.T) {
 		Interface: ftdi.SWD,
 	})
 	if err != nil {
-		t.Fatalf("prepare FTDI MPSSE port A: %v", err)
+		t.Fatalf("prepare FTDI MPSSE port A: %v", errors.Join(err, device.Close()))
 	}
 	if err := channel.Close(); err != nil {
 		t.Fatalf("close FTDI MPSSE port A: %v", err)

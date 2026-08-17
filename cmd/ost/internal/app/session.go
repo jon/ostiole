@@ -44,7 +44,7 @@ func openSWD(ctx context.Context) (*swdSession, error) {
 		Interface: ftdi.SWD,
 	})
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(err, device.Close())
 	}
 	connection := swd.New(channel)
 	if err := connection.JTAGToSWD(ctx); err != nil {

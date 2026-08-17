@@ -4,6 +4,7 @@ package dap_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 
@@ -77,7 +78,7 @@ func openHardwareDebugPortWithFaultWire(t *testing.T, ctx context.Context) (*dap
 		Interface: ftdi.SWD,
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal(errors.Join(err, dev.Close()))
 	}
 	t.Cleanup(func() {
 		if err := ch.Close(); err != nil {

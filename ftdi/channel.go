@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/jon/ostiole/usb"
 )
 
 const (
@@ -52,12 +54,23 @@ type Config struct {
 }
 
 type usbDevice interface {
-	ClaimInterface(iface uint8) error
-	ReleaseInterface(iface uint8) error
+	claimInterface(iface uint8) (usbClaim, error)
 	ControlTransfer(ctx context.Context, requestType, request uint8, value, index uint16, data []byte) (int, error)
 	BulkWrite(ctx context.Context, endpoint uint8, data []byte) (int, error)
 	BulkRead(ctx context.Context, endpoint uint8, data []byte) (int, error)
 	Close() error
+}
+
+type usbClaim interface {
+	Close() error
+}
+
+type ownedUSBDevice struct {
+	*usb.Device
+}
+
+func (d ownedUSBDevice) claimInterface(iface uint8) (usbClaim, error) {
+	return d.ClaimInterface(iface)
 }
 
 // Channel addresses one explicit MPSSE-capable USB function.
@@ -69,7 +82,7 @@ type Channel struct {
 	bulkOut    uint8
 	clockHz    uint32
 	packetSize int
-	claimed    bool
+	claim      usbClaim
 	settle     func(context.Context) error
 }
 
@@ -112,12 +125,24 @@ func validateSelection(product uint16, port Port) error {
 	return nil
 }
 
-func (c *Channel) claim() error {
-	return c.device.ClaimInterface(c.iface)
+func (c *Channel) claimUSB() error {
+	claim, err := c.device.claimInterface(c.iface)
+	if err != nil {
+		return err
+	}
+	c.claim = claim
+	return nil
 }
 
-func (c *Channel) release() error {
-	return c.device.ReleaseInterface(c.iface)
+func (c *Channel) releaseUSB() error {
+	if c.claim == nil {
+		return nil
+	}
+	if err := c.claim.Close(); err != nil {
+		return err
+	}
+	c.claim = nil
+	return nil
 }
 
 func (c *Channel) control(ctx context.Context, request uint8, value uint16) (int, error) {

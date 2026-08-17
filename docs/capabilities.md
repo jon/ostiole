@@ -18,7 +18,7 @@ family or every feature of a protocol.
 | macOS host access | Yes | IOKit and IOUSBLib through cgo; macOS 26 arm64 and Intel CI with a macOS 12 deployment target. |
 | Filtered enumeration | Yes | Explicit exact-product and vendor-only filters, including an exact product ID of zero; deterministic bus/address ordering and context checks. |
 | Exact open | Yes | Revalidates bus, address, vendor, and product before and after opening. |
-| Interface ownership | Yes | One claimed interface, alternate selection, release, and close. Linux reports contention rather than detaching a bound kernel driver. |
+| Interface ownership | Yes | `ClaimedInterface` selects alternate settings and releases the interface; a failed release can be retried. `Device.Close` waits for that release. Linux reports contention rather than detaching a bound kernel driver. |
 | Control transfers | Yes | Synchronous, deadline-bounded endpoint-zero transfers. |
 | Bulk transfers | Yes | Synchronous, deadline-bounded bulk IN and OUT transfers. |
 | Linux FT232H ownership | HIL | Manual `ftdi_sio` unbind, unprivileged usbfs claim and MPSSE/SWD traffic, release, and explicit driver rebind. |

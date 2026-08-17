@@ -4,6 +4,7 @@ package swd_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -39,7 +40,7 @@ func TestReadDPIDROverFTDI(t *testing.T) {
 		Interface: ftdi.SWD,
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal(errors.Join(err, dev.Close()))
 	}
 	t.Cleanup(func() {
 		if err := ch.Close(); err != nil {

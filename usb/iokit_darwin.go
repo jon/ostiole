@@ -193,10 +193,14 @@ func bytePointer(data []byte) unsafe.Pointer {
 }
 
 func (i *iokitInterface) close() error {
+	if i.native == nil {
+		return nil
+	}
 	result := C.ostiole_usb_interface_close(i.native)
 	if result != C.kIOReturnSuccess {
 		return iokitError(result)
 	}
+	i.native = nil
 	return nil
 }
 

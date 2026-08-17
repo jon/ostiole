@@ -95,12 +95,16 @@ func openChannel(ctx context.Context) (*ftdi.Channel, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ftdi.Open(ctx, dev, ftdi.Config{
+	ch, err := ftdi.Open(ctx, dev, ftdi.Config{
 		ClockHz:   400_000,
 		ProductID: devs[0].PID,
 		Port:      ftdi.PortA,
 		Interface: ftdi.SWD,
 	})
+	if err != nil {
+		return nil, errors.Join(err, dev.Close())
+	}
+	return ch, nil
 }
 
 func printIdentity(w io.Writer, info identity) error {

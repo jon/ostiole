@@ -222,7 +222,10 @@ kern_return_t ostiole_usb_interface_write(ostiole_usb_interface* interface,
 kern_return_t ostiole_usb_interface_close(ostiole_usb_interface* interface) {
   kern_return_t result =
       (*interface->interface)->USBInterfaceClose(interface->interface);
+  if (result != kIOReturnSuccess && result != kIOReturnNotOpen) {
+    return result;
+  }
   (*interface->interface)->Release(interface->interface);
   free(interface);
-  return result;
+  return kIOReturnSuccess;
 }

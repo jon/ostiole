@@ -63,7 +63,7 @@ func readIdentity(ctx context.Context) (_ identity, err error) {
 		Interface: ftdi.SWD,
 	})
 	if err != nil {
-		return identity{}, err
+		return identity{}, errors.Join(err, dev.Close())
 	}
 	conn := swd.New(ch)
 	if err := conn.JTAGToSWD(ctx); err != nil {

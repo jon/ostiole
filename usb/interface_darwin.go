@@ -26,49 +26,49 @@ type darwinInterfaceProvider interface {
 	interfaceHandle(uint8) (darwinInterfaceHandle, error)
 }
 
-// ClaimInterface claims one interface for this device.
-func (d *Device) ClaimInterface(iface uint8) error {
+// ClaimInterface claims one interface and returns the claim. If cleanup after
+// an error remains pending, Device.Close retries it.
+func (d *Device) ClaimInterface(iface uint8) (*ClaimedInterface, error) {
 	if d.handle == nil {
-		return errDarwinDeviceClosed
+		return nil, errDarwinDeviceClosed
 	}
-	if d.hasClaim {
-		return fmt.Errorf("usb: interface %d is already claimed", d.claimed)
+	if d.claim != nil {
+		return nil, fmt.Errorf("usb: interface %d is already claimed", d.claim.number)
 	}
 	provider, ok := d.handle.(darwinInterfaceProvider)
 	if !ok {
-		return errors.New("usb: device cannot provide USB interfaces")
+		return nil, errors.New("usb: device cannot provide USB interfaces")
 	}
 	handle, err := provider.interfaceHandle(iface)
 	if err != nil {
-		return fmt.Errorf("usb: find interface %d: %w", iface, err)
+		return nil, fmt.Errorf("usb: find interface %d: %w", iface, err)
 	}
+	claim := &ClaimedInterface{device: d, number: iface}
+	d.iface, d.claim = handle, claim
 	if err := handle.openSeize(); err != nil {
 		claimErr := fmt.Errorf("usb: claim interface %d: %w", iface, err)
-		return errors.Join(claimErr, handle.close())
+		return nil, errors.Join(claimErr, claim.Close())
 	}
 	pipes, err := handle.pipes()
 	if err != nil {
 		pipesErr := fmt.Errorf("usb: enumerate interface %d pipes: %w", iface, err)
-		return errors.Join(pipesErr, handle.close())
+		return nil, errors.Join(pipesErr, claim.Close())
 	}
-	d.iface, d.claimed, d.hasClaim = handle, iface, true
 	d.replaceRoutes(pipes)
-	return nil
+	return claim, nil
 }
 
-// SetAltSetting selects an alternate setting on the claimed interface.
-func (d *Device) SetAltSetting(iface, alternate uint8) error {
-	if !d.hasClaim || d.claimed != iface {
-		return fmt.Errorf("usb: interface %d is not claimed", iface)
+func (d *Device) setAltSetting(claim *ClaimedInterface, alternate uint8) error {
+	if d.claim != claim {
+		return errors.New("usb: claimed interface is not owned by this device")
 	}
 	d.routes = nil
 	if err := d.iface.setAlternate(alternate); err != nil {
-		return fmt.Errorf("usb: select interface %d alternate %d: %w",
-			iface, alternate, err)
+		return fmt.Errorf("usb: select interface %d alternate %d: %w", claim.number, alternate, err)
 	}
 	pipes, err := d.iface.pipes()
 	if err != nil {
-		return fmt.Errorf("usb: enumerate interface %d pipes: %w", iface, err)
+		return fmt.Errorf("usb: enumerate interface %d pipes: %w", claim.number, err)
 	}
 	d.replaceRoutes(pipes)
 	return nil
@@ -81,15 +81,14 @@ func (d *Device) replaceRoutes(pipes []darwinPipe) {
 	}
 }
 
-// ReleaseInterface releases the claimed interface.
-func (d *Device) ReleaseInterface(iface uint8) error {
-	if !d.hasClaim || d.claimed != iface {
-		return fmt.Errorf("usb: interface %d is not claimed", iface)
+func (d *Device) releaseInterface(claim *ClaimedInterface) error {
+	if d.claim != claim {
+		return errors.New("usb: claimed interface is not owned by this device")
 	}
-	handle := d.iface
-	d.iface, d.routes, d.hasClaim = nil, nil, false
-	if err := handle.close(); err != nil {
-		return fmt.Errorf("usb: release interface %d: %w", iface, err)
+	if err := d.iface.close(); err != nil {
+		return fmt.Errorf("usb: release interface %d: %w", claim.number, err)
 	}
+	d.iface, d.routes, d.claim = nil, nil, nil
+	claim.device = nil
 	return nil
 }

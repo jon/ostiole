@@ -15,8 +15,7 @@ import (
 type Device struct {
 	file      *os.File
 	ioctl     ioctlFunc
-	claimed   uint8
-	hasClaim  bool
+	claim     *ClaimedInterface
 	closeOnce sync.Once
 	closeErr  error
 }
@@ -70,18 +69,20 @@ func (e *Enumerator) revalidate(ctx context.Context, expected DeviceInfo) error 
 	return fmt.Errorf("%w: bus %d address %d disappeared", ErrStaleCandidate, expected.Bus, expected.Address)
 }
 
-// Close releases the open usbfs attachment.
+// Close releases the open usbfs attachment. If interface release fails, the
+// device remains open and Close can be retried.
 func (d *Device) Close() error {
 	if d == nil {
 		return nil
 	}
-	d.closeOnce.Do(func() {
-		var releaseErr error
-		if d.hasClaim {
-			releaseErr = d.ReleaseInterface(d.claimed)
+	if d.claim != nil {
+		if err := d.claim.Close(); err != nil {
+			return err
 		}
+	}
+	d.closeOnce.Do(func() {
 		if d.file != nil {
-			d.closeErr = errors.Join(releaseErr, d.file.Close())
+			d.closeErr = d.file.Close()
 		}
 	})
 	return d.closeErr

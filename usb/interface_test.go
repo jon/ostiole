@@ -3,6 +3,7 @@
 package usb
 
 import (
+	"errors"
 	"os"
 	"testing"
 )
@@ -32,13 +33,14 @@ func TestDeviceClaimsSelectsAndReleasesOneInterface(t *testing.T) {
 		return 0, nil
 	}
 
-	if err := device.ClaimInterface(1); err != nil {
+	claim, err := device.ClaimInterface(1)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := device.SetAltSetting(1, 3); err != nil {
+	if err := claim.SetAltSetting(3); err != nil {
 		t.Fatal(err)
 	}
-	if err := device.ReleaseInterface(1); err != nil {
+	if err := claim.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if len(records) != 3 ||
@@ -52,17 +54,54 @@ func TestDeviceClaimsSelectsAndReleasesOneInterface(t *testing.T) {
 }
 
 func TestDeviceRejectsAnotherClaimBeforeIO(t *testing.T) {
-	device := &Device{hasClaim: true, claimed: 0}
+	device := &Device{}
+	device.claim = &ClaimedInterface{device: device, number: 0}
 	called := false
 	device.ioctl = func(uintptr, uintptr, any) (uintptr, error) {
 		called = true
 		return 0, nil
 	}
 
-	if err := device.ClaimInterface(1); err == nil {
+	if _, err := device.ClaimInterface(1); err == nil {
 		t.Fatal("second ClaimInterface succeeded")
 	}
 	if called {
 		t.Fatal("second ClaimInterface issued an ioctl")
+	}
+}
+
+func TestClaimedInterfaceRetainsOwnershipAfterFailedRelease(t *testing.T) {
+	file, err := os.CreateTemp(t.TempDir(), "usb-device")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := errors.New("release failed")
+	releases := 0
+	device := &Device{file: file}
+	device.ioctl = func(_ uintptr, request uintptr, _ any) (uintptr, error) {
+		if request == usbfsReleaseInterface {
+			releases++
+			if releases == 1 {
+				return 0, want
+			}
+		}
+		return 0, nil
+	}
+
+	claim, err := device.ClaimInterface(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := claim.Close(); !errors.Is(err, want) {
+		t.Fatalf("first Close() error = %v, want %v", err, want)
+	}
+	if _, err := device.ClaimInterface(2); err == nil {
+		t.Fatal("ClaimInterface() succeeded while release was pending")
+	}
+	if err := claim.Close(); err != nil {
+		t.Fatalf("second Close(): %v", err)
+	}
+	if _, err := device.ClaimInterface(2); err != nil {
+		t.Fatalf("ClaimInterface() after release: %v", err)
 	}
 }
