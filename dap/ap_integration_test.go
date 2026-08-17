@@ -11,8 +11,7 @@ import (
 )
 
 const (
-	hardwareAPCSW    = dap.APReg(0x00)
-	hardwareMemClass = uint32(0x08)
+	hardwareMemClass = uint8(0x08)
 )
 
 var hardwareAP = dap.NewAPSel(0)
@@ -22,6 +21,7 @@ func TestAccessAPOverFTDI(t *testing.T) {
 	defer cancel()
 
 	dp := openHardwareDebugPort(t, ctx)
+	const hardwareAPCSW = uint8(0x00)
 	var (
 		savedCSW uint32
 		saved    bool
@@ -30,7 +30,7 @@ func TestAccessAPOverFTDI(t *testing.T) {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Second)
 		defer cleanupCancel()
 		if saved {
-			if err := dp.WriteAP(cleanupCtx, hardwareAP, hardwareAPCSW, savedCSW); err != nil {
+			if err := dp.WriteRawAP(cleanupCtx, hardwareAP.Address(hardwareAPCSW), savedCSW); err != nil {
 				t.Errorf("restore AP0 CSW: %v", err)
 			}
 		}
@@ -43,29 +43,29 @@ func TestAccessAPOverFTDI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	idr, err := dp.ReadAP(ctx, hardwareAP, dap.APIDR)
+	idr, err := dp.ReadAPIDR(ctx, hardwareAP)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if idr == 0 || idr>>13&0x0f != hardwareMemClass {
-		t.Fatalf("AP0 IDR = %#08x, want a MEM-AP identity", idr)
+	if idr.Raw == 0 || idr.Class != hardwareMemClass {
+		t.Fatalf("AP0 IDR = %#08x, want a MEM-AP identity", idr.Raw)
 	}
-	savedCSW, err = dp.ReadAP(ctx, hardwareAP, hardwareAPCSW)
+	savedCSW, err = dp.ReadRawAP(ctx, hardwareAP.Address(hardwareAPCSW))
 	if err != nil {
 		t.Fatal(err)
 	}
 	saved = true
-	if err := dp.WriteAP(ctx, hardwareAP, hardwareAPCSW, savedCSW); err != nil {
+	if err := dp.WriteRawAP(ctx, hardwareAP.Address(hardwareAPCSW), savedCSW); err != nil {
 		t.Fatal(err)
 	}
-	gotCSW, err := dp.ReadAP(ctx, hardwareAP, hardwareAPCSW)
+	gotCSW, err := dp.ReadRawAP(ctx, hardwareAP.Address(hardwareAPCSW))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if gotCSW != savedCSW {
 		t.Fatalf("AP0 CSW = %#08x after unchanged write, want %#08x", gotCSW, savedCSW)
 	}
-	t.Logf("DPIDR=%#08x AP0_IDR=%#08x AP0_CSW=%#08x", info.Raw, idr, gotCSW)
+	t.Logf("DPIDR=%#08x AP0_IDR=%#08x AP0_CSW=%#08x", info.Raw, idr.Raw, gotCSW)
 }
 
 func TestTransactionOverFTDI(t *testing.T) {
@@ -86,8 +86,8 @@ func TestTransactionOverFTDI(t *testing.T) {
 
 	txn := dp.NewTxn()
 	dpidr := txn.ReadDP(dap.DPIDR)
-	idr := txn.ReadAP(hardwareAP, dap.APIDR)
-	csw := txn.ReadAP(hardwareAP, dap.APCSW)
+	idr := txn.ReadAPIDR(hardwareAP)
+	csw := txn.ReadRawAP(hardwareAP.Address(0x00))
 	if err := txn.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -103,5 +103,9 @@ func TestTransactionOverFTDI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("transaction DPIDR=%#08x AP%d_IDR=%#08x AP%d_CSW=%#08x", dpidrValue, hardwareAP, idrValue, hardwareAP, cswValue)
+	selector, err := hardwareAP.Value()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("transaction DPIDR=%#08x AP%d_IDR=%#08x AP%d_CSW=%#08x", dpidrValue, selector, idrValue, selector, cswValue)
 }

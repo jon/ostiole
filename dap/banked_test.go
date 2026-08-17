@@ -33,7 +33,7 @@ func TestBankedDPAccessPreservesSELECTFields(t *testing.T) {
 	if got := target.requests[beforeBankedRead : beforeBankedRead+len(wantRequests)]; !equalRequests(got, wantRequests) {
 		t.Fatalf("banked DP requests = %#v, want %#v", got, wantRequests)
 	}
-	if _, err := dp.ReadAP(t.Context(), apSel(0x12), dap.APIDR); err != nil {
+	if _, err := dp.ReadAPIDR(t.Context(), apSel(0x12)); err != nil {
 		t.Fatal(err)
 	}
 	if len(target.selectValues) < 3 {

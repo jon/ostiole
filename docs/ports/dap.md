@@ -36,9 +36,15 @@ ADIv5 SW-DP defines DPv1 and DPv2; reading a structurally valid DPIDR does not
 by itself make an unfamiliar version compatible.
 
 Every AP implements IDR at offset `0xfc`, and IDR zero means that no AP is
-present. Selecting a missing AP returns zero on reads and ignores writes. The
-specification does not say that AP numbers are contiguous, so stopping an AP
-scan at the first zero is a convenience, not an enumeration rule.
+present. IDR is read-only. Selecting a missing AP returns zero on reads and
+ignores writes. The specification does not say that AP numbers are contiguous,
+so stopping an AP scan at the first zero is a convenience, not an enumeration
+rule.
+
+The other register names and effects depend on the AP class. A MEM-AP DRW read
+can update TAR when CSW.AddrInc is enabled. A write to the same register can
+write target memory. Calling either operation a raw register transfer does not
+make it harmless.
 
 ## Power and sticky state
 
@@ -171,9 +177,11 @@ traffic: ABORT has no acknowledgement after its data phase either. WDATAERR
 describes a write which the DP abandoned, while STICKYERR records an error
 reported by an AP. They are not interchangeable names for the same failure.
 
-If the failed request belonged to AP work, clearing the sticky flag does not
-establish what that request changed. Any AP state which matters still has to
-be read or restored explicitly before power is released.
+A FAULT acknowledgement on an AP write means that write did not execute.
+WDATAERR at the following completion barrier likewise records abandoned write
+data. Other failures during AP work can leave its effects uncertain. Any AP
+state which might have changed still has to be read or restored explicitly
+before power is released.
 
 A complete FAULT response after one or more WAITs still ends at a request
 boundary. Return FAULT; the preceding WAITs do not justify DAPABORT or framing

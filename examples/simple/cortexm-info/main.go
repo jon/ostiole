@@ -24,7 +24,7 @@ var accessPort = dap.NewAPSel(0)
 
 type identity struct {
 	dpidr     dap.DPIDRInfo
-	apidr     uint32
+	apidr     dap.APIDRInfo
 	processor cortexm.Identity
 }
 
@@ -68,7 +68,7 @@ func readIdentity(ctx context.Context) (_ identity, err error) {
 	if err != nil {
 		return identity{}, err
 	}
-	apidr, err := dp.ReadAP(ctx, accessPort, dap.APIDR)
+	apidr, err := dp.ReadAPIDR(ctx, accessPort)
 	if err != nil {
 		return identity{}, err
 	}
@@ -105,6 +105,6 @@ func openChannel(ctx context.Context) (*ftdi.Channel, error) {
 
 func printIdentity(w io.Writer, info identity) error {
 	_, err := fmt.Fprintf(w, "DPIDR=%#08x AP0_IDR=%#08x CPUID=%#08x\n",
-		info.dpidr.Raw, info.apidr, info.processor.Raw)
+		info.dpidr.Raw, info.apidr.Raw, info.processor.Raw)
 	return err
 }

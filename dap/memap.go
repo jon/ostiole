@@ -6,15 +6,14 @@ import (
 	"fmt"
 )
 
-// MEM-AP registers used by the first target-word reader.
 const (
-	APCSW APReg = 0x00
-	APTAR APReg = 0x04
-	APDRW APReg = 0x0c
+	memAPCSW = uint8(0x00)
+	memAPTAR = uint8(0x04)
+	memAPDRW = uint8(0x0c)
 )
 
 const (
-	memAPClass = uint32(0x08)
+	memAPClass = uint8(0x08)
 	cswSize    = uint32(0x07)
 	cswAddrInc = uint32(0x30)
 	cswSize32  = uint32(0x02)
@@ -39,25 +38,25 @@ type MemAP struct {
 // NewMemAP validates sel and saves the state changed by target reads.
 // The debug port must be connected and must not have cleanup pending.
 func NewMemAP(ctx context.Context, dp *DebugPort, sel APSel) (*MemAP, error) {
-	selection, err := sel.Value()
+	selection, err := validateAPSel(sel)
 	if err != nil {
 		return nil, err
 	}
-	idr, err := dp.ReadAP(ctx, sel, APIDR)
+	idr, err := dp.ReadAPIDR(ctx, sel)
 	if err != nil {
 		return nil, err
 	}
-	if idr == 0 {
+	if idr.Raw == 0 {
 		return nil, fmt.Errorf("dap: AP %d is absent", selection)
 	}
-	if idr>>13&0x0f != memAPClass {
+	if idr.Class != memAPClass {
 		return nil, fmt.Errorf("dap: AP %d is not a MEM-AP", selection)
 	}
-	csw, err := dp.ReadAP(ctx, sel, APCSW)
+	csw, err := dp.readAP(ctx, sel, memAPCSW)
 	if err != nil {
 		return nil, err
 	}
-	tar, err := dp.ReadAP(ctx, sel, APTAR)
+	tar, err := dp.readAP(ctx, sel, memAPTAR)
 	if err != nil {
 		return nil, err
 	}
@@ -90,14 +89,14 @@ func (m *MemAP) ReadWord(ctx context.Context, addr uint32) (uint32, error) {
 		return 0, fmt.Errorf("dap: unaligned target word address %#08x", addr)
 	}
 	m.restoreCSW = true
-	if err := m.dp.WriteAP(ctx, m.sel, APCSW, m.csw); err != nil {
+	if err := m.dp.writeAP(ctx, m.sel, memAPCSW, m.csw); err != nil {
 		return 0, err
 	}
 	m.restoreTAR = true
-	if err := m.dp.WriteAP(ctx, m.sel, APTAR, addr); err != nil {
+	if err := m.dp.writeAP(ctx, m.sel, memAPTAR, addr); err != nil {
 		return 0, err
 	}
-	return m.dp.ReadAP(ctx, m.sel, APDRW)
+	return m.dp.readAP(ctx, m.sel, memAPDRW)
 }
 
 // Release restores the CSW and TAR values changed by target reads.
@@ -124,7 +123,7 @@ func (m *MemAP) Release(ctx context.Context) error {
 	}
 	var tarErr, cswErr error
 	if m.restoreTAR {
-		tarErr = m.dp.writeAP(releaseCtx, m.sel, APTAR, m.savedTAR)
+		tarErr = m.dp.writeAP(releaseCtx, m.sel, memAPTAR, m.savedTAR)
 		if tarErr != nil {
 			tarErr = fmt.Errorf("dap: restore MEM-AP TAR: %w", tarErr)
 		} else {
@@ -132,7 +131,7 @@ func (m *MemAP) Release(ctx context.Context) error {
 		}
 	}
 	if m.restoreCSW {
-		cswErr = m.dp.writeAP(releaseCtx, m.sel, APCSW, m.savedCSW)
+		cswErr = m.dp.writeAP(releaseCtx, m.sel, memAPCSW, m.savedCSW)
 		if cswErr != nil {
 			cswErr = fmt.Errorf("dap: restore MEM-AP CSW: %w", cswErr)
 		} else {

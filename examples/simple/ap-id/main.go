@@ -23,7 +23,7 @@ var accessPort = dap.NewAPSel(0)
 
 type identity struct {
 	dpidr dap.DPIDRInfo
-	apidr uint32
+	apidr dap.APIDRInfo
 }
 
 func main() {
@@ -76,17 +76,17 @@ func readIdentity(ctx context.Context) (_ identity, err error) {
 	if err != nil {
 		return identity{}, err
 	}
-	apidr, err := dp.ReadAP(ctx, accessPort, dap.APIDR)
+	apidr, err := dp.ReadAPIDR(ctx, accessPort)
 	if err != nil {
 		return identity{}, err
 	}
-	if apidr == 0 {
+	if apidr.Raw == 0 {
 		return identity{}, errors.New("ostiole: AP0 is absent")
 	}
 	return identity{dpidr: dpidr, apidr: apidr}, nil
 }
 
 func printIdentity(w io.Writer, info identity) error {
-	_, err := fmt.Fprintf(w, "DPIDR=%#08x AP0_IDR=%#08x\n", info.dpidr.Raw, info.apidr)
+	_, err := fmt.Fprintf(w, "DPIDR=%#08x AP0_IDR=%#08x\n", info.dpidr.Raw, info.apidr.Raw)
 	return err
 }

@@ -38,15 +38,16 @@ type txnOpKind uint8
 const (
 	txnReadDP txnOpKind = iota
 	txnWriteDP
-	txnReadAP
-	txnWriteAP
+	txnReadAPIDR
+	txnReadRawAP
+	txnWriteRawAP
 )
 
 type txnOp struct {
 	kind   txnOpKind
 	dpReg  DPRegister
 	apSel  APSel
-	apReg  APReg
+	apAddr uint8
 	data   uint32
 	result *Result
 	err    error
@@ -80,14 +81,25 @@ func (t *Txn) WriteDP(reg DPRegister, value uint32) *Result {
 	return t.queue(txnOp{kind: txnWriteDP, dpReg: reg, data: value})
 }
 
-// ReadAP queues one posted access-port read.
-func (t *Txn) ReadAP(sel APSel, reg APReg) *Result {
-	return t.queue(txnOp{kind: txnReadAP, apSel: sel, apReg: reg})
+// ReadAPIDR queues a read of one access-port identification register. The
+// result value is the raw register encoding.
+func (t *Txn) ReadAPIDR(sel APSel) *Result {
+	return t.queue(txnOp{kind: txnReadAPIDR, apSel: sel, apAddr: apIDRAddress})
 }
 
-// WriteAP queues one access-port write and its completion barrier.
-func (t *Txn) WriteAP(sel APSel, reg APReg, value uint32) *Result {
-	return t.queue(txnOp{kind: txnWriteAP, apSel: sel, apReg: reg, data: value})
+// ReadRawAP queues one posted access-port read. A read that completes or might
+// have completed invalidates existing MemAP values. The caller is responsible
+// for effects defined by the selected AP class.
+func (t *Txn) ReadRawAP(addr APAddress) *Result {
+	return t.queue(txnOp{kind: txnReadRawAP, apSel: addr.sel, apAddr: addr.value})
+}
+
+// WriteRawAP queues one access-port write and its completion barrier. A write
+// that completes or might have completed invalidates existing MemAP values.
+// The caller is responsible for class-specific effects, including writes to
+// target memory through a MEM-AP data register.
+func (t *Txn) WriteRawAP(addr APAddress, value uint32) *Result {
+	return t.queue(txnOp{kind: txnWriteRawAP, apSel: addr.sel, apAddr: addr.value, data: value})
 }
 
 func (t *Txn) queue(op txnOp) *Result {
@@ -153,11 +165,12 @@ func (t *Txn) validate() error {
 			_, op.err = t.dp.validateDPRegister(op.dpReg, false)
 		case txnWriteDP:
 			_, op.err = t.dp.validateDPWrite(op.dpReg, op.data)
-		case txnReadAP, txnWriteAP:
-			op.err = validateAPReg(op.apReg)
-			if op.err == nil {
-				_, op.err = op.apSel.Value()
-			}
+		case txnReadAPIDR:
+			_, op.err = validateAPSel(op.apSel)
+		case txnReadRawAP:
+			_, op.err = validateAPAddress(APAddress{sel: op.apSel, value: op.apAddr}, false)
+		case txnWriteRawAP:
+			_, op.err = validateAPAddress(APAddress{sel: op.apSel, value: op.apAddr}, true)
 		}
 		if op.err != nil {
 			errs = append(errs, op.err)
@@ -169,7 +182,7 @@ func (t *Txn) validate() error {
 func (t *Txn) checkAccess() error {
 	for i := range t.ops {
 		op := &t.ops[i]
-		if op.kind == txnReadAP || op.kind == txnWriteAP {
+		if op.kind == txnReadAPIDR || op.kind == txnReadRawAP || op.kind == txnWriteRawAP {
 			op.err = t.dp.requireConnected()
 		} else {
 			op.err = t.dp.requireOperational()
@@ -242,7 +255,7 @@ func (p *txnPlanner) lower(index int, op txnOp) {
 	switch op.kind {
 	case txnReadDP, txnWriteDP:
 		p.lowerDP(index, op)
-	case txnReadAP, txnWriteAP:
+	case txnReadAPIDR, txnReadRawAP, txnWriteRawAP:
 		p.lowerAP(index, op)
 	}
 }
@@ -294,14 +307,18 @@ func txnDPRequest(op txnOp, info dpRegisterInfo) transferRequest {
 }
 
 func (p *txnPlanner) lowerAP(index int, op txnOp) {
+	addr := op.apAddr
 	selection, _ := op.apSel.Value()
-	value := uint32(selection)<<24 | uint32(op.apReg&0xf0)
+	value := uint32(selection)<<24 | uint32(addr&0xf0)
 	p.selectValue(index, value)
-	req := apTransferRequest(uint8(op.apReg&0x0c), op.kind == txnReadAP)
+	read := op.kind == txnReadAPIDR || op.kind == txnReadRawAP
+	invalidatesAP := op.kind == txnReadRawAP || op.kind == txnWriteRawAP
+	req := apTransferRequest(addr&0x0c, read)
 	p.steps = append(p.steps, txnStep{
-		req:  req,
-		data: op.data,
-		op:   index,
+		req:           req,
+		data:          op.data,
+		op:            index,
+		invalidatesAP: invalidatesAP,
 	})
 	p.selectPending = false
 	p.steps = append(p.steps, txnStep{
@@ -309,9 +326,10 @@ func (p *txnPlanner) lowerAP(index int, op txnOp) {
 		dpReg:            RDBUFF,
 		op:               index,
 		deliver:          true,
-		deliverValue:     op.kind == txnReadAP,
+		deliverValue:     read,
 		operationStarted: true,
-		completesWrite:   op.kind == txnWriteAP,
+		completesWrite:   op.kind == txnWriteRawAP,
+		invalidatesAP:    invalidatesAP,
 	})
 }
 
@@ -379,7 +397,7 @@ func (t *Txn) acceptStep(step txnStep, value uint32) {
 	if step.req.Read && !step.req.AP {
 		t.dp.recordDPRead(step.dpReg, value)
 	}
-	if step.completesWrite && step.invalidatesAP {
+	if step.deliver && step.invalidatesAP {
 		t.dp.state.invalidateAP()
 	}
 	if !step.deliver {
@@ -400,7 +418,7 @@ func (t *Txn) failStep(step txnStep, err error) error {
 }
 
 func (t *Txn) applyFailedStepEffect(step txnStep, err error) {
-	if !step.invalidatesAP {
+	if !step.invalidatesAP || t.dp.state.response == responseLost {
 		return
 	}
 	if errors.Is(err, ErrIndeterminate) || step.completesWrite && errors.Is(err, swd.ErrParity) {

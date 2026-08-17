@@ -6,8 +6,11 @@ is itself the goal.
 
 For example, a program identifying a Cortex-M should call `cortexm.Identify`
 rather than read and decode CPUID itself. A program inspecting an access port
-should call `dap.DebugPort.ReadAP` rather than manually implement the posted
-read pipeline with SWD transactions.
+should call `dap.DebugPort.ReadAPIDR` rather than manually implement the posted
+read pipeline with SWD transactions. Use `ReadRawAP` and `WriteRawAP` only when
+the caller understands the selected AP class and will restore any state the
+access changes. Derive the complete address with `APSel.Address`. A raw MEM-AP
+data-register write can write target memory.
 
 ## Find the right layer
 
@@ -17,7 +20,8 @@ read pipeline with SWD transactions.
 | Open one FTDI MPSSE SWD port | `Enumerator.Open`, `ftdi.Open` | `examples/trivial/swd-dpidr` |
 | Enter SWD mode or transfer one DP/AP register | `swd.New`, `Conn.JTAGToSWD`, `Conn.ReadDP`, `Conn.WriteDP`, `Conn.ReadAP`, `Conn.WriteAP` | `examples/trivial/swd-dpidr` |
 | Decode a DPIDR and manage SW-DP power | `dap.NewSWDP`, `DebugPort.Connect`, `DebugPort.Release` | `ost dap dp id` |
-| Access one explicitly selected AP register | `DebugPort.ReadAP`, `DebugPort.WriteAP` | `examples/simple/ap-id` |
+| Identify one explicitly selected AP | `DebugPort.ReadAPIDR`, `DecodeAPIDR` | `examples/simple/ap-id` |
+| Access another AP register by its full ADIv5 address | `DebugPort.ReadRawAP`, `DebugPort.WriteRawAP` | Package tests |
 | Read one aligned target word through a MEM-AP | `dap.NewMemAP`, `MemAP.ReadWord`, `MemAP.Release` | `examples/simple/cortexm-info` |
 | Identify a Cortex-M through any compatible word reader | `cortexm.Identify` | `examples/simple/cortexm-info` |
 | Test SWD and DAP behavior without hardware | `swd/sim`, `dap/sim` | Package tests |
@@ -59,9 +63,16 @@ and `Release` afterward. Give the debug port exclusive, serialized use of its
 `swd.Conn`; direct transfers on that connection can invalidate cached DAP
 state. `ReadDP` and `WriteDP` take logical ADIv5 register names and manage
 DPBANKSEL without exposing a current-bank API. `NewAPSel` constructs an AP
-selector whose zero value is invalid. This layer owns posted AP read
-and write completion and retries only the physical request that returned WAIT.
-After an extended AP stall, `dap.DebugPort` issues DAPABORT; existing
+selector whose zero value is invalid. `APSel.Address` combines it with a
+complete eight-bit register address; the resulting `APAddress` also has an
+invalid zero value. `ReadAPIDR` reads and decodes the common read-only AP
+identity. Raw AP access rejects an invalid or unaligned address before traffic.
+Use it only when the caller understands the selected AP class and will restore
+any state the access changes. A raw MEM-AP data-register write can write target
+memory. This layer owns posted AP read and write completion and retries only the
+physical request that returned WAIT. A raw AP read or write which completes, or
+might have completed, invalidates existing `MemAP` values. After an extended AP
+stall, `dap.DebugPort` issues DAPABORT; existing
 `dap.MemAP` values reject further reads, though `dap.MemAP.Release` still
 attempts to restore their saved state. `Connect` reads DPIDR, clears supported
 sticky conditions with ABORT,

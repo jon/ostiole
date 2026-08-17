@@ -21,13 +21,13 @@ func TestMEMAPReadsConfiguredTargetWord(t *testing.T) {
 	target.AddMEMAP(0, memAPIDR, map[uint32]uint32{wordAddr: wordData})
 	dp := enteredDAP(t, target)
 
-	if err := dp.WriteAP(t.Context(), apSel(0), 0x00, 2); err != nil {
+	if err := dp.WriteRawAP(t.Context(), apSel(0).Address(0x00), 2); err != nil {
 		t.Fatal(err)
 	}
-	if err := dp.WriteAP(t.Context(), apSel(0), 0x04, wordAddr); err != nil {
+	if err := dp.WriteRawAP(t.Context(), apSel(0).Address(0x04), wordAddr); err != nil {
 		t.Fatal(err)
 	}
-	value, err := dp.ReadAP(t.Context(), apSel(0), 0x0c)
+	value, err := dp.ReadRawAP(t.Context(), apSel(0).Address(0x0c))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,13 +42,13 @@ func TestMEMAPCopiesTargetWords(t *testing.T) {
 	target.AddMEMAP(0, memAPIDR, words)
 	words[wordAddr] = 0
 	dp := enteredDAP(t, target)
-	if err := dp.WriteAP(t.Context(), apSel(0), 0x00, 2); err != nil {
+	if err := dp.WriteRawAP(t.Context(), apSel(0).Address(0x00), 2); err != nil {
 		t.Fatal(err)
 	}
-	if err := dp.WriteAP(t.Context(), apSel(0), 0x04, wordAddr); err != nil {
+	if err := dp.WriteRawAP(t.Context(), apSel(0).Address(0x04), wordAddr); err != nil {
 		t.Fatal(err)
 	}
-	value, err := dp.ReadAP(t.Context(), apSel(0), 0x0c)
+	value, err := dp.ReadRawAP(t.Context(), apSel(0).Address(0x0c))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,10 +61,10 @@ func TestMEMAPRejectsMalformedCSW(t *testing.T) {
 	target := dapsim.New(0x2ba01477)
 	target.AddMEMAP(0, memAPIDR, map[uint32]uint32{wordAddr: wordData})
 	dp := enteredDAP(t, target)
-	if err := dp.WriteAP(t.Context(), apSel(0), 0x04, wordAddr); err != nil {
+	if err := dp.WriteRawAP(t.Context(), apSel(0).Address(0x04), wordAddr); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := dp.ReadAP(t.Context(), apSel(0), 0x0c); err == nil {
+	if _, err := dp.ReadRawAP(t.Context(), apSel(0).Address(0x0c)); err == nil {
 		t.Fatal("DRW read succeeded without 32-bit, non-incrementing CSW")
 	}
 }
@@ -73,7 +73,7 @@ func TestMEMAPDoesNotModelTargetWrites(t *testing.T) {
 	target := dapsim.New(0x2ba01477)
 	target.AddMEMAP(0, memAPIDR, nil)
 	dp := enteredDAP(t, target)
-	if err := dp.WriteAP(t.Context(), apSel(0), 0x0c, wordData); err == nil {
+	if err := dp.WriteRawAP(t.Context(), apSel(0).Address(0x0c), wordData); err == nil {
 		t.Fatal("DRW write succeeded")
 	}
 }

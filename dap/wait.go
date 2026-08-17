@@ -28,6 +28,18 @@ const (
 
 var errFramingUnknown = errors.New("dap: SWD framing is unknown")
 
+type requestNotSentError struct {
+	cause error
+}
+
+func (e *requestNotSentError) Error() string {
+	return e.cause.Error()
+}
+
+func (e *requestNotSentError) Unwrap() error {
+	return e.cause
+}
+
 type transferRequest struct {
 	AP   bool
 	Read bool
@@ -144,9 +156,14 @@ func isCTRLSTATRead(req transferRequest) bool {
 
 func (dp *DebugPort) stopWaiting(waits int, cause error, apWork bool) error {
 	if waits == 0 {
-		return cause
+		return &requestNotSentError{cause: cause}
 	}
 	return dp.finishWait(errors.Join(swd.ErrWait, cause), apWork)
+}
+
+func requestWasNotSent(err error) bool {
+	var notSent *requestNotSentError
+	return errors.As(err, &notSent)
 }
 
 func (dp *DebugPort) finishRetryError(req transferRequest, value uint32, err error, waits int, apWork bool) (uint32, error) {
@@ -179,18 +196,26 @@ func (dp *DebugPort) handleFault(req transferRequest, apWork bool) error {
 	}
 	fault.CTRLSTAT = state
 	fault.StateValid = true
+	apAffected := faultMayAffectAP(req, apWork, state)
 	dp.state.settleDPWrite()
 	dp.state.resolveSELECTFromCTRLSTAT(state)
 	minimal := dp.faultIdentityMinimal(state)
 	if stickyClearForState(state, minimal) != 0 {
-		if err := dp.clearFaultState(ctx, fault, minimal, apWork); err != nil {
+		if err := dp.clearFaultState(ctx, fault, minimal, apAffected); err != nil {
 			return err
 		}
 	}
-	if apWork {
+	if apAffected {
 		dp.state.invalidateAP()
 	}
 	return fault
+}
+
+func faultMayAffectAP(req transferRequest, apWork bool, state uint32) bool {
+	if !apWork || req.AP && !req.Read {
+		return false
+	}
+	return req.AP || state&writeDataError == 0
 }
 
 func (dp *DebugPort) clearFaultState(ctx context.Context, fault *FaultError, minimal bool, apWork bool) error {

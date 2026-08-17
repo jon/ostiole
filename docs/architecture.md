@@ -45,9 +45,9 @@ debugger service.
 
 Raw USB requests stay in `usb` and adapter drivers. MPSSE framing stays in
 `ftdi`. SWD request, acknowledgement, and parity rules stay in `swd`.
-Debug-port banking, posted AP reads, power ownership, and MEM-AP state stay in
-`dap`. Higher layers should call these packages rather than reproduce their
-framing.
+Debug-port banking, AP identification, raw AP addresses, power ownership,
+and MEM-AP state stay in `dap`. Higher layers should call these packages rather
+than reproduce their framing.
 
 ## Discovery and opening
 
@@ -118,13 +118,23 @@ and rejects ORUNDETECT or a non-default DLCR turnaround because `DebugPort`
 does not yet switch response modes or turnaround lengths. It then requests
 acknowledged debug and system power, retries the exact physical request which
 returned WAIT, and completes posted AP transactions through RDBUFF. `NewAPSel`
-constructs an AP selector whose zero value is invalid. After an extended AP stall, `dap.DebugPort` issues DAPABORT and invalidates AP-derived
-state. RDBUFF also settles DP writes, but a stall or FAULT at that barrier does
-not trigger AP-only recovery. A FAULT is not retried: the debug port captures
+constructs an AP selector whose zero value is invalid. `APSel.Address` combines
+it with a complete eight-bit register address; the resulting `APAddress` also
+has an invalid zero value. `ReadAPIDR` reads and decodes the common read-only AP
+identity. Raw AP access rejects invalid or unaligned addresses before traffic.
+Register names and effects remain specific to the selected AP class. A write
+to a MEM-AP data register can write target memory. A raw AP read or write which
+completes, or whose completion is uncertain, invalidates existing `MemAP`
+values. After an extended AP stall, `dap.DebugPort` issues DAPABORT and
+invalidates AP-derived state. RDBUFF also settles DP writes, but a stall or
+FAULT at that barrier does not trigger AP-only recovery. A FAULT is not
+retried: the debug port captures
 bank-zero CTRL/STAT, clears the sticky conditions reported there, verifies the
-clear through CTRL/STAT, returns a typed error, and invalidates AP-derived state
-when the failed request belonged to AP work. A SELECT write remains provisional
-until later traffic establishes whether its data took effect. WDATAERR
+clear through CTRL/STAT, and returns a typed error. AP-derived state is
+invalidated when the failed sequence might have changed it, but not when a
+complete AP-write FAULT or WDATAERR establishes that the write was abandoned.
+A SELECT write remains provisional until later traffic establishes whether
+its data took effect. WDATAERR
 invalidates the cached selection; FAULT handling reads `0x04` only when both
 possible DP banks are zero. If FAULT cleanup, WAIT cleanup, or another transfer
 leaves framing unknown, `dap.DebugPort` invalidates AP-derived state and blocks
@@ -180,6 +190,9 @@ The layers are not entirely passive:
 - Entering SWD clocks line-reset and protocol-selection sequences.
 - Connecting a debug port clears sticky status, selects a register bank, and
   may request volatile debug and system power.
+- Raw AP access has the effects defined by the selected AP class. A raw read
+  can change class-specific state, and a raw write to a MEM-AP data register
+  can write target memory. `DebugPort` does not restore either operation.
 - Reading through a MEM-AP temporarily changes CSW and TAR, then restores
   their prior values.
 
