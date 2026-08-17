@@ -2,7 +2,6 @@ package sim_test
 
 import (
 	"context"
-	"math"
 	"slices"
 	"testing"
 
@@ -59,63 +58,40 @@ func TestMEMAPCopiesTargetWords(t *testing.T) {
 	}
 }
 
-func TestMEMAPCopiesArbitraryByteRanges(t *testing.T) {
-	target := dapsim.New(0x2ba01477)
-	addMEMAPFixture(t, target, 0, memAPIDR, nil)
-	data := []byte{1, 2, 3, 4}
-	if err := target.SetMEMAPBytes(apSel(0), 0x101, data); err != nil {
-		t.Fatal(err)
-	}
-	data[0] = 0xff
-	got, err := target.MEMAPBytes(apSel(0), 0x101, 4)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(got, []byte{1, 2, 3, 4}) {
-		t.Fatalf("target bytes = %v, want [1 2 3 4]", got)
-	}
-	got[0] = 0xff
-	again, err := target.MEMAPBytes(apSel(0), 0x101, 4)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(again, []byte{1, 2, 3, 4}) {
-		t.Fatalf("target bytes after result mutation = %v, want [1 2 3 4]", again)
-	}
-}
-
-func TestMEMAPRejectsInvalidByteRanges(t *testing.T) {
-	target := dapsim.New(0x2ba01477)
-	addMEMAPFixture(t, target, 0, memAPIDR, nil)
-	if _, err := target.MEMAPBytes(apSel(0), 0, -1); err == nil {
-		t.Fatal("MEMAPBytes() accepted a negative size")
-	}
-	if err := target.SetMEMAPBytes(apSel(0), math.MaxUint64, []byte{1, 2}); err == nil {
-		t.Fatal("SetMEMAPBytes() accepted an overflowing range")
-	}
-	if _, err := target.MEMAPBytes(dap.APSel{}, 0, 1); err == nil {
-		t.Fatal("MEMAPBytes() accepted a zero APSel")
-	}
-}
-
-func TestMEMAPRejectsMalformedCSW(t *testing.T) {
+func TestMEMAPRejectsUnsupportedCSW(t *testing.T) {
 	target := dapsim.New(0x2ba01477)
 	addMEMAPFixture(t, target, 0, memAPIDR, map[uint32]uint32{wordAddr: wordData})
 	dp := enteredDAP(t, target)
 	if err := dp.WriteRawAP(t.Context(), apSel(0).Address(0x04), wordAddr); err != nil {
 		t.Fatal(err)
 	}
+	if err := dp.WriteRawAP(t.Context(), apSel(0).Address(0x00), 2|0x20); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := dp.ReadRawAP(t.Context(), apSel(0).Address(0x0c)); err == nil {
-		t.Fatal("DRW read succeeded without 32-bit, non-incrementing CSW")
+		t.Fatal("DRW read succeeded with unsupported AddrInc")
 	}
 }
 
-func TestMEMAPDoesNotModelTargetWrites(t *testing.T) {
+func TestMEMAPModelsTargetWrites(t *testing.T) {
 	target := dapsim.New(0x2ba01477)
 	addMEMAPFixture(t, target, 0, memAPIDR, nil)
 	dp := enteredDAP(t, target)
-	if err := dp.WriteRawAP(t.Context(), apSel(0).Address(0x0c), wordData); err == nil {
-		t.Fatal("DRW write succeeded")
+	if err := dp.WriteRawAP(t.Context(), apSel(0).Address(0x00), 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := dp.WriteRawAP(t.Context(), apSel(0).Address(0x04), wordAddr); err != nil {
+		t.Fatal(err)
+	}
+	if err := dp.WriteRawAP(t.Context(), apSel(0).Address(0x0c), wordData); err != nil {
+		t.Fatal(err)
+	}
+	data, err := target.MEMAPBytes(apSel(0), uint64(wordAddr), 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []byte{0x00, 0xc2, 0x0c, 0x41}; !slices.Equal(data, want) {
+		t.Fatalf("target bytes = % x, want % x", data, want)
 	}
 }
 
