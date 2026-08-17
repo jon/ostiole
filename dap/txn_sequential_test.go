@@ -32,3 +32,20 @@ func TestTxnPlannerPipelinesSequentialAPReads(t *testing.T) {
 		t.Fatalf("pipeline result attribution = %+v", steps)
 	}
 }
+
+func TestTxnPlannerBuffersAPWriteSequence(t *testing.T) {
+	dp := &DebugPort{}
+	ops := []txnOp{{kind: txnWriteAPSequence, apSel: NewAPSel(3), apAddr: memAPDRW, values: []uint32{1, 2, 3}}}
+	steps := newTxnPlanner(dp).plan(ops)
+	if len(steps) != 6 {
+		t.Fatalf("write steps = %+v, want SELECT, its barrier, three AP writes, and RDBUFF", steps)
+	}
+	for i := 2; i <= 4; i++ {
+		if steps[i].req != apTransferRequest(0x0c, false) || steps[i].data != uint32(i-1) || !steps[i].acceptWrite {
+			t.Fatalf("step %d = %+v, want buffered AP DRW write %d", i, steps[i], i-1)
+		}
+	}
+	if steps[5].req != dpTransferRequest(RDBUFF, true) || !steps[5].deliver || !steps[5].completesWrite {
+		t.Fatalf("last step = %+v, want completing RDBUFF", steps[5])
+	}
+}

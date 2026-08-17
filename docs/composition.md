@@ -23,6 +23,7 @@ data-register write can write target memory.
 | Identify one explicitly selected AP | `DebugPort.ReadAPIDR`, `DecodeAPIDR` | `examples/simple/ap-id` |
 | Access another AP register by its full ADIv5 address | `DebugPort.ReadRawAP`, `DebugPort.WriteRawAP` | Package tests |
 | Read or write one aligned target scalar through a MEM-AP | `dap.OpenMemAP`, `MemAP.ReadScalar`, `MemAP.WriteScalar`, `MemAP.Release` | `examples/simple/cortexm-info` uses `ReadWord`. |
+| Read or write arbitrary target bytes through a MEM-AP | `dap.OpenMemAP`, `MemAP.ReadBlock`, `MemAP.WriteBlock`, `MemAP.Release` | Package tests |
 | Identify a Cortex-M through any compatible word reader | `cortexm.Identify` | `examples/simple/cortexm-info` |
 | Test SWD and DAP behavior without hardware | `swd/sim`, `dap/sim` | Package tests |
 
@@ -138,18 +139,28 @@ prefix read before the fault; cancellation and transport or protocol failures
 can also interrupt the read. The rest of the destination remains unchanged. No
 auto-incrementing word run crosses a 1 KiB TAR boundary; unaligned edges still
 require the MEM-AP to accept byte or halfword CSW sizes. If the MEM-AP does not
-accept single address increment, `ReadBlock` writes TAR before each word.
+accept single address increment, `ReadBlock` and `WriteBlock` write TAR before
+each word.
 
-`MemAP.WriteScalar` changes target memory at the selected address. The library
-rejects a value which does not fit the selected size and validates alignment
-and advertised extensions, but deciding whether an address is safe to write
-belongs to the application. Keep the debug port connected until `MemAP.Release`
-restores CSW, TAR, and TARHI when present. Calls sharing a MEM-AP, its debug
-port, or their SWD connection must be serialized; these values do not add
-locking. If a Size64 transfer fails after its first DRW access might have
-started, ordinary debug-port traffic remains blocked. Release the MEM-AP so it
-can terminate the incomplete transfer through CSW, then release and reconnect
-the debug port.
+`MemAP.WriteBlock` accepts the same ranges and uses the same geometry. Its
+returned prefix includes only chunks whose RDBUFF completion requests were
+accepted. If a failed chunk might already have changed memory, the error
+includes `dap.ErrIndeterminate`; the method does not retry that chunk
+automatically. An indeterminate chunk invalidates the `MemAP`, but `Release`
+remains available to restore its saved state. `WriteBlock` retries a clean WAIT
+on the same request until its context ends. An accepted write is not replayed;
+if its RDBUFF completion request returns WAIT, only that request is retried.
+
+`MemAP.WriteScalar` and `MemAP.WriteBlock` change target memory at the selected
+addresses. The library rejects a scalar value which does not fit the selected
+size and validates alignment, range, and advertised extensions, but deciding
+whether an address is safe to write belongs to the application. Keep the debug
+port connected until `MemAP.Release` restores CSW, TAR, and TARHI when present.
+Calls sharing a MEM-AP, its debug port, or their SWD connection must be
+serialized; these values do not add locking. If a Size64 transfer fails after
+its first DRW access might have started, ordinary debug-port traffic remains
+blocked. Release the MEM-AP so it can terminate the incomplete transfer through
+CSW, then release and reconnect the debug port.
 
 Use `target/cortexm` when the desired result is processor identity. It accepts
 the word-reader behavior supplied by `dap.MemAP`, so target code remains

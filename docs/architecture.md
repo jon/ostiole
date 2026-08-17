@@ -37,7 +37,7 @@ debugger service.
 | `ftdi` | Own one explicitly selected FTDI MPSSE port and expose direction-safe SWD bits. |
 | `swd` | Enter SWD, establish its response grammar, and encode, execute, and validate individual or packed DP/AP register transactions. |
 | `swd/sim` | Model SWD protocol entry, register transfers, fixed-frame packing, and transfer limits without hardware. |
-| `dap` | Manage SW-DP identity and power, ordered DP/AP transactions, posted AP access, and scalar MEM-AP access. |
+| `dap` | Manage SW-DP identity and power, ordered DP/AP transactions, posted AP access, and scalar or block MEM-AP access. |
 | `dap/sim` | Model the DP, AP, and byte-addressed target-memory state consumed by `dap`. |
 | `target/cortexm` | Read and decode the architectural Cortex-M CPUID value. |
 | `examples/...` | Demonstrate public package compositions as executable programs. |
@@ -173,13 +173,14 @@ Size64, and addresses above 32 bits when CFG.LA is set. If a Size64 transfer
 fails after its first DRW access might have started, ordinary debug-port
 traffic remains blocked until the MEM-AP and debug port are released. MEM-AP
 cleanup terminates an incomplete transfer through CSW before restoring TAR or
-TARHI. Arbitrary-range reads use sub-word edges and bounded word runs. No
-auto-incrementing word run crosses a 1 KiB TAR boundary. If CSW does not retain
-single address increment, the reader writes TAR before each word. A block read
-retries the same request after WAIT while selection and framing remain known,
-WAIT cleanup succeeds, and its context remains active. If selection, framing,
-or cleanup becomes uncertain, the existing repair behavior applies. A FAULT
-returns the confirmed prefix instead of retrying the failed request.
+TARHI. Arbitrary-range reads and writes use sub-word edges and bounded word
+runs. No auto-incrementing word run crosses a 1 KiB TAR boundary. If CSW does
+not retain single address increment, block access writes TAR before each word.
+`ReadBlock` and `WriteBlock` retry a clean WAIT on the same request until their
+context ends. An accepted write is not replayed; if its RDBUFF completion
+request returns WAIT, `WriteBlock` retries only that request. If selection,
+framing, or cleanup becomes uncertain, the existing repair behavior applies. A
+FAULT returns the confirmed prefix instead of retrying the failed request.
 
 ADIv5 access-port enumeration scans all 256 APSEL values in bounded
 transactions. IDR zero means absent. The scan does not assume contiguous AP
@@ -217,8 +218,8 @@ replaceable while exercising the public protocol and DAP layers.
 
 The current examples and `ost` inspection commands do not reset or halt the
 target, write target memory, or change persistent state. The `dap.MemAP` API
-does expose target-memory writes; applications choose the affected address
-and own the consequences.
+does expose scalar and block target-memory writes; applications choose the
+affected addresses and own the consequences.
 
 The layers are not entirely passive:
 

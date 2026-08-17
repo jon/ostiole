@@ -60,6 +60,7 @@ const (
 	txnReadRawAP
 	txnWriteRawAP
 	txnReadAPSequential
+	txnWriteAPSequence
 )
 
 type txnOp struct {
@@ -68,9 +69,11 @@ type txnOp struct {
 	apSel      APSel
 	apAddr     uint8
 	data       uint32
+	values     []uint32
 	preserveAP bool
 	result     *txnResult
 	err        error
+	accepted   int
 }
 
 // Txn queues an ordered, single-use sequence of ADIv5 DP and AP operations.
@@ -136,6 +139,11 @@ func (t *Txn) readAP(sel APSel, addr uint8) *ReadResult {
 
 func (t *Txn) writeAP(sel APSel, addr uint8, value uint32) *WriteResult {
 	return &WriteResult{result: t.queue(txnOp{kind: txnWriteRawAP, apSel: sel, apAddr: addr, data: value, preserveAP: true})}
+}
+
+func (t *Txn) writeAPSequence(sel APSel, addr uint8, values []uint32) *WriteResult {
+	op := txnOp{kind: txnWriteAPSequence, apSel: sel, apAddr: addr, values: append([]uint32(nil), values...), preserveAP: true}
+	return &WriteResult{result: t.queue(op)}
 }
 
 func (t *Txn) readAPSequential(sel APSel, addr uint8) *ReadResult {
@@ -211,8 +219,11 @@ func (t *Txn) validate() error {
 			_, op.err = validateAPSel(op.apSel)
 		case txnReadRawAP, txnReadAPSequential:
 			_, op.err = validateAPAddress(APAddress{sel: op.apSel, value: op.apAddr}, false)
-		case txnWriteRawAP:
+		case txnWriteRawAP, txnWriteAPSequence:
 			_, op.err = validateAPAddress(APAddress{sel: op.apSel, value: op.apAddr}, true)
+			if op.kind == txnWriteAPSequence && len(op.values) == 0 {
+				op.err = errors.Join(op.err, errors.New("dap: empty access-port write sequence"))
+			}
 		}
 		if op.err != nil {
 			errs = append(errs, op.err)
@@ -224,7 +235,7 @@ func (t *Txn) validate() error {
 func (t *Txn) checkAccess() error {
 	for i := range t.ops {
 		op := &t.ops[i]
-		if op.kind == txnReadAPIDR || op.kind == txnReadRawAP || op.kind == txnWriteRawAP || op.kind == txnReadAPSequential {
+		if op.kind == txnReadAPIDR || op.kind == txnReadRawAP || op.kind == txnWriteRawAP || op.kind == txnReadAPSequential || op.kind == txnWriteAPSequence {
 			op.err = t.dp.requireConnected()
 		} else {
 			op.err = t.dp.requireOperational()
@@ -275,6 +286,7 @@ type txnStep struct {
 	completesWrite   bool
 	apRead           bool
 	apWrite          bool
+	acceptWrite      bool
 	invalidatesAP    bool
 }
 
@@ -315,6 +327,8 @@ func (p *txnPlanner) lower(index int, op txnOp) {
 		p.lowerDP(index, op)
 	case txnReadAPIDR, txnReadRawAP, txnWriteRawAP:
 		p.lowerAP(index, op)
+	case txnWriteAPSequence:
+		p.lowerAPWriteSequence(index, op)
 	}
 }
 
@@ -334,6 +348,32 @@ func (p *txnPlanner) lowerSequentialAP(start int, ops []txnOp) {
 		p.steps = append(p.steps, step)
 	}
 	p.steps = append(p.steps, txnStep{req: dpTransferRequest(RDBUFF, true), dpReg: RDBUFF, op: start + len(ops) - 1, deliver: true, deliverValue: true, operationStarted: true, apRead: true})
+}
+
+func (p *txnPlanner) lowerAPWriteSequence(index int, op txnOp) {
+	selection, _ := op.apSel.Value()
+	value := uint32(selection)<<24 | uint32(op.apAddr&0xf0)
+	p.selectValue(index, value)
+	p.settleSELECT(index)
+	for i, data := range op.values {
+		p.steps = append(p.steps, txnStep{
+			req:              apTransferRequest(op.apAddr&0x0c, false),
+			data:             data,
+			op:               index,
+			operationStarted: i > 0,
+			apWrite:          true,
+			acceptWrite:      true,
+		})
+	}
+	p.steps = append(p.steps, txnStep{
+		req:              dpTransferRequest(RDBUFF, true),
+		dpReg:            RDBUFF,
+		op:               index,
+		deliver:          true,
+		operationStarted: true,
+		completesWrite:   true,
+		apWrite:          true,
+	})
 }
 
 func (p *txnPlanner) lowerDP(index int, op txnOp) {
@@ -714,6 +754,9 @@ func (t *Txn) resolveIndeterminateSteps(steps []txnStep, err error) {
 
 func (t *Txn) acceptStep(step txnStep, value uint32) {
 	t.observeStep(step, value, nil)
+	if step.acceptWrite {
+		t.ops[step.op].accepted++
+	}
 	if !step.req.Read && !step.req.AP {
 		if step.invalidatesAP {
 			t.dp.recordDPWriteState(step.dpReg, step.data)
@@ -761,7 +804,9 @@ func (t *Txn) applyFailedStepEffect(step txnStep, err error) {
 	if (!step.invalidatesAP && !step.apRead && !step.apWrite) || t.dp.state.response == responseLost {
 		return
 	}
-	if errors.Is(err, ErrIndeterminate) || step.completesWrite && errors.Is(err, swd.ErrParity) {
+	indeterminateEffect := errors.Is(err, ErrIndeterminate) && (step.invalidatesAP || step.apRead || step.apWrite)
+	invalidatingParity := step.completesWrite && step.invalidatesAP && errors.Is(err, swd.ErrParity)
+	if indeterminateEffect || invalidatingParity {
 		t.dp.state.invalidateAP()
 	}
 }

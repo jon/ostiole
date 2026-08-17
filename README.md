@@ -53,14 +53,14 @@ writing a MEM-AP data register can write target memory. Any raw access which
 completes or might have completed invalidates existing `MemAP` values.
 `dap.DebugPort` retries only the physical request that returned WAIT.
 After an extended AP stall, it issues DAPABORT rather than replaying the whole
-logical access. A MEM-AP client and its model can read arbitrary byte ranges and
-perform aligned scalar reads and writes, then restore the CSW, TAR, and optional
-TARHI values changed by that access. Cleanup terminates an incomplete 64-bit
-transfer through CSW before restoring the target address registers. A block
-read retries the same request after WAIT while selection and framing remain
-known, WAIT cleanup succeeds, and its context remains active. If the MEM-AP
-does not accept single address increment, the reader writes TAR before each
-word instead.
+logical access. A MEM-AP client and its model can perform arbitrary-range and
+aligned-scalar reads and writes, then restore the CSW, TAR, and optional TARHI
+values changed by that access. Cleanup terminates an incomplete 64-bit transfer
+through CSW before restoring the target address registers. `ReadBlock` and
+`WriteBlock` retry a clean WAIT on the same request until their context ends. An
+accepted write is not replayed; if its RDBUFF completion request returns WAIT,
+`WriteBlock` retries only that request. If the MEM-AP does not accept single
+address increment, block access writes TAR before each word instead.
 
 The [examples](examples) begin with a raw SWD debug-port identity read, then
 add posted access-port reads and a Cortex-M identity read through a MEM-AP.

@@ -5,11 +5,15 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+
+	"github.com/jon/ostiole/swd"
 )
 
 const tarAutoIncrementWindow = uint64(0x400)
 
 const blockReadChunkWords = 64
+
+const blockWriteChunkWords = 64
 
 type blockSegment struct {
 	offset        int
@@ -95,7 +99,7 @@ func (m *MemAP) ReadBlock(ctx context.Context, addr uint64, buf []byte) (int, er
 		return 0, fmt.Errorf("dap: read target memory: %w", err)
 	}
 	segments := blockSegments(addr, len(buf))
-	if err := m.checkBlockSizes(ctx, segments); err != nil {
+	if err := m.checkBlockSizes(ctx, segments, "read"); err != nil {
 		return 0, err
 	}
 	n := 0
@@ -113,7 +117,7 @@ func (m *MemAP) ReadBlock(ctx context.Context, addr uint64, buf []byte) (int, er
 	return n, nil
 }
 
-func (m *MemAP) checkBlockSizes(ctx context.Context, segments []blockSegment) error {
+func (m *MemAP) checkBlockSizes(ctx context.Context, segments []blockSegment, operation string) error {
 	var checked uint8
 	for _, segment := range segments {
 		bit := uint8(segment.size)
@@ -121,8 +125,14 @@ func (m *MemAP) checkBlockSizes(ctx context.Context, segments []blockSegment) er
 			continue
 		}
 		checked |= bit
-		if err := m.selectCSWUntilContext(ctx, segment.size, 0); err != nil {
-			return fmt.Errorf("dap: read target memory: %w", err)
+		var err error
+		if operation == "read" {
+			err = m.selectCSWUntilContext(ctx, segment.size, 0)
+		} else {
+			err = m.selectCSWUntilContext(ctx, segment.size, 0)
+		}
+		if err != nil {
+			return fmt.Errorf("dap: %s target memory: %w", operation, err)
 		}
 	}
 	return nil
@@ -209,5 +219,156 @@ func (m *MemAP) putBlockValue(dst []byte, size TransferSize, value uint64) {
 		order.PutUint16(dst, uint16(value))
 	case Size32:
 		order.PutUint32(dst, uint32(value))
+	}
+}
+
+// WriteBlock writes an arbitrary target-memory range from buf. It returns the
+// contiguous byte prefix whose RDBUFF completion requests were accepted. If
+// the current chunk might have reached memory, the error wraps ErrIndeterminate
+// and WriteBlock does not retry that chunk. An indeterminate chunk invalidates
+// the MemAP; Release remains available to restore its saved state. WriteBlock
+// retries the same request after WAIT while selection and framing remain known,
+// WAIT cleanup succeeds, and the context remains active. It never replays an
+// accepted write; if the RDBUFF completion request returns WAIT, it retries only
+// that request. If the MEM-AP does not accept single address increment,
+// WriteBlock writes TAR before each word.
+func (m *MemAP) WriteBlock(ctx context.Context, addr uint64, buf []byte) (int, error) {
+	if len(buf) == 0 {
+		return 0, nil
+	}
+	if m == nil || m.dp == nil {
+		return 0, errors.New("dap: nil MEM-AP")
+	}
+	if m.epoch != m.dp.state.apGeneration {
+		return 0, errors.New("dap: write target memory: MEM-AP state was invalidated by debug-port recovery")
+	}
+	if err := m.dp.requireConnected(); err != nil {
+		return 0, err
+	}
+	if err := validateBlockRange(addr, len(buf), m.largeAddress); err != nil {
+		return 0, fmt.Errorf("dap: write target memory: %w", err)
+	}
+	segments := blockSegments(addr, len(buf))
+	if err := m.checkBlockSizes(ctx, segments, "write"); err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, segment := range segments {
+		var err error
+		n, err = m.writeBlockSegment(ctx, buf, segment, n)
+		if err != nil {
+			return n, err
+		}
+	}
+	return n, nil
+}
+
+func (m *MemAP) writeBlockSegment(ctx context.Context, buf []byte, segment blockSegment, n int) (int, error) {
+	chunkLimit := 1
+	addrInc := uint32(0)
+	if segment.autoIncrement {
+		chunkLimit = blockWriteChunkWords
+		addrInc = cswIncSingle
+	}
+	width, _ := sizeBytes(segment.size)
+	for first := 0; first < segment.count; first += chunkLimit {
+		count := min(segment.count-first, chunkLimit)
+		address := segment.address + uint64(first*width)
+		values := make([]uint32, count)
+		for i := range values {
+			offset := segment.offset + (first+i)*width
+			values[i] = m.blockWriteValue(buf[offset:], address+uint64(i*width), segment.size)
+		}
+		confirmed, err := m.writeBlockChunk(ctx, address, segment.size, addrInc, values)
+		n += confirmed * width
+		if err != nil {
+			return n, err
+		}
+	}
+	return n, nil
+}
+
+func (m *MemAP) writeBlockChunk(ctx context.Context, addr uint64, size TransferSize, addrInc uint32, values []uint32) (int, error) {
+	if err := m.selectCSWUntilContext(ctx, size, addrInc); err != nil {
+		if addrInc == cswIncSingle && errors.Is(err, errAddressIncrementUnsupported) {
+			return m.writeWordsWithoutIncrement(ctx, addr, size, values)
+		}
+		return 0, err
+	}
+	return m.writeBlockValues(ctx, addr, values)
+}
+
+func (m *MemAP) writeWordsWithoutIncrement(ctx context.Context, addr uint64, size TransferSize, values []uint32) (int, error) {
+	if err := m.selectCSWUntilContext(ctx, size, 0); err != nil {
+		return 0, err
+	}
+	width, _ := sizeBytes(size)
+	confirmed := 0
+	for i := range values {
+		count, err := m.writeBlockValues(ctx, addr+uint64(i*width), values[i:i+1])
+		confirmed += count
+		if err != nil {
+			return confirmed, err
+		}
+	}
+	return confirmed, nil
+}
+
+func (m *MemAP) writeBlockValues(ctx context.Context, addr uint64, values []uint32) (int, error) {
+	if m.largeAddress {
+		m.restoreTARHI = true
+		if err := m.writeAPUntilContext(ctx, memAPTARHI, uint32(addr>>32)); err != nil {
+			return 0, err
+		}
+	}
+	m.restoreTAR = true
+	if err := m.writeAPUntilContext(ctx, memAPTAR, uint32(addr)); err != nil {
+		return 0, err
+	}
+	writeTxn := m.dp.newTxnUntilContext()
+	writeTxn.writeAPSequence(m.sel, memAPDRW, values)
+	generation := m.dp.state.apGeneration
+	err := writeTxn.Commit(ctx)
+	if err == nil {
+		return len(values), nil
+	}
+	accepted := writeTxn.ops[0].accepted
+	if accepted == len(values) && errors.Is(err, swd.ErrParity) && !errors.Is(err, ErrIndeterminate) {
+		return len(values), err
+	}
+	if accepted > 0 && (len(values) != 1 || !faultReportsWriteDataError(err)) {
+		err = m.markBlockWriteIndeterminate(err, generation)
+	}
+	return 0, err
+}
+
+func (m *MemAP) writeAPUntilContext(ctx context.Context, addr uint8, value uint32) error {
+	txn := m.dp.newTxnUntilContext()
+	txn.writeAP(m.sel, addr, value)
+	return txn.Commit(ctx)
+}
+
+func (m *MemAP) markBlockWriteIndeterminate(err error, generation uint64) error {
+	if errors.Is(err, ErrIndeterminate) {
+		return err
+	}
+	if m.dp.state.apGeneration == generation {
+		m.dp.state.invalidateAP()
+	}
+	return errors.Join(err, ErrIndeterminate)
+}
+
+func (m *MemAP) blockWriteValue(src []byte, addr uint64, size TransferSize) uint32 {
+	var order binary.ByteOrder = binary.LittleEndian
+	if m.bigEndian {
+		order = binary.BigEndian
+	}
+	switch size {
+	case Size8:
+		return uint32(src[0]) << m.laneShift(addr, size)
+	case Size16:
+		return uint32(order.Uint16(src)) << m.laneShift(addr, size)
+	default:
+		return order.Uint32(src)
 	}
 }
