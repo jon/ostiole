@@ -62,6 +62,33 @@ Before acceptance, a pull request must:
 - Keep examples compact demonstrations of public APIs. Do not duplicate
   framing already owned by a library package.
 
+## Public API design
+
+- Expose the meaning owned by a package, not an incidental encoding from the
+  layer below it. Distinct operations remain distinct even when they share a
+  wire value.
+- Put every fact needed to interpret a value in its type or owning object.
+  This includes direction, bank, response mode, device or register class, and
+  resource ownership.
+- Prefer immutable constants and opaque constructed values for public
+  vocabulary. Exported sentinel errors are the ordinary exception.
+- Make zero values harmless or invalid. A zero value must never silently
+  select an effectful operation.
+- Do not ask callers to repeat state which the callee already owns or can
+  derive. State transitions which must succeed together belong to one owning
+  operation.
+- Keep a raw escape hatch only at the layer which owns its representation. It
+  must not bypass cached or restorable state owned by a higher-level value.
+- Name acquisition, effects, restoration, and cleanup plainly. Do not hide
+  target traffic or cleanup obligations behind a constructor which appears to
+  allocate a value.
+- Do not export an enum or abstraction with one concrete choice in case a
+  second choice appears later.
+- Reject invalid input before USB, adapter, wire, debug-port, access-port, or
+  target traffic.
+- Before v1, replace a misleading API instead of preserving parallel old and
+  new vocabularies through aliases or compatibility shims.
+
 ## Tests and hardware safety
 
 - Include behavioral tests at the package boundary that owns the change. Keep
