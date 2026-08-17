@@ -18,7 +18,7 @@ const (
 
 func TestMEMAPReadsConfiguredTargetWord(t *testing.T) {
 	target := dapsim.New(0x2ba01477)
-	target.AddMEMAP(0, memAPIDR, map[uint32]uint32{wordAddr: wordData})
+	addMEMAPFixture(t, target, 0, memAPIDR, map[uint32]uint32{wordAddr: wordData})
 	dp := enteredDAP(t, target)
 
 	if err := dp.WriteRawAP(t.Context(), apSel(0).Address(0x00), 2); err != nil {
@@ -39,7 +39,7 @@ func TestMEMAPReadsConfiguredTargetWord(t *testing.T) {
 func TestMEMAPCopiesTargetWords(t *testing.T) {
 	words := map[uint32]uint32{wordAddr: wordData}
 	target := dapsim.New(0x2ba01477)
-	target.AddMEMAP(0, memAPIDR, words)
+	addMEMAPFixture(t, target, 0, memAPIDR, words)
 	words[wordAddr] = 0
 	dp := enteredDAP(t, target)
 	if err := dp.WriteRawAP(t.Context(), apSel(0).Address(0x00), 2); err != nil {
@@ -59,7 +59,7 @@ func TestMEMAPCopiesTargetWords(t *testing.T) {
 
 func TestMEMAPRejectsMalformedCSW(t *testing.T) {
 	target := dapsim.New(0x2ba01477)
-	target.AddMEMAP(0, memAPIDR, map[uint32]uint32{wordAddr: wordData})
+	addMEMAPFixture(t, target, 0, memAPIDR, map[uint32]uint32{wordAddr: wordData})
 	dp := enteredDAP(t, target)
 	if err := dp.WriteRawAP(t.Context(), apSel(0).Address(0x04), wordAddr); err != nil {
 		t.Fatal(err)
@@ -71,7 +71,7 @@ func TestMEMAPRejectsMalformedCSW(t *testing.T) {
 
 func TestMEMAPDoesNotModelTargetWrites(t *testing.T) {
 	target := dapsim.New(0x2ba01477)
-	target.AddMEMAP(0, memAPIDR, nil)
+	addMEMAPFixture(t, target, 0, memAPIDR, nil)
 	dp := enteredDAP(t, target)
 	if err := dp.WriteRawAP(t.Context(), apSel(0).Address(0x0c), wordData); err == nil {
 		t.Fatal("DRW write succeeded")

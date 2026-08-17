@@ -10,7 +10,7 @@ import (
 
 func TestPostedAccessPortReads(t *testing.T) {
 	target := dapsim.New(0x2ba01477)
-	target.AddAP(0, 0x04770031)
+	addAPFixture(t, target, 0, 0x04770031)
 	conn := enteredConn(t, target)
 	selectAP(t, conn, 0, 0x0f)
 
@@ -32,7 +32,7 @@ func TestPostedAccessPortReads(t *testing.T) {
 
 func TestSelectedAccessPortsRemainIndependent(t *testing.T) {
 	target := dapsim.New(0x2ba01477)
-	target.AddAP(1, 0x14770031)
+	addAPFixture(t, target, 1, 0x14770031)
 	conn := enteredConn(t, target)
 
 	selectAP(t, conn, 1, 0)

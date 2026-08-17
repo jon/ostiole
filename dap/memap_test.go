@@ -13,7 +13,7 @@ import (
 
 func TestReadAlignedMEMAPWord(t *testing.T) {
 	target := sim.New(0x2ba01477)
-	target.AddMEMAP(0, 0x00010001, map[uint32]uint32{
+	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{
 		0xe000ed00: 0x410cc200,
 	})
 	dp := enteredDAPClient(t, target)
@@ -42,7 +42,7 @@ func TestReadAlignedMEMAPWord(t *testing.T) {
 
 func TestMEMAPReleaseRestoresRegisterState(t *testing.T) {
 	target := sim.New(0x2ba01477)
-	target.AddMEMAP(0, 0x00010001, map[uint32]uint32{
+	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{
 		0xe000ed00: 0x410cc200,
 	})
 	dp := enteredDAPClient(t, target)
@@ -72,7 +72,7 @@ func TestMEMAPReleaseRestoresRegisterState(t *testing.T) {
 
 func TestMEMAPReleaseCanRetry(t *testing.T) {
 	target := sim.New(0x2ba01477)
-	target.AddMEMAP(0, 0x00010001, map[uint32]uint32{0: 1})
+	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 1})
 	dp := enteredDAPClient(t, target)
 	mem, err := dap.NewMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
@@ -93,7 +93,7 @@ func TestMEMAPReleaseCanRetry(t *testing.T) {
 
 func TestMEMAPRejectsUnalignedWord(t *testing.T) {
 	target := sim.New(0x2ba01477)
-	target.AddMEMAP(0, 0x00010001, nil)
+	addMEMAP(t, target, 0, 0x00010001, nil)
 	mem, err := dap.NewMemAP(t.Context(), enteredDAPClient(t, target), apSel(0))
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +105,7 @@ func TestMEMAPRejectsUnalignedWord(t *testing.T) {
 
 func TestImmediateRawAPWriteInvalidatesMEMAP(t *testing.T) {
 	target := sim.New(0x2ba01477)
-	target.AddMEMAP(0, 0x00010001, map[uint32]uint32{0: 1})
+	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 1})
 	dp := enteredDAPClient(t, target)
 	mem, err := dap.NewMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
@@ -119,7 +119,7 @@ func TestImmediateRawAPWriteInvalidatesMEMAP(t *testing.T) {
 
 func TestQueuedRawAPWriteInvalidatesMEMAP(t *testing.T) {
 	target := sim.New(0x2ba01477)
-	target.AddMEMAP(0, 0x00010001, map[uint32]uint32{0: 1})
+	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 1})
 	dp := enteredDAPClient(t, target)
 	mem, err := dap.NewMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
@@ -138,7 +138,7 @@ func TestQueuedRawAPWriteInvalidatesMEMAP(t *testing.T) {
 
 func TestImmediateRawAPReadInvalidatesMEMAP(t *testing.T) {
 	target := sim.New(0x2ba01477)
-	target.AddMEMAP(0, 0x00010001, map[uint32]uint32{0: 1})
+	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 1})
 	dp := enteredDAPClient(t, target)
 	if err := dp.WriteRawAP(t.Context(), apSel(0).Address(0x00), 2); err != nil {
 		t.Fatal(err)
@@ -155,7 +155,7 @@ func TestImmediateRawAPReadInvalidatesMEMAP(t *testing.T) {
 
 func TestQueuedRawAPReadInvalidatesMEMAP(t *testing.T) {
 	target := sim.New(0x2ba01477)
-	target.AddMEMAP(0, 0x00010001, map[uint32]uint32{0: 1})
+	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 1})
 	dp := enteredDAPClient(t, target)
 	if err := dp.WriteRawAP(t.Context(), apSel(0).Address(0x00), 2); err != nil {
 		t.Fatal(err)
@@ -177,7 +177,7 @@ func TestQueuedRawAPReadInvalidatesMEMAP(t *testing.T) {
 
 func TestAPIDRReadsKeepMEMAPUsable(t *testing.T) {
 	target := sim.New(0x2ba01477)
-	target.AddMEMAP(0, 0x00010001, map[uint32]uint32{0: 1})
+	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 1})
 	dp := enteredDAPClient(t, target)
 	mem, err := dap.NewMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
@@ -201,7 +201,7 @@ func TestAPIDRReadsKeepMEMAPUsable(t *testing.T) {
 
 func TestIndeterminateImmediateRawAPWriteInvalidatesMEMAP(t *testing.T) {
 	target := &barrierTarget{Target: sim.New(0x2ba01477)}
-	target.AddMEMAP(0, 0x00010001, map[uint32]uint32{0: 1})
+	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 1})
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -220,7 +220,7 @@ func TestIndeterminateImmediateRawAPWriteInvalidatesMEMAP(t *testing.T) {
 
 func TestIndeterminateQueuedRawAPWriteInvalidatesMEMAP(t *testing.T) {
 	target := &barrierTarget{Target: sim.New(0x2ba01477)}
-	target.AddMEMAP(0, 0x00010001, map[uint32]uint32{0: 1})
+	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 1})
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -244,7 +244,7 @@ func TestIndeterminateQueuedRawAPWriteInvalidatesMEMAP(t *testing.T) {
 
 func TestIndeterminateImmediateRawAPReadInvalidatesMEMAP(t *testing.T) {
 	target := &barrierTarget{Target: sim.New(0x2ba01477)}
-	target.AddMEMAP(0, 0x00010001, map[uint32]uint32{0: 1})
+	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 1})
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -263,7 +263,7 @@ func TestIndeterminateImmediateRawAPReadInvalidatesMEMAP(t *testing.T) {
 
 func TestIndeterminateQueuedRawAPReadInvalidatesMEMAP(t *testing.T) {
 	target := &barrierTarget{Target: sim.New(0x2ba01477)}
-	target.AddMEMAP(0, 0x00010001, map[uint32]uint32{0: 1})
+	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 1})
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -287,7 +287,7 @@ func TestIndeterminateQueuedRawAPReadInvalidatesMEMAP(t *testing.T) {
 
 func TestInvalidRawAPReadKeepsMEMAPUsable(t *testing.T) {
 	target := newWaitTarget()
-	target.AddMEMAP(0, 0x00010001, map[uint32]uint32{0: 1})
+	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 1})
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -307,7 +307,7 @@ func TestInvalidRawAPReadKeepsMEMAPUsable(t *testing.T) {
 
 func TestCanceledRawAPReadKeepsMEMAPUsableWithoutTraffic(t *testing.T) {
 	target := newWaitTarget()
-	target.AddMEMAP(0, 0x00010001, map[uint32]uint32{0: 1})
+	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 1})
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -333,7 +333,7 @@ func TestCanceledRawAPReadKeepsMEMAPUsableWithoutTraffic(t *testing.T) {
 
 func TestCanceledQueuedRawAPReadKeepsMEMAPUsableWithoutTraffic(t *testing.T) {
 	target := newWaitTarget()
-	target.AddMEMAP(0, 0x00010001, map[uint32]uint32{0: 1})
+	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 1})
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -364,7 +364,7 @@ func TestCanceledQueuedRawAPReadKeepsMEMAPUsableWithoutTraffic(t *testing.T) {
 
 func TestRejectedRawAPWritesKeepMEMAPUsable(t *testing.T) {
 	target := newWaitTarget()
-	target.AddMEMAP(0, 0x00010001, map[uint32]uint32{0: 1})
+	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 1})
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -401,7 +401,7 @@ func TestRejectedRawAPWritesKeepMEMAPUsable(t *testing.T) {
 
 func TestCanceledRawAPWriteKeepsMEMAPUsableWithoutTraffic(t *testing.T) {
 	target := newWaitTarget()
-	target.AddMEMAP(0, 0x00010001, map[uint32]uint32{0: 1})
+	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 1})
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -432,7 +432,7 @@ func TestCanceledRawAPWriteKeepsMEMAPUsableWithoutTraffic(t *testing.T) {
 
 func TestNewMEMAPRejectsAbsentAndNonMemoryPorts(t *testing.T) {
 	target := sim.New(0x2ba01477)
-	target.AddAP(1, 0x00000001)
+	addAP(t, target, 1, 0x00000001)
 	dp := enteredDAPClient(t, target)
 	var zero dap.APSel
 	if _, err := dap.NewMemAP(t.Context(), dp, zero); err == nil {

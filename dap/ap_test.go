@@ -12,7 +12,7 @@ import (
 
 func TestAccessSelectedAPRegisters(t *testing.T) {
 	target := sim.New(0x2ba01477)
-	target.AddAP(0, 0x04770031)
+	addAP(t, target, 0, 0x04770031)
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -78,7 +78,7 @@ func TestAPAccessRequiresConnectedDebugPort(t *testing.T) {
 
 func TestAPWriteWaitsForRDBUFF(t *testing.T) {
 	target := &barrierTarget{Target: sim.New(0x2ba01477)}
-	target.AddAP(0, 0x04770031)
+	addAP(t, target, 0, 0x04770031)
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -106,7 +106,7 @@ func TestDecodeAPIDR(t *testing.T) {
 
 func TestRawAPAccessRejectsInvalidAddressesBeforeTraffic(t *testing.T) {
 	target := &countingTarget{Target: sim.New(0x2ba01477)}
-	target.AddAP(0, 0x04770031)
+	addAP(t, target, 0, 0x04770031)
 	dp := enteredDP(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)

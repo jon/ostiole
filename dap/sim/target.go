@@ -37,7 +37,7 @@ type Target struct {
 	dpBankSet [16]bool
 	selectDP  uint32
 	rdbuff    uint32
-	aps       map[uint8]*accessPort
+	aps       map[dap.APSel]*accessPort
 }
 
 type accessPort struct {
@@ -48,7 +48,7 @@ type accessPort struct {
 
 // New returns an SW-DP target with the supplied identity.
 func New(dpidr uint32) *Target {
-	return &Target{dpidr: dpidr, aps: make(map[uint8]*accessPort)}
+	return &Target{dpidr: dpidr, aps: make(map[dap.APSel]*accessPort)}
 }
 
 // SetDPRegister sets one simulated banked debug-port register.
@@ -80,21 +80,47 @@ func (t *Target) SetDPRegister(reg dap.DPRegister, value uint32) error {
 	return nil
 }
 
-// AddAP adds an access port with the supplied identification register.
-func (t *Target) AddAP(sel uint8, idr uint32) {
+// AddAP adds an access port with the supplied identification register. It
+// rejects a zero APIDR and an existing selector.
+func (t *Target) AddAP(sel dap.APSel, idr uint32) error {
 	if t == nil {
-		return
+		return errors.New("dap/sim: nil target")
+	}
+	if idr == 0 {
+		return errors.New("dap/sim: APIDR must be nonzero")
+	}
+	selection, err := sel.Value()
+	if err != nil {
+		return err
+	}
+	if _, ok := t.aps[sel]; ok {
+		return fmt.Errorf("dap/sim: AP %d is already configured", selection)
 	}
 	t.aps[sel] = &accessPort{regs: map[uint8]uint32{0xfc: idr}}
+	return nil
 }
 
-// AddMEMAP adds a word-readable memory access port.
-func (t *Target) AddMEMAP(sel uint8, idr uint32, words map[uint32]uint32) {
+// AddMEMAP adds a word-readable memory access port. It rejects a non-MEM-AP
+// identity, an existing selector, and unaligned target-word addresses.
+func (t *Target) AddMEMAP(sel dap.APSel, idr uint32, words map[uint32]uint32) error {
 	if t == nil {
-		return
+		return errors.New("dap/sim: nil target")
+	}
+	if idr == 0 || dap.DecodeAPIDR(idr).Class != 8 {
+		return errors.New("dap/sim: MEM-AP requires a nonzero class-8 APIDR")
+	}
+	selection, err := sel.Value()
+	if err != nil {
+		return err
+	}
+	if _, ok := t.aps[sel]; ok {
+		return fmt.Errorf("dap/sim: AP %d is already configured", selection)
 	}
 	memory := make(map[uint32]uint32, len(words))
 	for addr, value := range words {
+		if addr&3 != 0 {
+			return fmt.Errorf("dap/sim: unaligned target-word address %#08x", addr)
+		}
 		memory[addr] = value
 	}
 	t.aps[sel] = &accessPort{
@@ -102,6 +128,7 @@ func (t *Target) AddMEMAP(sel uint8, idr uint32, words map[uint32]uint32) {
 		memory: memory,
 		memAP:  true,
 	}
+	return nil
 }
 
 // Read implements swd/sim.Target.
@@ -184,7 +211,7 @@ func validateRequest(req swdsim.Request, read bool) error {
 
 func (t *Target) readAP(req swdsim.Request) (uint32, error) {
 	posted := t.rdbuff
-	ap := t.aps[uint8(t.selectDP>>24)]
+	ap := t.aps[dap.NewAPSel(uint8(t.selectDP>>24))]
 	if ap == nil {
 		t.rdbuff = 0
 		return posted, nil
@@ -203,7 +230,7 @@ func (t *Target) readAP(req swdsim.Request) (uint32, error) {
 }
 
 func (t *Target) writeAP(req swdsim.Request, value uint32) error {
-	ap := t.aps[uint8(t.selectDP>>24)]
+	ap := t.aps[dap.NewAPSel(uint8(t.selectDP>>24))]
 	if ap == nil {
 		return nil
 	}
