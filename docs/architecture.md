@@ -103,8 +103,10 @@ The FTDI channel clocks direction-explicit bit streams. It does not interpret
 SWD requests. `swd.Conn` owns request framing, turnaround, acknowledgements,
 data parity, line reset, and the JTAG-to-SWD selection sequence.
 
-The SWD transfer performs one physical transaction. A WAIT or FAULT
-acknowledgement is returned to its caller without retrying. See
+`swd.Conn` separates DP and AP reads from writes and rejects an unsupported
+physical register address before sending traffic. Each call performs one
+physical transaction. A WAIT or FAULT acknowledgement is returned to its
+caller without retrying. See
 [Serial Wire Debug](protocols/swd.md) for the wire protocol and current bench
 notes.
 

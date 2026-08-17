@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
-	"github.com/jon/ostiole/swd"
 )
 
 // APSel identifies one access port.
@@ -33,7 +31,7 @@ func (dp *DebugPort) readAP(ctx context.Context, sel APSel, reg APReg) (uint32, 
 	if err := dp.selectAP(ctx, sel, reg); err != nil {
 		return 0, err
 	}
-	_, err := dp.transfer(ctx, swd.Request{
+	_, err := dp.transfer(ctx, transferRequest{
 		AP:   true,
 		Read: true,
 		Addr: uint8(reg) & 0x0c,
@@ -60,7 +58,7 @@ func (dp *DebugPort) writeAP(ctx context.Context, sel APSel, reg APReg, value ui
 	if err := dp.selectAP(ctx, sel, reg); err != nil {
 		return err
 	}
-	_, err := dp.transfer(ctx, swd.Request{
+	_, err := dp.transfer(ctx, transferRequest{
 		AP:   true,
 		Addr: uint8(reg) & 0x0c,
 	}, value)

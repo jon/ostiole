@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/jon/ostiole/swd"
+	swdsim "github.com/jon/ostiole/swd/sim"
 )
 
 const (
@@ -89,7 +89,7 @@ func (t *Target) AddMEMAP(sel uint8, idr uint32, words map[uint32]uint32) {
 }
 
 // Read implements swd/sim.Target.
-func (t *Target) Read(ctx context.Context, req swd.Request) (uint32, error) {
+func (t *Target) Read(ctx context.Context, req swdsim.Request) (uint32, error) {
 	if t == nil {
 		return 0, errors.New("dap/sim: nil target")
 	}
@@ -116,7 +116,7 @@ func (t *Target) Read(ctx context.Context, req swd.Request) (uint32, error) {
 }
 
 // Write implements swd/sim.Target.
-func (t *Target) Write(ctx context.Context, req swd.Request, value uint32) error {
+func (t *Target) Write(ctx context.Context, req swdsim.Request, value uint32) error {
 	if t == nil {
 		return errors.New("dap/sim: nil target")
 	}
@@ -148,7 +148,7 @@ func (t *Target) Write(ctx context.Context, req swd.Request, value uint32) error
 	return nil
 }
 
-func (t *Target) readAP(req swd.Request) (uint32, error) {
+func (t *Target) readAP(req swdsim.Request) (uint32, error) {
 	posted := t.rdbuff
 	ap := t.aps[uint8(t.selectDP>>24)]
 	if ap == nil {
@@ -168,7 +168,7 @@ func (t *Target) readAP(req swd.Request) (uint32, error) {
 	return posted, nil
 }
 
-func (t *Target) writeAP(req swd.Request, value uint32) error {
+func (t *Target) writeAP(req swdsim.Request, value uint32) error {
 	ap := t.aps[uint8(t.selectDP>>24)]
 	if ap == nil {
 		return nil
@@ -181,7 +181,7 @@ func (t *Target) writeAP(req swd.Request, value uint32) error {
 	return nil
 }
 
-func (t *Target) apReg(req swd.Request) uint8 {
+func (t *Target) apReg(req swdsim.Request) uint8 {
 	bank := uint8(t.selectDP>>4) & 0x0f
 	return bank<<4 | req.Addr
 }

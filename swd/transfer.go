@@ -3,13 +3,52 @@ package swd
 import (
 	"context"
 	"errors"
-	"fmt"
 )
 
-// Transfer performs one SWD register transaction without retrying.
-func (c *Conn) Transfer(ctx context.Context, req Request, data uint32) (uint32, error) {
-	if req.Addr&^0x0c != 0 {
-		return 0, fmt.Errorf("swd: invalid register address %#02x", req.Addr)
+// ReadDP reads one debug-port register without retrying. addr must be 0x00,
+// 0x04, 0x08, or 0x0c.
+func (c *Conn) ReadDP(ctx context.Context, addr uint8) (uint32, error) {
+	return c.read(ctx, false, addr)
+}
+
+// WriteDP writes one debug-port register without retrying. addr must be 0x00,
+// 0x04, 0x08, or 0x0c.
+func (c *Conn) WriteDP(ctx context.Context, addr uint8, value uint32) error {
+	return c.write(ctx, false, addr, value)
+}
+
+// ReadAP reads one access-port register without retrying. addr must be 0x00,
+// 0x04, 0x08, or 0x0c.
+func (c *Conn) ReadAP(ctx context.Context, addr uint8) (uint32, error) {
+	return c.read(ctx, true, addr)
+}
+
+// WriteAP writes one access-port register without retrying. addr must be 0x00,
+// 0x04, 0x08, or 0x0c.
+func (c *Conn) WriteAP(ctx context.Context, addr uint8, value uint32) error {
+	return c.write(ctx, true, addr, value)
+}
+
+func (c *Conn) read(ctx context.Context, ap bool, addr uint8) (uint32, error) {
+	req, err := newRequest(ap, true, addr)
+	if err != nil {
+		return 0, err
+	}
+	return c.transfer(ctx, req, 0)
+}
+
+func (c *Conn) write(ctx context.Context, ap bool, addr uint8, value uint32) error {
+	req, err := newRequest(ap, false, addr)
+	if err != nil {
+		return err
+	}
+	_, err = c.transfer(ctx, req, value)
+	return err
+}
+
+func (c *Conn) transfer(ctx context.Context, req request, value uint32) (uint32, error) {
+	if c == nil {
+		return 0, errors.New("swd: nil connection")
 	}
 	header := &sequence{}
 	header.appendByte(true, requestByte(req))
@@ -22,10 +61,10 @@ func (c *Conn) Transfer(ctx context.Context, req Request, data uint32) (uint32, 
 	if err := ackError(ack); err != nil {
 		return 0, c.finishFailed(ctx, err)
 	}
-	if req.Read {
+	if req.isRead() {
 		return c.readData(ctx)
 	}
-	return 0, c.writeData(ctx, data)
+	return 0, c.writeData(ctx, value)
 }
 
 func readACK(input []byte, offset int) byte {
@@ -88,12 +127,12 @@ func (c *Conn) writeData(ctx context.Context, value uint32) error {
 	return err
 }
 
-func requestByte(req Request) byte {
-	fields := req.Addr
-	if req.AP {
+func requestByte(req request) byte {
+	fields := req.address()
+	if req.isAP() {
 		fields |= 1
 	}
-	if req.Read {
+	if req.isRead() {
 		fields |= 2
 	}
 	header := byte(0x81) | fields<<1

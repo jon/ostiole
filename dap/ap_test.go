@@ -7,7 +7,6 @@ import (
 
 	"github.com/jon/ostiole/dap"
 	"github.com/jon/ostiole/dap/sim"
-	"github.com/jon/ostiole/swd"
 	swdsim "github.com/jon/ostiole/swd/sim"
 )
 
@@ -96,7 +95,7 @@ type barrierTarget struct {
 	postedWrite bool
 }
 
-func (t *barrierTarget) Read(ctx context.Context, req swd.Request) (uint32, error) {
+func (t *barrierTarget) Read(ctx context.Context, req swdsim.Request) (uint32, error) {
 	if !req.AP && req.Addr == 0x0c && t.postedWrite && t.failBarrier {
 		t.postedWrite = false
 		return 0, errBarrier
@@ -104,7 +103,7 @@ func (t *barrierTarget) Read(ctx context.Context, req swd.Request) (uint32, erro
 	return t.Target.Read(ctx, req)
 }
 
-func (t *barrierTarget) Write(ctx context.Context, req swd.Request, value uint32) error {
+func (t *barrierTarget) Write(ctx context.Context, req swdsim.Request, value uint32) error {
 	if req.AP {
 		t.postedWrite = true
 	}

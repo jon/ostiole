@@ -56,7 +56,7 @@ wires its MPSSE port for debugging.
 | --- | --- | --- |
 | Line reset | Yes | Unit tested. |
 | JTAG-to-SWD selection | Yes | Unit tested and used by every SWD HIL path. |
-| DP and AP requests | Yes | One request at a time with header, turnaround, data, and idle cycles. |
+| DP and AP requests | Yes | Separate `ReadDP`, `WriteDP`, `ReadAP`, and `WriteAP` calls validate the physical register address before sending one request with header, turnaround, data, and idle cycles. |
 | ACK classification | Yes | OK, WAIT, FAULT, and invalid acknowledgements are distinguished. |
 | Read parity | Yes | Invalid read parity is reported. |
 | Automatic retries | No | A raw `swd.Conn` transfer returns WAIT and FAULT directly; retry policy belongs to DAP. |

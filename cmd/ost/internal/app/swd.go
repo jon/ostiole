@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-
-	"github.com/jon/ostiole/swd"
 )
 
 func runSWD(ctx context.Context, args []string, stdout io.Writer, ops operations) error {
@@ -29,5 +27,5 @@ func readDPIDR(ctx context.Context) (_ uint32, err error) {
 	defer func() {
 		err = errors.Join(err, session.close())
 	}()
-	return session.connection.Transfer(ctx, swd.Request{Read: true}, 0)
+	return session.connection.ReadDP(ctx, 0x00)
 }

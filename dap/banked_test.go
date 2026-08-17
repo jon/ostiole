@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/jon/ostiole/dap"
-	"github.com/jon/ostiole/swd"
+	swdsim "github.com/jon/ostiole/swd/sim"
 )
 
 func TestBankedDPAccessPreservesSELECTFields(t *testing.T) {
@@ -29,7 +29,7 @@ func TestBankedDPAccessPreservesSELECTFields(t *testing.T) {
 	if value != dlcr {
 		t.Fatalf("DLCR = %#08x, want %#08x", value, dlcr)
 	}
-	wantRequests := []swd.Request{{Addr: uint8(dap.SELECT)}, {Read: true, Addr: uint8(dap.RDBUFF)}, {Read: true, Addr: uint8(dap.CTRLSTAT)}}
+	wantRequests := []swdsim.Request{{Addr: uint8(dap.SELECT)}, {Read: true, Addr: uint8(dap.RDBUFF)}, {Read: true, Addr: uint8(dap.CTRLSTAT)}}
 	if got := target.requests[beforeBankedRead : beforeBankedRead+len(wantRequests)]; !equalRequests(got, wantRequests) {
 		t.Fatalf("banked DP requests = %#v, want %#v", got, wantRequests)
 	}
@@ -48,7 +48,7 @@ func TestBankedDPAccessPreservesSELECTFields(t *testing.T) {
 	}
 }
 
-func equalRequests(got, want []swd.Request) bool {
+func equalRequests(got, want []swdsim.Request) bool {
 	if len(got) != len(want) {
 		return false
 	}

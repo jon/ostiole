@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jon/ostiole/swd"
 	"github.com/jon/ostiole/swd/sim"
 )
 
@@ -16,7 +15,7 @@ func TestTargetReportsIdentityAndPowerState(t *testing.T) {
 	target := New(0x2ba01477)
 	ctx := context.Background()
 
-	value, err := target.Read(ctx, swd.Request{Read: true})
+	value, err := target.Read(ctx, sim.Request{Read: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,10 +24,10 @@ func TestTargetReportsIdentityAndPowerState(t *testing.T) {
 	}
 
 	const requests = uint32(1<<28 | 1<<30)
-	if err := target.Write(ctx, swd.Request{Addr: 4}, requests); err != nil {
+	if err := target.Write(ctx, sim.Request{Addr: 4}, requests); err != nil {
 		t.Fatal(err)
 	}
-	value, err = target.Read(ctx, swd.Request{Read: true, Addr: 4})
+	value, err = target.Read(ctx, sim.Request{Read: true, Addr: 4})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,10 +44,10 @@ func TestTargetModelsBankedDPRegisters(t *testing.T) {
 	if err := target.SetBankedDPRegister(1, dlcr); err != nil {
 		t.Fatal(err)
 	}
-	if err := target.Write(ctx, swd.Request{Addr: 0x08}, 1); err != nil {
+	if err := target.Write(ctx, sim.Request{Addr: 0x08}, 1); err != nil {
 		t.Fatal(err)
 	}
-	value, err := target.Read(ctx, swd.Request{Read: true, Addr: 0x04})
+	value, err := target.Read(ctx, sim.Request{Read: true, Addr: 0x04})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,10 +56,10 @@ func TestTargetModelsBankedDPRegisters(t *testing.T) {
 	}
 
 	const changed = uint32(0x5a5a0000)
-	if err := target.Write(ctx, swd.Request{Addr: 0x04}, changed); err != nil {
+	if err := target.Write(ctx, sim.Request{Addr: 0x04}, changed); err != nil {
 		t.Fatal(err)
 	}
-	value, err = target.Read(ctx, swd.Request{Read: true, Addr: 0x04})
+	value, err = target.Read(ctx, sim.Request{Read: true, Addr: 0x04})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,10 +81,10 @@ func TestTargetRejectsInvalidBankedDPRegister(t *testing.T) {
 	if err := target.SetBankedDPRegister(1, 1<<8); err == nil {
 		t.Fatal("SetBankedDPRegister() accepted unsupported turnaround")
 	}
-	if err := target.Write(t.Context(), swd.Request{Addr: 0x08}, 1); err != nil {
+	if err := target.Write(t.Context(), sim.Request{Addr: 0x08}, 1); err != nil {
 		t.Fatal(err)
 	}
-	if err := target.Write(t.Context(), swd.Request{Addr: 0x04}, 1<<8); err == nil {
+	if err := target.Write(t.Context(), sim.Request{Addr: 0x04}, 1<<8); err == nil {
 		t.Fatal("DLCR write accepted unsupported turnaround")
 	}
 }
@@ -94,7 +93,7 @@ func TestAbortClearsStickyState(t *testing.T) {
 	target := New(0x2ba01477)
 	target.ctrlStat = stickyCompare | stickyError | writeDataError | stickyOverrun
 
-	err := target.Write(context.Background(), swd.Request{},
+	err := target.Write(context.Background(), sim.Request{},
 		clearStickyCompare|clearStickyError|clearWriteDataError|clearStickyOverrun)
 	if err != nil {
 		t.Fatal(err)
@@ -106,7 +105,7 @@ func TestAbortClearsStickyState(t *testing.T) {
 
 func TestTargetPostsZeroForAnAbsentAccessPort(t *testing.T) {
 	target := New(0x2ba01477)
-	value, err := target.Read(context.Background(), swd.Request{AP: true, Read: true})
+	value, err := target.Read(context.Background(), sim.Request{AP: true, Read: true})
 	if err != nil {
 		t.Fatal(err)
 	}

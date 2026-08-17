@@ -28,19 +28,38 @@ const (
 
 var errFramingUnknown = errors.New("dap: SWD framing is unknown")
 
-func (dp *DebugPort) transfer(ctx context.Context, req swd.Request, data uint32) (uint32, error) {
+type transferRequest struct {
+	AP   bool
+	Read bool
+	Addr uint8
+}
+
+func (dp *DebugPort) transfer(ctx context.Context, req transferRequest, data uint32) (uint32, error) {
 	return dp.transferWithAPRecovery(ctx, req, data, waitMayAffectAP(req), true)
 }
 
+func (dp *DebugPort) transferOnce(ctx context.Context, req transferRequest, data uint32) (uint32, error) {
+	if req.AP && req.Read {
+		return dp.conn.ReadAP(ctx, req.Addr)
+	}
+	if req.AP {
+		return 0, dp.conn.WriteAP(ctx, req.Addr, data)
+	}
+	if req.Read {
+		return dp.conn.ReadDP(ctx, req.Addr)
+	}
+	return 0, dp.conn.WriteDP(ctx, req.Addr, data)
+}
+
 func (dp *DebugPort) transferDPWriteBarrier(ctx context.Context) (uint32, error) {
-	value, err := dp.transferWithAPRecovery(ctx, swd.Request{Read: true, Addr: uint8(RDBUFF)}, 0, false, false)
+	value, err := dp.transferWithAPRecovery(ctx, transferRequest{Read: true, Addr: uint8(RDBUFF)}, 0, false, false)
 	if err == nil || errors.Is(err, swd.ErrParity) || faultHasValidState(err) {
 		dp.state.settleDPWrite()
 	}
 	return value, err
 }
 
-func (dp *DebugPort) transferWithAPRecovery(ctx context.Context, req swd.Request, data uint32, apWork, settlePrevious bool) (uint32, error) {
+func (dp *DebugPort) transferWithAPRecovery(ctx context.Context, req transferRequest, data uint32, apWork, settlePrevious bool) (uint32, error) {
 	if dp.state.response == responseLost {
 		return 0, errFramingUnknown
 	}
@@ -49,7 +68,7 @@ func (dp *DebugPort) transferWithAPRecovery(ctx context.Context, req swd.Request
 		if err := ctx.Err(); err != nil {
 			return 0, dp.stopWaiting(waits, err, apWork)
 		}
-		value, err := dp.conn.Transfer(ctx, req, data)
+		value, err := dp.transferOnce(ctx, req, data)
 		dp.resolveSELECT(req, value, err)
 		if settlePrevious && responseSettlesPreviousDPWrite(req, err) {
 			dp.state.settleDPWrite()
@@ -71,14 +90,14 @@ func (dp *DebugPort) transferWithAPRecovery(ctx context.Context, req swd.Request
 	}
 }
 
-func responseSettlesPreviousDPWrite(req swd.Request, err error) bool {
+func responseSettlesPreviousDPWrite(req transferRequest, err error) bool {
 	if err != nil && err != swd.ErrWait && err != swd.ErrParity {
 		return false
 	}
 	return req.AP || req.Read && req.Addr != uint8(DPIDR)
 }
 
-func (dp *DebugPort) resolveSELECT(req swd.Request, value uint32, err error) {
+func (dp *DebugPort) resolveSELECT(req transferRequest, value uint32, err error) {
 	if !dp.state.selectPending {
 		return
 	}
@@ -102,15 +121,15 @@ func (dp *DebugPort) resolveSELECTAfterABORT(err error) {
 	}
 }
 
-func isABORTWrite(req swd.Request) bool {
+func isABORTWrite(req transferRequest) bool {
 	return !req.AP && !req.Read && req.Addr == uint8(ABORT)
 }
 
-func isDPIDRRead(req swd.Request) bool {
+func isDPIDRRead(req transferRequest) bool {
 	return !req.AP && req.Read && req.Addr == uint8(DPIDR)
 }
 
-func isCTRLSTATRead(req swd.Request) bool {
+func isCTRLSTATRead(req transferRequest) bool {
 	return !req.AP && req.Read && req.Addr == uint8(CTRLSTAT)
 }
 
@@ -121,7 +140,7 @@ func (dp *DebugPort) stopWaiting(waits int, cause error, apWork bool) error {
 	return dp.finishWait(errors.Join(swd.ErrWait, cause), apWork)
 }
 
-func (dp *DebugPort) finishRetryError(req swd.Request, value uint32, err error, waits int, apWork bool) (uint32, error) {
+func (dp *DebugPort) finishRetryError(req transferRequest, value uint32, err error, waits int, apWork bool) (uint32, error) {
 	if err == swd.ErrFault {
 		return 0, dp.handleFault(req, apWork)
 	}
@@ -135,7 +154,7 @@ func (dp *DebugPort) finishRetryError(req swd.Request, value uint32, err error, 
 	return 0, dp.invalidateWait(cause)
 }
 
-func (dp *DebugPort) handleFault(req swd.Request, apWork bool) error {
+func (dp *DebugPort) handleFault(req transferRequest, apWork bool) error {
 	fault := &FaultError{}
 	if dp.state.response != responseSimple || !dp.state.faultBankZero() {
 		dp.state.loseFraming()
@@ -144,7 +163,7 @@ func (dp *DebugPort) handleFault(req swd.Request, apWork bool) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), waitRecoveryTimeout)
 	defer cancel()
-	state, err := dp.conn.Transfer(ctx, swd.Request{Read: true, Addr: uint8(CTRLSTAT)}, 0)
+	state, err := dp.transferOnce(ctx, transferRequest{Read: true, Addr: uint8(CTRLSTAT)}, 0)
 	if err != nil {
 		dp.state.loseFraming()
 		return errors.Join(fault, fmt.Errorf("dap: read CTRL/STAT after FAULT: %w", err))
@@ -167,11 +186,11 @@ func (dp *DebugPort) handleFault(req swd.Request, apWork bool) error {
 
 func (dp *DebugPort) clearFaultState(ctx context.Context, fault *FaultError, minimal bool, apWork bool) error {
 	clear := stickyClearForState(fault.CTRLSTAT, minimal)
-	if _, err := dp.conn.Transfer(ctx, swd.Request{Addr: uint8(ABORT)}, clear); err != nil {
+	if _, err := dp.transferOnce(ctx, transferRequest{Addr: uint8(ABORT)}, clear); err != nil {
 		dp.state.loseFraming()
 		return errors.Join(fault, fmt.Errorf("dap: clear sticky state after FAULT: %w", err))
 	}
-	state, err := dp.conn.Transfer(ctx, swd.Request{Read: true, Addr: uint8(CTRLSTAT)}, 0)
+	state, err := dp.transferOnce(ctx, transferRequest{Read: true, Addr: uint8(CTRLSTAT)}, 0)
 	if err != nil {
 		dp.state.loseFraming()
 		return errors.Join(fault, fmt.Errorf("dap: verify sticky state after FAULT: %w", err))
@@ -201,7 +220,7 @@ func (dp *DebugPort) invalidateTransfer(cause error) error {
 	return fmt.Errorf("dap: SWD framing is unknown after transfer failure: %w", cause)
 }
 
-func (dp *DebugPort) validateWait(req swd.Request, err error) error {
+func (dp *DebugPort) validateWait(req transferRequest, err error) error {
 	if dp.waitForbidden(req) {
 		cause := fmt.Errorf("dap: non-stallable request returned WAIT: %w", err)
 		if err != swd.ErrWait {
@@ -219,7 +238,7 @@ func (dp *DebugPort) validateWait(req swd.Request, err error) error {
 	return dp.invalidateWait(fmt.Errorf("dap: complete WAIT response: %w", err))
 }
 
-func (dp *DebugPort) waitForbidden(req swd.Request) bool {
+func (dp *DebugPort) waitForbidden(req transferRequest) bool {
 	if req.AP {
 		return false
 	}
@@ -254,7 +273,7 @@ func (dp *DebugPort) invalidateWait(cause error) error {
 	return fmt.Errorf("dap: AP state is unknown after incomplete WAIT recovery: %w", cause)
 }
 
-func waitMayAffectAP(req swd.Request) bool {
+func waitMayAffectAP(req transferRequest) bool {
 	return req.AP || req.Read && req.Addr == uint8(RDBUFF)
 }
 
@@ -263,7 +282,7 @@ func (dp *DebugPort) abortWait(cause error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), waitRecoveryTimeout)
 	defer cancel()
 
-	_, err := dp.conn.Transfer(ctx, swd.Request{}, dapAbort)
+	_, err := dp.transferOnce(ctx, transferRequest{}, dapAbort)
 	if err != nil {
 		dp.state.loseFraming()
 		return errors.Join(cause, fmt.Errorf("dap: DAPABORT after extended WAIT: %w", err))
@@ -276,7 +295,7 @@ func (dp *DebugPort) abortWait(cause error) error {
 }
 
 func (dp *DebugPort) restoreAfterAbort(ctx context.Context) error {
-	state, err := dp.conn.Transfer(ctx, swd.Request{Read: true, Addr: uint8(CTRLSTAT)}, 0)
+	state, err := dp.transferOnce(ctx, transferRequest{Read: true, Addr: uint8(CTRLSTAT)}, 0)
 	if err != nil {
 		return fmt.Errorf("dap: read sticky state after DAP abort: %w", err)
 	}
@@ -286,7 +305,7 @@ func (dp *DebugPort) restoreAfterAbort(ctx context.Context) error {
 	}
 	clear := stickyClearForState(state, dp.identity.Minimal)
 	if clear != 0 {
-		if _, err := dp.conn.Transfer(ctx, swd.Request{}, clear); err != nil {
+		if _, err := dp.transferOnce(ctx, transferRequest{}, clear); err != nil {
 			return fmt.Errorf("dap: clear sticky state after DAP abort: %w", err)
 		}
 	}

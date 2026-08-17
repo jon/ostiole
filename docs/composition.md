@@ -15,7 +15,7 @@ read pipeline with SWD transactions.
 | --- | --- | --- |
 | List USB attachments understood by the FTDI driver | `usb.New`, `ftdi.SupportedDevices`, `Enumerator.List` | `ost ftdi list` |
 | Open one FTDI MPSSE SWD port | `Enumerator.Open`, `ftdi.Open` | `examples/trivial/swd-dpidr` |
-| Enter SWD mode or transfer one DP/AP register | `swd.New`, `Conn.JTAGToSWD`, `Conn.Transfer` | `examples/trivial/swd-dpidr` |
+| Enter SWD mode or transfer one DP/AP register | `swd.New`, `Conn.JTAGToSWD`, `Conn.ReadDP`, `Conn.WriteDP`, `Conn.ReadAP`, `Conn.WriteAP` | `examples/trivial/swd-dpidr` |
 | Decode a DPIDR and manage SW-DP power | `dap.NewSWDP`, `DebugPort.Connect`, `DebugPort.Release` | `ost dap dp id` |
 | Access one explicitly selected AP register | `DebugPort.ReadAP`, `DebugPort.WriteAP` | `examples/simple/ap-id` |
 | Read one aligned target word through a MEM-AP | `dap.NewMemAP`, `MemAP.ReadWord`, `MemAP.Release` | `examples/simple/cortexm-info` |

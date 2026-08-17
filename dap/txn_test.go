@@ -74,7 +74,7 @@ func TestDebugPortTransactionSettlesSELECTBeforeBankedDPAccess(t *testing.T) {
 	if _, err := result.Value(); err != nil {
 		t.Fatal(err)
 	}
-	want := []swd.Request{{Read: true, Addr: uint8(dap.RDBUFF)}, {Addr: uint8(dap.SELECT)}, {Read: true, Addr: uint8(dap.RDBUFF)}, {Read: true, Addr: uint8(dap.CTRLSTAT)}}
+	want := []swdsim.Request{{Read: true, Addr: uint8(dap.RDBUFF)}, {Addr: uint8(dap.SELECT)}, {Read: true, Addr: uint8(dap.RDBUFF)}, {Read: true, Addr: uint8(dap.CTRLSTAT)}}
 	if got := target.requests[before:]; !equalRequests(got, want) {
 		t.Fatalf("transaction requests = %#v, want %#v", got, want)
 	}
@@ -253,7 +253,7 @@ func TestDebugPortTransactionKeepsConfirmedPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	target.armFault(swd.Request{AP: true, Read: true, Addr: 0x0c})
+	target.armFault(swdsim.Request{AP: true, Read: true, Addr: 0x0c})
 	txn := dp.NewTxn()
 	prefix := txn.ReadDP(dap.DPIDRAddr)
 	faulted := txn.ReadAP(0, dap.APIDR)
@@ -278,7 +278,7 @@ func TestDebugPortTransactionDoesNotConfirmAbandonedDPWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	target.dropWriteFor = swd.Request{Addr: uint8(dap.SELECT)}
+	target.dropWriteFor = swdsim.Request{Addr: uint8(dap.SELECT)}
 	target.dropWrite = true
 	target.stickyOnDrop = testWriteDataError
 	txn := dp.NewTxn()
@@ -312,7 +312,7 @@ func TestDebugPortTransactionSettlesDPWriteThroughRDBUFF(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertTxnValue(t, write, 0)
-	want := []swd.Request{{Addr: uint8(dap.SELECT)}, {Read: true, Addr: uint8(dap.RDBUFF)}}
+	want := []swdsim.Request{{Addr: uint8(dap.SELECT)}, {Read: true, Addr: uint8(dap.RDBUFF)}}
 	if got := target.requests[before:]; !equalRequests(got, want) {
 		t.Fatalf("DP write requests = %#v, want %#v", got, want)
 	}
@@ -327,7 +327,7 @@ func TestDebugPortTransactionKeepsFaultDeterminateWhenCleanupLosesFraming(t *tes
 	}
 
 	cleanupErr := errors.New("injected CTRL/STAT read failure")
-	target.armFault(swd.Request{AP: true, Read: true, Addr: 0x0c})
+	target.armFault(swdsim.Request{AP: true, Read: true, Addr: 0x0c})
 	target.ctrlStatErr = cleanupErr
 	txn := dp.NewTxn()
 	faulted := txn.ReadAP(0, dap.APIDR)
@@ -356,7 +356,7 @@ func TestDebugPortTransactionKeepsWAITDeterminateWhenDAPABORTFails(t *testing.T)
 
 	abortErr := errors.New("injected DAPABORT failure")
 	target.abortErr = abortErr
-	target.arm(swd.Request{AP: true, Read: true, Addr: 0x0c}, -1)
+	target.arm(swdsim.Request{AP: true, Read: true, Addr: 0x0c}, -1)
 	txn := dp.NewTxn()
 	waited := txn.ReadAP(0, dap.APIDR)
 	suffix := txn.ReadDP(dap.DPIDRAddr)
@@ -381,7 +381,7 @@ func TestDebugPortTransactionSettlesPreviousRawDPWriteBeforeTraffic(t *testing.T
 		t.Fatal(err)
 	}
 
-	target.dropWriteFor = swd.Request{Addr: uint8(dap.SELECT)}
+	target.dropWriteFor = swdsim.Request{Addr: uint8(dap.SELECT)}
 	target.dropWrite = true
 	target.stickyOnDrop = testWriteDataError
 	if err := dp.WriteDP(t.Context(), dap.SELECT, 0); err != nil {
@@ -414,7 +414,7 @@ func TestDebugPortTransactionDoesNotIssueDAPABORTForDPWriteBarrierWAIT(t *testin
 		t.Fatal(err)
 	}
 
-	target.arm(swd.Request{Read: true, Addr: uint8(dap.RDBUFF)}, -1)
+	target.arm(swdsim.Request{Read: true, Addr: uint8(dap.RDBUFF)}, -1)
 	txn := dp.NewTxn()
 	write := txn.WriteDP(dap.SELECTAddr, 0)
 	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrWait) || !errors.Is(err, dap.ErrIndeterminate) {
@@ -446,7 +446,7 @@ func TestDebugPortTransactionDoesNotIssueDAPABORTForSELECTBarrierWAIT(t *testing
 		t.Fatal(err)
 	}
 
-	target.arm(swd.Request{Read: true, Addr: uint8(dap.RDBUFF)}, -1)
+	target.arm(swdsim.Request{Read: true, Addr: uint8(dap.RDBUFF)}, -1)
 	txn := dp.NewTxn()
 	read := txn.ReadDP(dap.DLCRAddr)
 	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrWait) {
@@ -481,7 +481,7 @@ func TestDebugPortRawRDBUFFDoesNotIssueDAPABORTForDPWriteWAIT(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	target.arm(swd.Request{Read: true, Addr: uint8(dap.RDBUFF)}, -1)
+	target.arm(swdsim.Request{Read: true, Addr: uint8(dap.RDBUFF)}, -1)
 	if _, err := dp.ReadDP(t.Context(), dap.RDBUFF); !errors.Is(err, swd.ErrWait) {
 		t.Fatalf("ReadDP(RDBUFF) error = %v, want WAIT", err)
 	}
@@ -508,7 +508,7 @@ func TestDebugPortTransactionDoesNotInvalidateAPForDPWriteBarrierFAULT(t *testin
 		t.Fatal(err)
 	}
 
-	target.dropWriteFor = swd.Request{Addr: uint8(dap.SELECT)}
+	target.dropWriteFor = swdsim.Request{Addr: uint8(dap.SELECT)}
 	target.dropWrite = true
 	target.stickyOnDrop = testWriteDataError
 	txn := dp.NewTxn()
@@ -532,7 +532,7 @@ func TestDebugPortTransactionKeepsRejectedAPWriteDeterminate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	target.dropWriteFor = swd.Request{AP: true, Addr: uint8(dap.APCSW)}
+	target.dropWriteFor = swdsim.Request{AP: true, Addr: uint8(dap.APCSW)}
 	target.dropWrite = true
 	target.stickyOnDrop = testWriteDataError
 	txn := dp.NewTxn()
@@ -564,7 +564,7 @@ func TestDebugPortTransactionDoesNotInvalidateAPForRejectedDAPABORT(t *testing.T
 		t.Fatal(err)
 	}
 
-	target.dropWriteFor = swd.Request{Addr: uint8(dap.ABORT)}
+	target.dropWriteFor = swdsim.Request{Addr: uint8(dap.ABORT)}
 	target.dropWrite = true
 	target.stickyOnDrop = testWriteDataError
 	txn := dp.NewTxn()
@@ -663,7 +663,7 @@ func TestDebugPortTransactionSettlesDPWriteWhenBarrierDataParityFails(t *testing
 		t.Fatal(err)
 	}
 	assertTxnValue(t, read, 0x2ba01477)
-	want := []swd.Request{{Read: true, Addr: uint8(dap.DPIDR)}}
+	want := []swdsim.Request{{Read: true, Addr: uint8(dap.DPIDR)}}
 	if got := target.requests[before:]; !equalRequests(got, want) {
 		t.Fatalf("requests after barrier parity error = %#v, want %#v", got, want)
 	}
@@ -698,7 +698,7 @@ func TestDebugPortTransactionTreatsSELECTBarrierDataParityAsDeterminate(t *testi
 		t.Fatal(err)
 	}
 	assertTxnValue(t, dpidr, 0x2ba01477)
-	want := []swd.Request{{Read: true, Addr: uint8(dap.DPIDR)}}
+	want := []swdsim.Request{{Read: true, Addr: uint8(dap.DPIDR)}}
 	if got := target.requests[before:]; !equalRequests(got, want) {
 		t.Fatalf("requests after SELECT barrier parity error = %#v, want %#v", got, want)
 	}
@@ -736,7 +736,7 @@ func TestDebugPortTransactionSettlesPreviousDPWriteWhenBarrierDataParityFails(t 
 		t.Fatal(err)
 	}
 	assertTxnValue(t, read, 0x2ba01477)
-	want := []swd.Request{{Read: true, Addr: uint8(dap.DPIDR)}}
+	want := []swdsim.Request{{Read: true, Addr: uint8(dap.DPIDR)}}
 	if got := target.requests[before:]; !equalRequests(got, want) {
 		t.Fatalf("requests after previous write barrier parity error = %#v, want %#v", got, want)
 	}
@@ -769,7 +769,7 @@ func TestDebugPortRawRDBUFFSettlesDPWriteWhenDataParityFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertTxnValue(t, read, 0x2ba01477)
-	want := []swd.Request{{Read: true, Addr: uint8(dap.DPIDR)}}
+	want := []swdsim.Request{{Read: true, Addr: uint8(dap.DPIDR)}}
 	if got := target.requests[before:]; !equalRequests(got, want) {
 		t.Fatalf("requests after raw RDBUFF parity error = %#v, want %#v", got, want)
 	}
@@ -814,8 +814,8 @@ func TestDebugPortTransactionAttributesRDBUFFFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	apRead := swd.Request{AP: true, Read: true, Addr: 0x0c}
-	target.armFault(swd.Request{Read: true, Addr: uint8(dap.RDBUFF)})
+	apRead := swdsim.Request{AP: true, Read: true, Addr: 0x0c}
+	target.armFault(swdsim.Request{Read: true, Addr: uint8(dap.RDBUFF)})
 	txn := dp.NewTxn()
 	faulted := txn.ReadAP(0, dap.APIDR)
 	suffix := txn.ReadDP(dap.DPIDRAddr)
@@ -844,7 +844,7 @@ func TestDebugPortTransactionMarksAPWriteIndeterminateWhenBarrierFails(t *testin
 		t.Fatal(err)
 	}
 
-	target.armFault(swd.Request{Read: true, Addr: uint8(dap.RDBUFF)})
+	target.armFault(swdsim.Request{Read: true, Addr: uint8(dap.RDBUFF)})
 	txn := dp.NewTxn()
 	write := txn.WriteAP(0, dap.APCSW, 0x23000040)
 	suffix := txn.ReadDP(dap.DPIDRAddr)

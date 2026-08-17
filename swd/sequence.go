@@ -1,5 +1,8 @@
 // Package swd implements Serial Wire Debug framing over direction-explicit
 // wire access.
+//
+// Conn exposes separate DP and AP reads and writes. Each call validates the
+// physical register address and makes one attempt without retrying.
 package swd
 
 type sequence struct {
