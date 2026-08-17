@@ -65,7 +65,7 @@ func TestIdentifyCortexMOverFTDI(t *testing.T) {
 	if _, err := debugPort.Connect(ctx); err != nil {
 		t.Fatal(err)
 	}
-	memory, err = dap.NewMemAP(ctx, debugPort, 0)
+	memory, err = dap.NewMemAP(ctx, debugPort, dap.NewAPSel(0))
 	if err != nil {
 		t.Fatal(err)
 	}

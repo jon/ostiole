@@ -40,7 +40,8 @@ protocol entry and basic DP/AP register transfers against a caller-supplied
 target.
 
 The `dap` package begins the next layer with ADIv5 debug-port identity, raw
-SW-DP registers, and an explicit connection lifecycle. A connection clears
+SW-DP registers, and an explicit connection lifecycle. `NewAPSel` constructs
+an access-port selector whose zero value is invalid. A connection clears
 sticky status, selects the base register bank, and restores only the power
 requests it acquired. Selected AP registers are read and written through their
 posted `RDBUFF` completion path. The simulator models the same DP and AP state

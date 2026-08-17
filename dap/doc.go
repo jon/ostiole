@@ -14,6 +14,8 @@
 // operations which share a physical SWD offset, enforce direction, and manage
 // DPBANKSEL without exposing a current-bank operation.
 //
+// NewAPSel constructs an access-port selector. The zero APSel is invalid.
+//
 // A failed Connect attempts bounded cleanup before returning. If that cleanup
 // also fails, Release remains available but other debug-port and access-port
 // operations fail until cleanup succeeds. A failed Release has the same

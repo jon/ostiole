@@ -69,8 +69,9 @@ func TestRunIdentifiesSelectedCortexMTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if selected != 3 {
-		t.Fatalf("selected AP = %d, want 3", selected)
+	if selected != dap.NewAPSel(3) {
+		value, _ := selected.Value()
+		t.Fatalf("selected AP = %d, want 3", value)
 	}
 	want := "DPIDR=0x2ba01477 AP3_IDR=0x24770011 CPUID=0x410fc241\n"
 	if stdout.String() != want {
@@ -95,8 +96,9 @@ func TestRunInspectsSelectedAccessPort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if selected != 3 {
-		t.Fatalf("selected AP = %d, want 3", selected)
+	if selected != dap.NewAPSel(3) {
+		value, _ := selected.Value()
+		t.Fatalf("selected AP = %d, want 3", value)
 	}
 	want := "DPIDR=0x2ba01477 AP3_IDR=0x24770011\n"
 	if stdout.String() != want {

@@ -11,10 +11,11 @@ import (
 )
 
 const (
-	hardwareAP       = dap.APSel(0)
 	hardwareAPCSW    = dap.APReg(0x00)
 	hardwareMemClass = uint32(0x08)
 )
+
+var hardwareAP = dap.NewAPSel(0)
 
 func TestAccessAPOverFTDI(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)

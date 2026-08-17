@@ -23,14 +23,14 @@ func TestAccessSelectedAPRegisters(t *testing.T) {
 		}
 	})
 
-	idr, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	idr, err := dp.ReadAP(t.Context(), apSel(0), dap.APIDR)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if idr != 0x04770031 {
 		t.Fatalf("AP0 IDR = %#08x, want 0x04770031", idr)
 	}
-	absent, err := dp.ReadAP(t.Context(), 1, dap.APIDR)
+	absent, err := dp.ReadAP(t.Context(), apSel(1), dap.APIDR)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,10 +38,10 @@ func TestAccessSelectedAPRegisters(t *testing.T) {
 		t.Fatalf("absent AP1 IDR = %#08x, want 0", absent)
 	}
 
-	if err := dp.WriteAP(t.Context(), 0, 0, 0x12345678); err != nil {
+	if err := dp.WriteAP(t.Context(), apSel(0), 0, 0x12345678); err != nil {
 		t.Fatal(err)
 	}
-	value, err := dp.ReadAP(t.Context(), 0, 0)
+	value, err := dp.ReadAP(t.Context(), apSel(0), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestAccessSelectedAPRegisters(t *testing.T) {
 
 func TestAPAccessRequiresConnectedDebugPort(t *testing.T) {
 	dp := enteredDP(t, sim.New(0x2ba01477))
-	if _, err := dp.ReadAP(t.Context(), 0, dap.APIDR); err == nil {
+	if _, err := dp.ReadAP(t.Context(), apSel(0), dap.APIDR); err == nil {
 		t.Fatal("ReadAP() succeeded before Connect()")
 	}
 	if _, err := dp.Connect(t.Context()); err != nil {
@@ -61,7 +61,7 @@ func TestAPAccessRequiresConnectedDebugPort(t *testing.T) {
 	if err := dp.Release(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if err := dp.WriteAP(t.Context(), 0, 0, 1); err == nil {
+	if err := dp.WriteAP(t.Context(), apSel(0), 0, 1); err == nil {
 		t.Fatal("WriteAP() succeeded after Release()")
 	}
 }
@@ -79,11 +79,50 @@ func TestAPWriteWaitsForRDBUFF(t *testing.T) {
 		}
 	})
 	target.failBarrier = true
-	if err := dp.WriteAP(t.Context(), 0, 0, 1); !errors.Is(err, errBarrier) {
+	if err := dp.WriteAP(t.Context(), apSel(0), 0, 1); !errors.Is(err, errBarrier) {
 		t.Fatalf("WriteAP() error = %v, want %v", err, errBarrier)
 	}
 	if _, err := dp.ReadDP(t.Context(), dap.DPIDR); err == nil {
 		t.Fatal("ReadDP() succeeded after the AP completion transfer failed")
+	}
+}
+
+func TestAPAccessRejectsZeroSelectorBeforeTraffic(t *testing.T) {
+	target := newWaitTarget()
+	target.AddAP(0, 0x04770031)
+	dp := enteredDP(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = dp.Release(context.Background()) })
+
+	before := len(target.requests)
+	var zero dap.APSel
+	if _, err := dp.ReadAP(t.Context(), zero, dap.APIDR); err == nil {
+		t.Fatal("ReadAP() accepted a zero APSel")
+	}
+	if err := dp.WriteAP(t.Context(), zero, 0, 1); err == nil {
+		t.Fatal("WriteAP() accepted a zero APSel")
+	}
+	if _, err := dap.NewMemAP(t.Context(), dp, zero); err == nil {
+		t.Fatal("NewMemAP() accepted a zero APSel")
+	}
+	if got := len(target.requests); got != before {
+		t.Fatalf("zero-selector accesses sent %d requests", got-before)
+	}
+}
+
+func TestAPSelValue(t *testing.T) {
+	selector, err := dap.NewAPSel(255).Value()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selector != 255 {
+		t.Fatalf("APSel.Value() = %d, want 255", selector)
+	}
+	var zero dap.APSel
+	if _, err := zero.Value(); err == nil {
+		t.Fatal("zero APSel.Value() succeeded")
 	}
 }
 

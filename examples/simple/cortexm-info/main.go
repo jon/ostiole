@@ -18,8 +18,9 @@ import (
 const (
 	operationTimeout = 5 * time.Second
 	cleanupTimeout   = time.Second
-	accessPort       = dap.APSel(0)
 )
+
+var accessPort = dap.NewAPSel(0)
 
 type identity struct {
 	dpidr     dap.DPIDRInfo

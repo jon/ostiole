@@ -6,8 +6,25 @@ import (
 	"fmt"
 )
 
-// APSel identifies one access port.
-type APSel uint8
+// APSel identifies one access port. Its zero value is invalid; construct a
+// selector with NewAPSel.
+type APSel struct {
+	index uint16
+}
+
+// NewAPSel returns the selector for one ADIv5 access port.
+func NewAPSel(value uint8) APSel {
+	return APSel{index: uint16(value) + 1}
+}
+
+// Value returns the architectural selector value. The zero APSel returns an
+// error.
+func (sel APSel) Value() (uint8, error) {
+	if sel.index == 0 {
+		return 0, errors.New("dap: zero APSel is invalid")
+	}
+	return uint8(sel.index - 1), nil
+}
 
 // APReg identifies one banked access-port register.
 type APReg uint8
@@ -72,7 +89,11 @@ func (dp *DebugPort) writeAP(ctx context.Context, sel APSel, reg APReg, value ui
 }
 
 func (dp *DebugPort) selectAP(ctx context.Context, sel APSel, reg APReg) error {
-	value := uint32(sel)<<24 | uint32(reg&0xf0)
+	selection, err := sel.Value()
+	if err != nil {
+		return err
+	}
+	value := uint32(selection)<<24 | uint32(reg&0xf0)
 	if dp.state.selectDP.valid && dp.state.selectDP.value == value {
 		return nil
 	}

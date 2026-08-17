@@ -332,7 +332,7 @@ func TestDebugPortDoesNotDelayWAITRetries(t *testing.T) {
 	target.arm(req, 100)
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
-	value, err := dp.ReadAP(ctx, 0, dap.APIDR)
+	value, err := dp.ReadAP(ctx, apSel(0), dap.APIDR)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -368,7 +368,7 @@ func TestInvalidDPRegisterDoesNotLoseFraming(t *testing.T) {
 			if _, err := dp.Connect(t.Context()); err != nil {
 				t.Fatal(err)
 			}
-			mem, err := dap.NewMemAP(t.Context(), dp, 0)
+			mem, err := dap.NewMemAP(t.Context(), dp, apSel(0))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -535,10 +535,10 @@ func assertRepairBlocksTraffic(t *testing.T, dp *dap.DebugPort, target *waitTarg
 	if _, err := dp.ReadDP(t.Context(), dap.DPIDR); err == nil || !strings.Contains(err.Error(), "cleanup is pending") {
 		t.Fatalf("ReadDP() error while cleanup pending = %v", err)
 	}
-	if _, err := dp.ReadAP(t.Context(), 0, dap.APIDR); err == nil || !strings.Contains(err.Error(), "cleanup is pending") {
+	if _, err := dp.ReadAP(t.Context(), apSel(0), dap.APIDR); err == nil || !strings.Contains(err.Error(), "cleanup is pending") {
 		t.Fatalf("ReadAP() error while cleanup pending = %v", err)
 	}
-	if _, err := dap.NewMemAP(t.Context(), dp, 0); err == nil || !strings.Contains(err.Error(), "cleanup is pending") {
+	if _, err := dap.NewMemAP(t.Context(), dp, apSel(0)); err == nil || !strings.Contains(err.Error(), "cleanup is pending") {
 		t.Fatalf("NewMemAP() error while cleanup pending = %v", err)
 	}
 	if got := len(target.requests); got != before {
@@ -548,7 +548,7 @@ func assertRepairBlocksTraffic(t *testing.T, dp *dap.DebugPort, target *waitTarg
 
 func readAPIDR(t *testing.T, dp *dap.DebugPort) {
 	t.Helper()
-	value, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	value, err := dp.ReadAP(t.Context(), apSel(0), dap.APIDR)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -559,7 +559,7 @@ func readAPIDR(t *testing.T, dp *dap.DebugPort) {
 
 func writeAPCSW(t *testing.T, dp *dap.DebugPort) {
 	t.Helper()
-	if err := dp.WriteAP(t.Context(), 0, dap.APCSW, 0x23000040); err != nil {
+	if err := dp.WriteAP(t.Context(), apSel(0), dap.APCSW, 0x23000040); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -664,7 +664,7 @@ func TestDebugPortReusesFullSELECTValue(t *testing.T) {
 	selectReq := dpWrite(0x08)
 	target.executed[selectReq] = 0
 	for range 2 {
-		if _, err := dp.ReadAP(t.Context(), 2, dap.APIDR); err != nil {
+		if _, err := dp.ReadAP(t.Context(), apSel(2), dap.APIDR); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -690,7 +690,7 @@ func TestDebugPortAbortsExtendedWAITAndClearsAbandonedWrite(t *testing.T) {
 	rdbuffReq := dpRead(0x0c)
 	target.stickyAfterAbort = testWriteDataError
 	target.arm(rdbuffReq, -1)
-	err := dp.WriteAP(t.Context(), 0, dap.APCSW, 0x23000040)
+	err := dp.WriteAP(t.Context(), apSel(0), dap.APCSW, 0x23000040)
 	if !errors.Is(err, swd.ErrWait) {
 		t.Fatalf("WriteAP() error = %v, want %v", err, swd.ErrWait)
 	}
@@ -719,7 +719,7 @@ func TestDebugPortDoesNotAbortExtendedDPWAIT(t *testing.T) {
 	}
 
 	target.arm(dpWrite(0x08), -1)
-	_, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	_, err := dp.ReadAP(t.Context(), apSel(0), dap.APIDR)
 	if !errors.Is(err, swd.ErrWait) {
 		t.Fatalf("ReadAP() error = %v, want %v", err, swd.ErrWait)
 	}
@@ -740,7 +740,7 @@ func TestDebugPortDoesNotRetryFAULT(t *testing.T) {
 
 	req := apRead(0x0c)
 	target.armFault(req)
-	_, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	_, err := dp.ReadAP(t.Context(), apSel(0), dap.APIDR)
 	if !errors.Is(err, swd.ErrFault) {
 		t.Fatalf("ReadAP() error = %v, want %v", err, swd.ErrFault)
 	}
@@ -758,7 +758,7 @@ func TestDebugPortReportsAndClearsFAULT(t *testing.T) {
 	}
 
 	target.sticky = 1<<4 | 1<<5 | 1<<7
-	_, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	_, err := dp.ReadAP(t.Context(), apSel(0), dap.APIDR)
 	var fault *dap.FaultError
 	if !errors.As(err, &fault) || !errors.Is(err, swd.ErrFault) {
 		t.Fatalf("ReadAP() error = %v, want typed FAULT", err)
@@ -772,7 +772,7 @@ func TestDebugPortReportsAndClearsFAULT(t *testing.T) {
 	if target.sticky != 0 {
 		t.Fatalf("sticky state after recovery = %#08x, want 0", target.sticky)
 	}
-	if _, err := dp.ReadAP(t.Context(), 0, dap.APIDR); err != nil {
+	if _, err := dp.ReadAP(t.Context(), apSel(0), dap.APIDR); err != nil {
 		t.Fatalf("ReadAP() after FAULT recovery: %v", err)
 	}
 }
@@ -825,12 +825,12 @@ func TestDebugPortUsesPreviousSELECTAfterWriteDataFAULT(t *testing.T) {
 	if err := dp.WriteDP(t.Context(), dap.SELECT, 0xf0); err != nil {
 		t.Fatal(err)
 	}
-	_, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	_, err := dp.ReadAP(t.Context(), apSel(0), dap.APIDR)
 	var fault *dap.FaultError
 	if !errors.As(err, &fault) || !fault.StateValid || fault.CTRLSTAT&testWriteDataError == 0 {
 		t.Fatalf("ReadAP() error = %v, want WDATAERR after abandoned SELECT data", err)
 	}
-	value, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	value, err := dp.ReadAP(t.Context(), apSel(0), dap.APIDR)
 	if err != nil {
 		t.Fatalf("ReadAP() after WDATAERR recovery: %v", err)
 	}
@@ -862,7 +862,7 @@ func TestDebugPortDoesNotReadCTRLSTATAfterAbandonedBankZeroSELECT(t *testing.T) 
 	if err := dp.WriteDP(t.Context(), dap.SELECT, 0); err != nil {
 		t.Fatal(err)
 	}
-	_, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	_, err := dp.ReadAP(t.Context(), apSel(0), dap.APIDR)
 	var fault *dap.FaultError
 	if !errors.As(err, &fault) || fault.StateValid || !strings.Contains(err.Error(), "cannot read CTRL/STAT") {
 		t.Fatalf("ReadAP() error = %v, want FAULT without CTRL/STAT state", err)
@@ -1001,7 +1001,7 @@ func TestDebugPortReestablishesSELECTAfterABORT(t *testing.T) {
 	if err := dp.WriteDP(t.Context(), dap.ABORT, 1<<3); err != nil {
 		t.Fatal(err)
 	}
-	value, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	value, err := dp.ReadAP(t.Context(), apSel(0), dap.APIDR)
 	if err != nil {
 		t.Fatalf("ReadAP() after WDERRCLR: %v", err)
 	}
@@ -1020,17 +1020,17 @@ func TestDebugPortRequiresRepairWhenStickyClearDoesNotTakeEffect(t *testing.T) {
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	mem, err := dap.NewMemAP(t.Context(), dp, 0)
+	mem, err := dap.NewMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := dp.ReadAP(t.Context(), 0, dap.APIDR); err != nil {
+	if _, err := dp.ReadAP(t.Context(), apSel(0), dap.APIDR); err != nil {
 		t.Fatal(err)
 	}
 
 	target.sticky = testWriteDataError
 	target.dropStickyClear = true
-	_, err = dp.ReadAP(t.Context(), 0, dap.APIDR)
+	_, err = dp.ReadAP(t.Context(), apSel(0), dap.APIDR)
 	var fault *dap.FaultError
 	if !errors.As(err, &fault) || !errors.Is(err, swd.ErrFault) || !strings.Contains(err.Error(), "sticky state remains") {
 		t.Fatalf("ReadAP() error = %v, want FAULT and uncleared sticky state", err)
@@ -1065,7 +1065,7 @@ func TestDebugPortPreservesFAULTWhenCleanupFails(t *testing.T) {
 	cleanupErr := errors.New("injected FAULT cleanup failure")
 	target.sticky = testWriteDataError
 	target.clearErr = cleanupErr
-	_, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	_, err := dp.ReadAP(t.Context(), apSel(0), dap.APIDR)
 	var fault *dap.FaultError
 	if !errors.As(err, &fault) || !errors.Is(err, swd.ErrFault) || !errors.Is(err, cleanupErr) {
 		t.Fatalf("ReadAP() error = %v, want typed FAULT and cleanup failure", err)
@@ -1092,7 +1092,7 @@ func TestDebugPortReportsFAULTWithoutStateWhenCTRLSTATReadFails(t *testing.T) {
 	readErr := errors.New("injected CTRL/STAT read failure")
 	target.sticky = testWriteDataError
 	target.ctrlStatErr = readErr
-	_, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	_, err := dp.ReadAP(t.Context(), apSel(0), dap.APIDR)
 	var fault *dap.FaultError
 	if !errors.As(err, &fault) || !errors.Is(err, swd.ErrFault) || !errors.Is(err, readErr) {
 		t.Fatalf("ReadAP() error = %v, want typed FAULT and CTRL/STAT read failure", err)
@@ -1117,7 +1117,7 @@ func TestDebugPortKeepsFramingAfterWAITThenFAULT(t *testing.T) {
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	mem, err := dap.NewMemAP(t.Context(), dp, 0)
+	mem, err := dap.NewMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1125,7 +1125,7 @@ func TestDebugPortKeepsFramingAfterWAITThenFAULT(t *testing.T) {
 	req := apRead(0x0c)
 	target.arm(req, 1)
 	target.fault = true
-	if _, err := dp.ReadAP(t.Context(), 0, dap.APIDR); !errors.Is(err, swd.ErrFault) {
+	if _, err := dp.ReadAP(t.Context(), apSel(0), dap.APIDR); !errors.Is(err, swd.ErrFault) {
 		t.Fatalf("ReadAP() error = %v, want %v", err, swd.ErrFault)
 	}
 	if target.attempts != 2 || target.executed[req] != 0 {
@@ -1134,7 +1134,7 @@ func TestDebugPortKeepsFramingAfterWAITThenFAULT(t *testing.T) {
 	if _, err := mem.ReadWord(t.Context(), 0xe000ed00); err == nil || !strings.Contains(err.Error(), "invalidated") {
 		t.Fatalf("ReadWord() through invalidated MEM-AP error = %v", err)
 	}
-	mem, err = dap.NewMemAP(t.Context(), dp, 0)
+	mem, err = dap.NewMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
 		t.Fatalf("NewMemAP() after clean FAULT: %v", err)
 	}
@@ -1159,7 +1159,7 @@ func TestDebugPortPreservesWAITAndAbortFailure(t *testing.T) {
 	abortErr := errors.New("injected DAPABORT failure")
 	target.abortErr = abortErr
 	target.arm(apRead(0x0c), -1)
-	_, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	_, err := dp.ReadAP(t.Context(), apSel(0), dap.APIDR)
 	if !errors.Is(err, swd.ErrWait) || !errors.Is(err, abortErr) {
 		t.Fatalf("ReadAP() error = %v, want WAIT and abort failure", err)
 	}
@@ -1178,7 +1178,7 @@ func TestDebugPortDoesNotReplayAfterWAITCleanupFailure(t *testing.T) {
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	mem, err := dap.NewMemAP(t.Context(), dp, 0)
+	mem, err := dap.NewMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1186,7 +1186,7 @@ func TestDebugPortDoesNotReplayAfterWAITCleanupFailure(t *testing.T) {
 	req := apRead(0x0c)
 	target.arm(req, 1)
 	wire.armed = true
-	_, err = dp.ReadAP(t.Context(), 0, dap.APIDR)
+	_, err = dp.ReadAP(t.Context(), apSel(0), dap.APIDR)
 	if !errors.Is(err, swd.ErrWait) || !errors.Is(err, cleanupErr) {
 		t.Fatalf("ReadAP() error = %v, want WAIT and cleanup failure", err)
 	}
@@ -1219,7 +1219,7 @@ func TestMEMAPReleaseReentersAfterDPWAITCleanupFailure(t *testing.T) {
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	mem, err := dap.NewMemAP(t.Context(), dp, 0)
+	mem, err := dap.NewMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1230,7 +1230,7 @@ func TestMEMAPReleaseReentersAfterDPWAITCleanupFailure(t *testing.T) {
 	req := dpWrite(0x08)
 	target.arm(req, 1)
 	wire.armed = true
-	_, err = dp.ReadAP(t.Context(), 0, dap.APIDR)
+	_, err = dp.ReadAP(t.Context(), apSel(0), dap.APIDR)
 	if !errors.Is(err, swd.ErrWait) || !errors.Is(err, cleanupErr) {
 		t.Fatalf("ReadAP() error = %v, want WAIT and cleanup failure", err)
 	}
@@ -1285,7 +1285,7 @@ func TestDebugPortInvalidatesAPStateWhenWAITRetryFails(t *testing.T) {
 			if _, err := dp.Connect(t.Context()); err != nil {
 				t.Fatal(err)
 			}
-			mem, err := dap.NewMemAP(t.Context(), dp, 0)
+			mem, err := dap.NewMemAP(t.Context(), dp, apSel(0))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1293,7 +1293,7 @@ func TestDebugPortInvalidatesAPStateWhenWAITRetryFails(t *testing.T) {
 			retryErr := errors.New("injected retry I/O failure")
 			target.arm(test.req, -1)
 			target.retryErr = retryErr
-			_, err = dp.ReadAP(t.Context(), 0, dap.APIDR)
+			_, err = dp.ReadAP(t.Context(), apSel(0), dap.APIDR)
 			if !errors.Is(err, swd.ErrWait) || !errors.Is(err, retryErr) {
 				t.Fatalf("ReadAP() error = %v, want WAIT and retry I/O failure", err)
 			}
@@ -1325,7 +1325,7 @@ func TestDebugPortStopsRecoveryAfterStickyCleanupFailure(t *testing.T) {
 	target.stickyAfterAbort = testWriteDataError
 	target.executed[dpWrite(0x08)] = 0
 	target.arm(apRead(0x0c), -1)
-	_, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	_, err := dp.ReadAP(t.Context(), apSel(0), dap.APIDR)
 	if !errors.Is(err, swd.ErrWait) || !errors.Is(err, cleanupErr) {
 		t.Fatalf("ReadAP() error = %v, want WAIT and sticky-clear failure", err)
 	}
@@ -1348,7 +1348,7 @@ func TestDebugPortStopsRecoveryAfterStickyStateReadFailure(t *testing.T) {
 	selectReq := dpWrite(0x08)
 	target.executed[selectReq] = 0
 	target.arm(apRead(0x0c), -1)
-	_, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	_, err := dp.ReadAP(t.Context(), apSel(0), dap.APIDR)
 	if !errors.Is(err, swd.ErrWait) || !errors.Is(err, readErr) {
 		t.Fatalf("ReadAP() error = %v, want WAIT and sticky-state read failure", err)
 	}
@@ -1508,7 +1508,7 @@ func TestReleaseFailureAllowsCleanupOnly(t *testing.T) {
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	mem, err := dap.NewMemAP(t.Context(), dp, 0)
+	mem, err := dap.NewMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1524,7 +1524,7 @@ func TestReleaseFailureAllowsCleanupOnly(t *testing.T) {
 	if _, err := dp.ReadDP(t.Context(), dap.DPIDR); err == nil || !strings.Contains(err.Error(), "cleanup is pending") {
 		t.Fatalf("ReadDP() error while cleanup pending = %v", err)
 	}
-	if _, err := dp.ReadAP(t.Context(), 0, dap.APIDR); err == nil || !strings.Contains(err.Error(), "cleanup is pending") {
+	if _, err := dp.ReadAP(t.Context(), apSel(0), dap.APIDR); err == nil || !strings.Contains(err.Error(), "cleanup is pending") {
 		t.Fatalf("ReadAP() error while cleanup pending = %v", err)
 	}
 	if _, err := mem.ReadWord(t.Context(), 0); err == nil || !strings.Contains(err.Error(), "cleanup is pending") {
@@ -1594,7 +1594,7 @@ func TestReentryRejectsChangedDebugPort(t *testing.T) {
 	req := apRead(0x0c)
 	target.arm(req, 1)
 	wire.armed = true
-	if _, err := dp.ReadAP(t.Context(), 0, dap.APIDR); !errors.Is(err, cleanupErr) {
+	if _, err := dp.ReadAP(t.Context(), apSel(0), dap.APIDR); !errors.Is(err, cleanupErr) {
 		t.Fatalf("ReadAP() error = %v, want cleanup failure", err)
 	}
 	aborts := len(target.abortValues)
@@ -1630,7 +1630,7 @@ func TestDebugPortRetriesSELECTAfterDAPAbort(t *testing.T) {
 	selectReq := dpWrite(0x08)
 	target.executed[selectReq] = 0
 	target.arm(apRead(0x0c), -1)
-	_, err := dp.ReadAP(t.Context(), 0, dap.APIDR)
+	_, err := dp.ReadAP(t.Context(), apSel(0), dap.APIDR)
 	if !errors.Is(err, swd.ErrWait) {
 		t.Fatalf("ReadAP() error = %v, want %v", err, swd.ErrWait)
 	}
@@ -1659,7 +1659,7 @@ func TestDebugPortAbortsWAITAfterContextCancellation(t *testing.T) {
 	wire.cancel = cancel
 	target.arm(apRead(0x0c), -1)
 	wire.armed = true
-	_, err := dp.ReadAP(ctx, 0, dap.APIDR)
+	_, err := dp.ReadAP(ctx, apSel(0), dap.APIDR)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("ReadAP() error = %v, want context cancellation", err)
 	}
@@ -1675,7 +1675,7 @@ func TestDAPAbortInvalidatesExistingMEMAP(t *testing.T) {
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	mem, err := dap.NewMemAP(t.Context(), dp, 0)
+	mem, err := dap.NewMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1717,13 +1717,13 @@ func TestMEMAPReleaseRearmsRestorationAfterDAPAbort(t *testing.T) {
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if err := dp.WriteAP(t.Context(), 0, dap.APCSW, 0xa5000051); err != nil {
+	if err := dp.WriteAP(t.Context(), apSel(0), dap.APCSW, 0xa5000051); err != nil {
 		t.Fatal(err)
 	}
-	if err := dp.WriteAP(t.Context(), 0, dap.APTAR, 0x20000000); err != nil {
+	if err := dp.WriteAP(t.Context(), apSel(0), dap.APTAR, 0x20000000); err != nil {
 		t.Fatal(err)
 	}
-	mem, err := dap.NewMemAP(t.Context(), dp, 0)
+	mem, err := dap.NewMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1764,13 +1764,13 @@ func TestImmediateDAPAbortInvalidatesAndRearmsMEMAP(t *testing.T) {
 		originalCSW = uint32(0xa5000051)
 		originalTAR = uint32(0x20000000)
 	)
-	if err := dp.WriteAP(t.Context(), 0, dap.APCSW, originalCSW); err != nil {
+	if err := dp.WriteAP(t.Context(), apSel(0), dap.APCSW, originalCSW); err != nil {
 		t.Fatal(err)
 	}
-	if err := dp.WriteAP(t.Context(), 0, dap.APTAR, originalTAR); err != nil {
+	if err := dp.WriteAP(t.Context(), apSel(0), dap.APTAR, originalTAR); err != nil {
 		t.Fatal(err)
 	}
-	mem, err := dap.NewMemAP(t.Context(), dp, 0)
+	mem, err := dap.NewMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
 		t.Fatal(err)
 	}
