@@ -88,20 +88,20 @@ specification notes, and current physical observation.
 | FAULT recovery | Yes | A FAULT is never replayed. With a known response grammar and bank-zero selection, the error includes the captured CTRL/STAT value and DAP clears only the sticky conditions reported there, then verifies that they are clear. A definitely abandoned AP write does not invalidate MEM-AP state; an uncertain effect does. Failed cleanup preserves the FAULT and blocks ordinary traffic until release repairs the port. |
 | AP enumeration | Yes | Scans all 256 ADIv5 APSEL values in bounded transactions. IDR zero means absent; a FAULT returns the confirmed discoveries with the error. The current Cortex-M bench reports AP0 as `0x24770011` and AP1 as `0x02880000`; sparse numbering is covered by simulation. The scan used 32 SWDIO calls for 1,022 fixed frames, all with OK acknowledgements. |
 | MEM-AP acquisition | Yes | `OpenMemAP` performs AP traffic, rejects an absent or non-MEM AP, and snapshots the state which `Release` restores. |
-| MEM-AP configuration | Yes | Reads CFG at construction, models BE, LA, and LD, and includes TARHI in retryable restoration when large addresses are available. |
-| Target word read | Yes | One aligned 32-bit word with address increment disabled. |
-| MEM-AP restoration | Yes | Saves and restores CSW, TAR, and TARHI when CFG.LA is set; failed restoration remains retryable. MEM-AP restoration remains available while debug-port cleanup is pending. If framing is unknown, `Release` re-enters SWD before restoration. If DAPABORT interrupts cleanup, the next `Release` retries the saved values. The invalidated handle remains invalid. |
-| Managed target-memory writes | No | `MemAP` has no write operation. `WriteRawAP` is an unmanaged escape hatch and can write target memory through a class-specific data register. |
-| Block or sub-word access | No | No burst, auto-increment, 8-bit, or 16-bit operation exists. |
+| MEM-AP configuration | Yes | `OpenMemAP` reads CFG, models BE, LA, and LD, and includes TARHI in retryable restoration when large addresses are available. |
+| Scalar target-memory access | Yes | `ReadScalar` and `WriteScalar` support aligned 8-, 16-, and 32-bit values and verify the implementation-defined CSW.Size before using the byte lane selected by CFG.BE. CFG.LA permits addresses above 32 bits; CFG.LD makes 64-bit access eligible for the same CSW check. Oversized write values fail before traffic, and writes finish with an AP completion barrier. If the first DRW access of a failed Size64 transfer might have started, ordinary traffic remains blocked until cleanup. `ReadWord` provides the 32-bit convenience operation. |
+| MEM-AP restoration | Yes | Saves and restores CSW, TAR, and TARHI when present; failed restoration remains retryable. MEM-AP restoration remains available while debug-port cleanup is pending. If framing is unknown, `Release` re-enters SWD before restoration. It terminates a possibly incomplete Size64 transfer through CSW before touching TAR or TARHI. If DAPABORT interrupts cleanup, the next `Release` retries every saved value. The invalidated handle remains invalid. |
+| Managed target-memory writes | Yes | `WriteScalar` is effectful. The caller selects the address; the API checks alignment and range, not whether that address is safe to modify. `WriteRawAP` remains an unmanaged escape hatch. |
+| Block access | No | No arbitrary-range or auto-incrementing operation exists. |
 | ADIv6 or JTAG-DP | No | The public implementation is the current minimal ADIv5 SW-DP path. |
-| Behavioral simulation | Yes | DP identity/power, posted AP access, and configured target words. AP fixtures take `dap.APSel` values and reject duplicate selectors, zero APIDRs, non-MEM-AP identities passed to `AddMEMAP`, and unaligned target-word addresses. |
+| Behavioral simulation | Yes | DP identity/power, posted AP access, and byte-addressed MEM-AP reads and writes in either target byte order. AP fixtures take `dap.APSel` values and reject duplicate selectors, zero APIDRs, non-MEM-AP identities passed to `AddMEMAP`, and unaligned target-word addresses. |
 | DAP-composed SWD entry | HIL | The FT232H/Cortex-M AP, transaction, and MEM-AP tests each counted one SWD connection performed by `DebugPort.Connect`; the reconnect test counted two. |
-| AP and MEM-AP reads | HIL | Opt-in FTDI integration tests against an explicitly selected AP. On the current Cortex-M target, automatic ORUNDETECT used fixed frames for ordinary DP, AP, transaction, and MEM-AP traffic. A separately gated test corrupts write parity, observes a fixed-frame target FAULT with WDATAERR and STICKYORUN, verifies recovery, and releases the connection with its inherited setting restored. |
+| AP and MEM-AP access | HIL | Opt-in FTDI integration tests against an explicitly selected AP. One transaction clocked nine fixed requests in two SWDIO calls and received nine OK acknowledgements. A separately gated write test preserved a 64-byte SRAM range, exercised 8-, 16-, and 32-bit writes without changing neighboring lanes, then restored and verified all 64 bytes. That test counted 3,130 OK acknowledgements, no WAIT, FAULT, or invalid acknowledgement, and 3,122 fixed frames. The target did not advertise CFG.LD. |
 
-Connecting and reading a MEM-AP changes volatile debug state even though it
-does not write target memory. Applications must release the MEM-AP before the
-debug port so CSW and TAR are restored, bank selection returns to zero, and
-acquired power is released.
+Connecting and using a MEM-AP changes volatile debug state;
+`MemAP.WriteScalar` also changes target memory. Applications must release the
+MEM-AP before the debug port so CSW, TAR, and TARHI when present are restored,
+bank selection returns to zero, and acquired power is released.
 Calls which share a debug port, MEM-AP, or SWD connection must be serialized;
 the packages do not add locking.
 The [Arm Debug Access Port guide](ports/dap.md) describes ADIv5 register
@@ -117,7 +117,7 @@ access, posted transactions, power handshakes, and the current bench result.
 | Register access | No | CPUID decoding is not a general core-register interface. |
 | Reset | No | No architectural or pin-reset operation exists. |
 | Breakpoints or watchpoints | No | No target instrumentation API exists. |
-| Firmware or runtime loading | No | No ELF loader, flash driver, or target-memory writer exists. |
+| Firmware or runtime loading | No | No ELF loader, image-placement policy, or flash driver exists. |
 
 The package identifies a processor; it is not yet a complete Cortex-M target
 driver.

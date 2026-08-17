@@ -62,13 +62,14 @@ const (
 )
 
 type txnOp struct {
-	kind   txnOpKind
-	dpReg  DPRegister
-	apSel  APSel
-	apAddr uint8
-	data   uint32
-	result *txnResult
-	err    error
+	kind       txnOpKind
+	dpReg      DPRegister
+	apSel      APSel
+	apAddr     uint8
+	data       uint32
+	preserveAP bool
+	result     *txnResult
+	err        error
 }
 
 // Txn queues an ordered, single-use sequence of ADIv5 DP and AP operations.
@@ -121,6 +122,14 @@ func (t *Txn) ReadRawAP(addr APAddress) *ReadResult {
 // target memory through a MEM-AP data register.
 func (t *Txn) WriteRawAP(addr APAddress, value uint32) *WriteResult {
 	return &WriteResult{result: t.queue(txnOp{kind: txnWriteRawAP, apSel: addr.sel, apAddr: addr.value, data: value})}
+}
+
+func (t *Txn) readAP(sel APSel, addr uint8) *ReadResult {
+	return &ReadResult{result: t.queue(txnOp{kind: txnReadRawAP, apSel: sel, apAddr: addr, preserveAP: true})}
+}
+
+func (t *Txn) writeAP(sel APSel, addr uint8, value uint32) *WriteResult {
+	return &WriteResult{result: t.queue(txnOp{kind: txnWriteRawAP, apSel: sel, apAddr: addr, data: value, preserveAP: true})}
 }
 
 func (t *Txn) queue(op txnOp) *txnResult {
@@ -254,6 +263,8 @@ type txnStep struct {
 	operationStarted bool
 	settlesDPWrite   bool
 	completesWrite   bool
+	apRead           bool
+	apWrite          bool
 	invalidatesAP    bool
 }
 
@@ -339,10 +350,12 @@ func (p *txnPlanner) lowerAP(index int, op txnOp) {
 	invalidatesAP := op.kind == txnReadRawAP || op.kind == txnWriteRawAP
 	req := apTransferRequest(addr&0x0c, read)
 	p.steps = append(p.steps, txnStep{
+		apRead:        op.kind == txnReadRawAP,
+		apWrite:       op.kind == txnWriteRawAP,
 		req:           req,
 		data:          op.data,
 		op:            index,
-		invalidatesAP: invalidatesAP,
+		invalidatesAP: invalidatesAP && !op.preserveAP,
 	})
 	p.steps = append(p.steps, txnStep{
 		req:              dpTransferRequest(RDBUFF, true),
@@ -351,8 +364,10 @@ func (p *txnPlanner) lowerAP(index int, op txnOp) {
 		deliver:          true,
 		deliverValue:     read,
 		operationStarted: true,
+		apRead:           op.kind == txnReadRawAP,
+		apWrite:          op.kind == txnWriteRawAP,
 		completesWrite:   op.kind == txnWriteRawAP,
-		invalidatesAP:    invalidatesAP,
+		invalidatesAP:    invalidatesAP && !op.preserveAP,
 	})
 }
 
@@ -688,7 +703,7 @@ func (t *Txn) failStep(step txnStep, err error) error {
 }
 
 func (t *Txn) applyFailedStepEffect(step txnStep, err error) {
-	if !step.invalidatesAP || t.dp.state.response == responseLost {
+	if (!step.invalidatesAP && !step.apRead && !step.apWrite) || t.dp.state.response == responseLost {
 		return
 	}
 	if errors.Is(err, ErrIndeterminate) || step.completesWrite && errors.Is(err, swd.ErrParity) {

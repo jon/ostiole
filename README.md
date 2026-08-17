@@ -53,9 +53,10 @@ writing a MEM-AP data register can write target memory. Any raw access which
 completes or might have completed invalidates existing `MemAP` values.
 `dap.DebugPort` retries only the physical request that returned WAIT.
 After an extended AP stall, it issues DAPABORT rather than replaying the whole
-logical access. A minimal MEM-AP client and its model can read one aligned
-32-bit target word without address incrementing, then restore the CSW and TAR
-values changed by that read.
+logical access. A MEM-AP client and its model can read and write aligned scalar
+values without address incrementing, then restore the CSW, TAR, and optional
+TARHI values changed by that access. Cleanup terminates an incomplete 64-bit
+transfer through CSW before restoring the target address registers.
 
 The [examples](examples) begin with a raw SWD debug-port identity read, then
 add posted access-port reads and a Cortex-M identity read through a MEM-AP.
@@ -108,9 +109,11 @@ root. See [Linux USB access](docs/linux-usb.md) for udev rules and a bounded
 
 Debug and programming interfaces can reset processors, halt execution, modify
 memory, reconfigure programmable logic, and change persistent device state.
-Early hardware work avoids reset, halt, target-memory writes, and persistent
-changes. Establishing an ADIv5 connection does change volatile debug-port
-control state; the connection releases its own power requests before return.
+The shipped examples and `ost` commands avoid reset, halt, target-memory
+writes, and persistent changes. The `dap.MemAP` API does expose effectful
+scalar writes; callers choose the addresses and own the consequences.
+Establishing an ADIv5 connection also changes volatile debug-port control
+state; the connection releases its own power requests before return.
 
 ## SWD DPIDR example
 

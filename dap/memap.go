@@ -25,7 +25,8 @@ const (
 	cfgLargeData = uint32(1 << 2)
 )
 
-// TransferSize is a MEM-AP CSW.Size encoding.
+// TransferSize names the width of one MEM-AP scalar transfer. Its zero value
+// is invalid.
 type TransferSize uint8
 
 const (
@@ -35,10 +36,13 @@ const (
 	Size64
 )
 
-// MemAP reads aligned target words through one memory access port.
+// MemAP reads and writes aligned scalar values through one memory access port.
 //
 // Its methods and all uses of its DebugPort must be serialized. Release the
-// MemAP before releasing its DebugPort.
+// MemAP before releasing its DebugPort. Reads and writes change volatile
+// MEM-AP registers; Release restores the saved values. If a failed Size64
+// transfer might have started its first DRW access, release the MemAP and then
+// the DebugPort before reconnecting.
 type MemAP struct {
 	dp           *DebugPort
 	sel          APSel
@@ -51,14 +55,15 @@ type MemAP struct {
 	bigEndian    bool
 	largeAddress bool
 	largeData    bool
+	largePending bool
 	restoreCSW   bool
 	restoreTAR   bool
 	restoreTARHI bool
 }
 
-// OpenMemAP validates sel and saves the state changed by target reads. It
-// performs AP traffic. A returned MemAP must be paired with MemAP.Release. The
-// debug port must be connected and must not have cleanup pending.
+// OpenMemAP validates sel and saves the state changed by target-memory access.
+// It performs AP traffic. A returned MemAP must be paired with MemAP.Release.
+// The debug port must be connected and must not have cleanup pending.
 func OpenMemAP(ctx context.Context, dp *DebugPort, sel APSel) (*MemAP, error) {
 	selection, err := validateAPSel(sel)
 	if err != nil {
@@ -110,33 +115,183 @@ func OpenMemAP(ctx context.Context, dp *DebugPort, sel APSel) (*MemAP, error) {
 	}, nil
 }
 
-// ReadWord reads one aligned 32-bit target word. Debug-port recovery
-// invalidates further reads through an existing MemAP.
+// ReadWord reads one aligned 32-bit target word.
 func (m *MemAP) ReadWord(ctx context.Context, addr uint32) (uint32, error) {
-	if m == nil || m.dp == nil {
-		return 0, errors.New("dap: nil MEM-AP")
-	}
-	if m.epoch != m.dp.state.apGeneration {
-		return 0, errors.New("dap: read target word: MEM-AP state was invalidated by debug-port recovery")
-	}
-	if err := m.dp.requireConnected(); err != nil {
-		return 0, err
-	}
-	if addr&3 != 0 {
-		return 0, fmt.Errorf("dap: unaligned target word address %#08x", addr)
-	}
-	m.restoreCSW = true
-	if err := m.dp.writeAP(ctx, m.sel, memAPCSW, m.csw); err != nil {
-		return 0, err
-	}
-	m.restoreTAR = true
-	if err := m.dp.writeAP(ctx, m.sel, memAPTAR, addr); err != nil {
-		return 0, err
-	}
-	return m.dp.readAP(ctx, m.sel, memAPDRW)
+	value, err := m.ReadScalar(ctx, uint64(addr), Size32)
+	return uint32(value), err
 }
 
-// Release restores the CSW and TAR values changed by target reads.
+// ReadScalar performs one aligned, sized target-memory read. The returned
+// value is right-justified regardless of target byte order or address lane.
+func (m *MemAP) ReadScalar(ctx context.Context, addr uint64, size TransferSize) (uint64, error) {
+	if err := m.checkScalar(addr, size, "read"); err != nil {
+		return 0, err
+	}
+	if err := m.selectSize(ctx, size); err != nil {
+		return 0, err
+	}
+	txn := m.scalarTxn(addr)
+	low := txn.readAP(m.sel, memAPDRW)
+	var high *ReadResult
+	if size == Size64 {
+		high = txn.readAP(m.sel, memAPDRW)
+		m.largePending = true
+	}
+	generation := m.dp.state.apGeneration
+	if err := txn.Commit(ctx); err != nil {
+		if size == Size64 {
+			m.requireLargeDataCleanup(generation)
+		}
+		return 0, err
+	}
+	m.largePending = false
+	lowValue, err := low.Value()
+	if err != nil {
+		return 0, err
+	}
+	if high != nil {
+		highValue, err := high.Value()
+		if err != nil {
+			return 0, err
+		}
+		return uint64(lowValue) | uint64(highValue)<<32, nil
+	}
+	return uint64(lowValue>>m.laneShift(addr, size)) & sizeMask(size), nil
+}
+
+// WriteScalar performs one aligned, sized target-memory write. Sub-word values
+// are placed in the address lane selected by the MEM-AP byte order. It returns
+// only after the AP completion barrier succeeds.
+func (m *MemAP) WriteScalar(ctx context.Context, addr uint64, size TransferSize, value uint64) error {
+	if err := m.checkScalar(addr, size, "write"); err != nil {
+		return err
+	}
+	if value&^sizeMask(size) != 0 {
+		width, _ := sizeBytes(size)
+		return fmt.Errorf("dap: write target memory: value %#x exceeds %d bits", value, width*8)
+	}
+	if err := m.selectSize(ctx, size); err != nil {
+		return err
+	}
+	txn := m.scalarTxn(addr)
+	if size == Size64 {
+		txn.writeAP(m.sel, memAPDRW, uint32(value))
+		txn.writeAP(m.sel, memAPDRW, uint32(value>>32))
+		m.largePending = true
+	} else {
+		data := uint32(value) << m.laneShift(addr, size)
+		txn.writeAP(m.sel, memAPDRW, data)
+	}
+	generation := m.dp.state.apGeneration
+	err := txn.Commit(ctx)
+	if err == nil {
+		m.largePending = false
+	} else if size == Size64 {
+		m.requireLargeDataCleanup(generation)
+	}
+	return err
+}
+
+func (m *MemAP) requireLargeDataCleanup(generation uint64) {
+	if m.dp.state.apGeneration == generation {
+		m.dp.state.invalidateAP()
+	}
+	m.dp.state.beginRepair()
+}
+
+func (m *MemAP) checkScalar(addr uint64, size TransferSize, operation string) error {
+	if m == nil || m.dp == nil {
+		return errors.New("dap: nil MEM-AP")
+	}
+	if m.epoch != m.dp.state.apGeneration {
+		return fmt.Errorf("dap: %s target memory: MEM-AP state was invalidated by debug-port recovery", operation)
+	}
+	if err := m.dp.requireConnected(); err != nil {
+		return err
+	}
+	if err := validateScalarAccess(addr, size, m.largeAddress); err != nil {
+		return fmt.Errorf("dap: %s target memory: %w", operation, err)
+	}
+	if size == Size64 && !m.largeData {
+		return fmt.Errorf("dap: %s target memory: Size64 requires CFG.LD", operation)
+	}
+	return nil
+}
+
+func (m *MemAP) selectSize(ctx context.Context, size TransferSize) error {
+	encoding, err := transferSizeEncoding(size)
+	if err != nil {
+		return err
+	}
+	txn := m.dp.NewTxn()
+	m.restoreCSW = true
+	txn.writeAP(m.sel, memAPCSW, m.csw&^cswSize|encoding)
+	selected := txn.readAP(m.sel, memAPCSW)
+	if err := txn.Commit(ctx); err != nil {
+		return err
+	}
+	m.largePending = false
+	value, err := selected.Value()
+	if err != nil {
+		return err
+	}
+	if value&cswSize != encoding {
+		width, _ := sizeBytes(size)
+		return fmt.Errorf("dap: MEM-AP does not support %d-bit transfers", width*8)
+	}
+	return nil
+}
+
+func transferSizeEncoding(size TransferSize) (uint32, error) {
+	switch size {
+	case Size8:
+		return 0, nil
+	case Size16:
+		return 1, nil
+	case Size32:
+		return 2, nil
+	case Size64:
+		return 3, nil
+	default:
+		return 0, fmt.Errorf("invalid transfer size %d", size)
+	}
+}
+
+func (m *MemAP) scalarTxn(addr uint64) *Txn {
+	txn := m.dp.NewTxn()
+	if m.largeAddress {
+		m.restoreTARHI = true
+		txn.writeAP(m.sel, memAPTARHI, uint32(addr>>32))
+	}
+	m.restoreTAR = true
+	txn.writeAP(m.sel, memAPTAR, uint32(addr))
+	return txn
+}
+
+func (m *MemAP) laneShift(addr uint64, size TransferSize) uint {
+	width, _ := sizeBytes(size)
+	lane := int(addr & 3)
+	if m.bigEndian {
+		lane = 4 - width - lane
+	}
+	return uint(lane * 8)
+}
+
+func sizeMask(size TransferSize) uint64 {
+	switch size {
+	case Size8:
+		return 0xff
+	case Size16:
+		return 0xffff
+	case Size32:
+		return 0xffffffff
+	default:
+		return ^uint64(0)
+	}
+}
+
+// Release restores the CSW, TAR, and, when present, TARHI values changed by
+// target-memory access.
 //
 // Release remains available while debug-port cleanup is pending. Failed
 // restoration remains pending so the method can be retried. Call it before
@@ -158,6 +313,12 @@ func (m *MemAP) Release(ctx context.Context) error {
 		m.restoreTARHI = m.largeAddress
 		m.restoreCSW = true
 		m.restoreEpoch = m.dp.state.apGeneration
+	}
+	if m.largePending {
+		if err := m.restoreRegister(releaseCtx, &m.restoreCSW, memAPCSW, m.savedCSW, "CSW"); err != nil {
+			return err
+		}
+		m.largePending = false
 	}
 	tarhiErr := m.restoreRegister(releaseCtx, &m.restoreTARHI, memAPTARHI, m.savedTARHI, "TARHI")
 	tarErr := m.restoreRegister(releaseCtx, &m.restoreTAR, memAPTAR, m.savedTAR, "TAR")

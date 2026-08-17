@@ -22,7 +22,7 @@ data-register write can write target memory.
 | Enter SWD, decode a DPIDR, and manage SW-DP power | `dap.NewDebugPort`, `DebugPort.Connect`, `DebugPort.Release` | `ost dap dp id` |
 | Identify one explicitly selected AP | `DebugPort.ReadAPIDR`, `DecodeAPIDR` | `examples/simple/ap-id` |
 | Access another AP register by its full ADIv5 address | `DebugPort.ReadRawAP`, `DebugPort.WriteRawAP` | Package tests |
-| Read one aligned target word through a MEM-AP | `dap.OpenMemAP`, `MemAP.ReadWord`, `MemAP.Release` | `examples/simple/cortexm-info` |
+| Read or write one aligned target scalar through a MEM-AP | `dap.OpenMemAP`, `MemAP.ReadScalar`, `MemAP.WriteScalar`, `MemAP.Release` | `examples/simple/cortexm-info` uses `ReadWord`. |
 | Identify a Cortex-M through any compatible word reader | `cortexm.Identify` | `examples/simple/cortexm-info` |
 | Test SWD and DAP behavior without hardware | `swd/sim`, `dap/sim` | Package tests |
 
@@ -124,11 +124,22 @@ operation whose completion is uncertain reports `ErrIndeterminate`, and later
 operations report `ErrNotExecuted`. A transaction acquires no additional state
 and does not change the release order.
 
-Use `dap.OpenMemAP` when the application needs the currently supported target
-memory operation: one aligned 32-bit read through an explicitly selected
-MEM-AP. Keep the debug port connected until `MemAP.Release` restores CSW and
-TAR. Calls sharing a MEM-AP, its debug port, or their SWD connection must be
-serialized; these values do not add locking.
+Use `dap.MemAP` for aligned 8-, 16-, or 32-bit target-memory reads and writes
+through an explicitly selected MEM-AP. Support for the non-word sizes is
+implementation-defined, so each access verifies that CSW accepted its size
+before touching memory. CFG.LD makes 64-bit access possible; CFG.LA permits
+addresses above 32 bits. `target/cortexm` uses `ReadWord` for its 32-bit reads.
+
+`MemAP.WriteScalar` changes target memory at the selected address. The library
+rejects a value which does not fit the selected size and validates alignment
+and advertised extensions, but deciding whether an address is safe to write
+belongs to the application. Keep the debug port connected until `MemAP.Release`
+restores CSW, TAR, and TARHI when present. Calls sharing a MEM-AP, its debug
+port, or their SWD connection must be serialized; these values do not add
+locking. If a Size64 transfer fails after its first DRW access might have
+started, ordinary debug-port traffic remains blocked. Release the MEM-AP so it
+can terminate the incomplete transfer through CSW, then release and reconnect
+the debug port.
 
 Use `target/cortexm` when the desired result is processor identity. It accepts
 the word-reader behavior supplied by `dap.MemAP`, so target code remains

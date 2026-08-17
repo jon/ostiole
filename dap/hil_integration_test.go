@@ -92,14 +92,40 @@ func releaseHardwareDebugPort(t *testing.T, dp *dap.DebugPort) {
 	t.Helper()
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Second)
 	defer cleanupCancel()
+	if err := releaseHardwareDebugPortWithin(cleanupCtx, dp); err != nil {
+		t.Errorf("release SW-DP within cleanup deadline: %v", err)
+	}
+}
+
+func releaseHardwareDebugPortWithin(ctx context.Context, dp *dap.DebugPort) error {
 	for {
-		err := dp.Release(cleanupCtx)
+		err := dp.Release(ctx)
 		if err == nil {
-			return
+			return nil
 		}
-		if cleanupCtx.Err() != nil {
-			t.Errorf("release SW-DP within cleanup deadline: %v", errors.Join(err, cleanupCtx.Err()))
-			return
+		if ctx.Err() != nil {
+			return errors.Join(err, ctx.Err())
+		}
+	}
+}
+
+func releaseHardwareMemAP(t *testing.T, mem *dap.MemAP) {
+	t.Helper()
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Second)
+	defer cleanupCancel()
+	if err := releaseHardwareMemAPWithin(cleanupCtx, mem); err != nil {
+		t.Errorf("release MEM-AP within cleanup deadline: %v", err)
+	}
+}
+
+func releaseHardwareMemAPWithin(ctx context.Context, mem *dap.MemAP) error {
+	for {
+		err := mem.Release(ctx)
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return errors.Join(err, ctx.Err())
 		}
 	}
 }
