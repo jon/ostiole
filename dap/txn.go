@@ -8,23 +8,41 @@ import (
 	"github.com/jon/ostiole/swd"
 )
 
-// Result reports the outcome of one queued operation.
-type Result struct {
+type txnResult struct {
 	resolved bool
 	value    uint32
 	err      error
 }
 
-// Value returns the queued operation's result. Before Commit, it returns
-// ErrResultPending.
-func (r *Result) Value() (uint32, error) {
-	if r == nil || !r.resolved {
-		return 0, ErrResultPending
-	}
-	return r.value, r.err
+// ReadResult reports the outcome of one queued read.
+type ReadResult struct {
+	result *txnResult
 }
 
-func (r *Result) resolve(value uint32, err error) {
+// Value returns the value and error from the queued read. Before Commit, it
+// returns ErrResultPending.
+func (r *ReadResult) Value() (uint32, error) {
+	if r == nil || r.result == nil || !r.result.resolved {
+		return 0, ErrResultPending
+	}
+	return r.result.value, r.result.err
+}
+
+// WriteResult reports the outcome of one queued write.
+type WriteResult struct {
+	result *txnResult
+}
+
+// Err returns the queued write's completion error. Before Commit, it returns
+// ErrResultPending.
+func (r *WriteResult) Err() error {
+	if r == nil || r.result == nil || !r.result.resolved {
+		return ErrResultPending
+	}
+	return r.result.err
+}
+
+func (r *txnResult) resolve(value uint32, err error) {
 	if r.resolved {
 		return
 	}
@@ -49,7 +67,7 @@ type txnOp struct {
 	apSel  APSel
 	apAddr uint8
 	data   uint32
-	result *Result
+	result *txnResult
 	err    error
 }
 
@@ -70,41 +88,41 @@ func (dp *DebugPort) NewTxn() *Txn {
 }
 
 // ReadDP queues one logical debug-port read.
-func (t *Txn) ReadDP(reg DPRegister) *Result {
-	return t.queue(txnOp{kind: txnReadDP, dpReg: reg})
+func (t *Txn) ReadDP(reg DPRegister) *ReadResult {
+	return &ReadResult{result: t.queue(txnOp{kind: txnReadDP, dpReg: reg})}
 }
 
-// WriteDP queues one logical debug-port write. Commit settles the
-// write through RDBUFF before its Result reports success. Release does not own
+// WriteDP queues one logical debug-port write. Commit settles the write through
+// RDBUFF before its WriteResult reports success. Release does not own
 // power-request bits changed this way. Rejection does not invalidate existing
 // MemAP values by itself; a completed or indeterminate DAPABORT does.
-func (t *Txn) WriteDP(reg DPRegister, value uint32) *Result {
-	return t.queue(txnOp{kind: txnWriteDP, dpReg: reg, data: value})
+func (t *Txn) WriteDP(reg DPRegister, value uint32) *WriteResult {
+	return &WriteResult{result: t.queue(txnOp{kind: txnWriteDP, dpReg: reg, data: value})}
 }
 
 // ReadAPIDR queues a read of one access-port identification register. The
 // result value is the raw register encoding.
-func (t *Txn) ReadAPIDR(sel APSel) *Result {
-	return t.queue(txnOp{kind: txnReadAPIDR, apSel: sel, apAddr: apIDRAddress})
+func (t *Txn) ReadAPIDR(sel APSel) *ReadResult {
+	return &ReadResult{result: t.queue(txnOp{kind: txnReadAPIDR, apSel: sel, apAddr: apIDRAddress})}
 }
 
 // ReadRawAP queues one posted access-port read. A read that completes or might
 // have completed invalidates existing MemAP values. The caller is responsible
 // for effects defined by the selected AP class.
-func (t *Txn) ReadRawAP(addr APAddress) *Result {
-	return t.queue(txnOp{kind: txnReadRawAP, apSel: addr.sel, apAddr: addr.value})
+func (t *Txn) ReadRawAP(addr APAddress) *ReadResult {
+	return &ReadResult{result: t.queue(txnOp{kind: txnReadRawAP, apSel: addr.sel, apAddr: addr.value})}
 }
 
 // WriteRawAP queues one access-port write and its completion barrier. A write
 // that completes or might have completed invalidates existing MemAP values.
 // The caller is responsible for class-specific effects, including writes to
 // target memory through a MEM-AP data register.
-func (t *Txn) WriteRawAP(addr APAddress, value uint32) *Result {
-	return t.queue(txnOp{kind: txnWriteRawAP, apSel: addr.sel, apAddr: addr.value, data: value})
+func (t *Txn) WriteRawAP(addr APAddress, value uint32) *WriteResult {
+	return &WriteResult{result: t.queue(txnOp{kind: txnWriteRawAP, apSel: addr.sel, apAddr: addr.value, data: value})}
 }
 
-func (t *Txn) queue(op txnOp) *Result {
-	result := &Result{}
+func (t *Txn) queue(op txnOp) *txnResult {
+	result := &txnResult{}
 	op.result = result
 	if t == nil || t.committed {
 		result.resolve(0, ErrTxnCommitted)
@@ -117,7 +135,7 @@ func (t *Txn) queue(op txnOp) *Result {
 // Commit validates the complete queue, settles any earlier immediate DP write,
 // then executes queued operations in order until one fails. Failure while
 // settling the earlier write leaves every queued operation unexecuted. Commit
-// resolves every Result before returning. A Txn can be committed only once.
+// resolves every result before returning. A Txn can be committed only once.
 func (t *Txn) Commit(ctx context.Context) error {
 	if t == nil || t.committed {
 		return ErrTxnCommitted

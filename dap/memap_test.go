@@ -130,7 +130,7 @@ func TestQueuedRawAPWriteInvalidatesMEMAP(t *testing.T) {
 	if err := txn.Commit(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := write.Value(); err != nil {
+	if err := write.Err(); err != nil {
 		t.Fatal(err)
 	}
 	assertMEMAPHandleInvalid(t, mem)
@@ -236,7 +236,7 @@ func TestIndeterminateQueuedRawAPWriteInvalidatesMEMAP(t *testing.T) {
 	if err := txn.Commit(t.Context()); !errors.Is(err, errBarrier) || !errors.Is(err, dap.ErrIndeterminate) {
 		t.Fatalf("Commit() error = %v, want %v and indeterminate", err, errBarrier)
 	}
-	if _, err := write.Value(); !errors.Is(err, errBarrier) || !errors.Is(err, dap.ErrIndeterminate) {
+	if err := write.Err(); !errors.Is(err, errBarrier) || !errors.Is(err, dap.ErrIndeterminate) {
 		t.Fatalf("write result error = %v, want %v and indeterminate", err, errBarrier)
 	}
 	assertMEMAPHandleInvalid(t, mem)

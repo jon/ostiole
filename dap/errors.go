@@ -8,7 +8,7 @@ import (
 )
 
 var (
-	// ErrResultPending reports a call to Result.Value before Commit.
+	// ErrResultPending reports access to a queued result before Commit.
 	ErrResultPending = errors.New("dap: transaction result is pending")
 	// ErrTxnCommitted reports reuse of a single-use transaction.
 	ErrTxnCommitted = errors.New("dap: transaction is already committed")
