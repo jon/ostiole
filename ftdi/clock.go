@@ -20,15 +20,11 @@ const (
 )
 
 func (c *Channel) configure(ctx context.Context) error {
-	divisor, err := clockDivisor(c.clockHz)
-	if err != nil {
-		return err
-	}
 	return c.writeExact(ctx, []byte{
 		cmdDisableDivBy5,
 		cmdDisableAdaptive,
 		cmdDisable3Phase,
-		cmdSetClockDiv, byte(divisor), byte(divisor >> 8),
+		cmdSetClockDiv, byte(c.divisor), byte(c.divisor >> 8),
 		cmdDisableLoop,
 		cmdSetDataLow, 0, pinClock,
 		cmdSetDataHigh, 0, 0,

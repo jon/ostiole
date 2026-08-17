@@ -33,12 +33,7 @@ func TestHILDarwinFT232HMPSSEHandshake(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open selected FT232H: %v", err)
 	}
-	channel, err := ftdi.Open(ctx, device, ftdi.Config{
-		ClockHz:   400_000,
-		ProductID: ftdi.PIDFT232H,
-		Port:      ftdi.PortA,
-		Interface: ftdi.SWD,
-	})
+	channel, err := ftdi.Open(ctx, device, ftdi.Config{Port: ftdi.PortA, MaxClockHz: 400_000})
 	if err != nil {
 		t.Fatalf("prepare FTDI MPSSE port A: %v", errors.Join(err, device.Close()))
 	}
