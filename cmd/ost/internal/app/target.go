@@ -29,8 +29,12 @@ func runTarget(ctx context.Context, args []string, stdout io.Writer, ops operati
 	if err != nil {
 		return err
 	}
+	selector, err := info.selection.Value()
+	if err != nil {
+		return err
+	}
 	_, err = fmt.Fprintf(stdout, "DPIDR=%#08x AP%d_IDR=%#08x CPUID=%#08x\n",
-		info.dpidr.Raw, info.selection, info.apidr, info.processor.Raw)
+		info.dpidr.Raw, selector, info.apidr, info.processor.Raw)
 	return err
 }
 

@@ -117,8 +117,8 @@ writes zero to SELECT once without retrying, confirms the write through RDBUFF,
 and rejects ORUNDETECT or a non-default DLCR turnaround because `DebugPort`
 does not yet switch response modes or turnaround lengths. It then requests
 acknowledged debug and system power, retries the exact physical request which
-returned WAIT, and completes posted AP transactions through RDBUFF. After an
-extended AP stall, `dap.DebugPort` issues DAPABORT and invalidates AP-derived
+returned WAIT, and completes posted AP transactions through RDBUFF. `NewAPSel`
+constructs an AP selector whose zero value is invalid. After an extended AP stall, `dap.DebugPort` issues DAPABORT and invalidates AP-derived
 state. RDBUFF also settles DP writes, but a stall or FAULT at that barrier does
 not trigger AP-only recovery. A FAULT is not retried: the debug port captures
 bank-zero CTRL/STAT, clears the sticky conditions reported there, verifies the

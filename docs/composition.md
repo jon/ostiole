@@ -58,7 +58,8 @@ ownership, bank selection, or AP access. Call `Connect` before AP operations
 and `Release` afterward. Give the debug port exclusive, serialized use of its
 `swd.Conn`; direct transfers on that connection can invalidate cached DAP
 state. `ReadDP` and `WriteDP` take logical ADIv5 register names and manage
-DPBANKSEL without exposing a current-bank API. This layer owns posted AP read
+DPBANKSEL without exposing a current-bank API. `NewAPSel` constructs an AP
+selector whose zero value is invalid. This layer owns posted AP read
 and write completion and retries only the physical request that returned WAIT.
 After an extended AP stall, `dap.DebugPort` issues DAPABORT; existing
 `dap.MemAP` values reject further reads, though `dap.MemAP.Release` still

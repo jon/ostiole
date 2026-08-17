@@ -39,15 +39,19 @@ type MemAP struct {
 // NewMemAP validates sel and saves the state changed by target reads.
 // The debug port must be connected and must not have cleanup pending.
 func NewMemAP(ctx context.Context, dp *DebugPort, sel APSel) (*MemAP, error) {
+	selection, err := sel.Value()
+	if err != nil {
+		return nil, err
+	}
 	idr, err := dp.ReadAP(ctx, sel, APIDR)
 	if err != nil {
 		return nil, err
 	}
 	if idr == 0 {
-		return nil, fmt.Errorf("dap: AP %d is absent", sel)
+		return nil, fmt.Errorf("dap: AP %d is absent", selection)
 	}
 	if idr>>13&0x0f != memAPClass {
-		return nil, fmt.Errorf("dap: AP %d is not a MEM-AP", sel)
+		return nil, fmt.Errorf("dap: AP %d is not a MEM-AP", selection)
 	}
 	csw, err := dp.ReadAP(ctx, sel, APCSW)
 	if err != nil {

@@ -155,6 +155,9 @@ func (t *Txn) validate() error {
 			_, op.err = t.dp.validateDPWrite(op.dpReg, op.data)
 		case txnReadAP, txnWriteAP:
 			op.err = validateAPReg(op.apReg)
+			if op.err == nil {
+				_, op.err = op.apSel.Value()
+			}
 		}
 		if op.err != nil {
 			errs = append(errs, op.err)
@@ -291,7 +294,8 @@ func txnDPRequest(op txnOp, info dpRegisterInfo) transferRequest {
 }
 
 func (p *txnPlanner) lowerAP(index int, op txnOp) {
-	value := uint32(op.apSel)<<24 | uint32(op.apReg&0xf0)
+	selection, _ := op.apSel.Value()
+	value := uint32(selection)<<24 | uint32(op.apReg&0xf0)
 	p.selectValue(index, value)
 	req := apTransferRequest(uint8(op.apReg&0x0c), op.kind == txnReadAP)
 	p.steps = append(p.steps, txnStep{

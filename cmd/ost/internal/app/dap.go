@@ -47,8 +47,11 @@ func runAP(ctx context.Context, args []string, stdout io.Writer, ops operations)
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(stdout, "DPIDR=%#08x AP%d_IDR=%#08x\n",
-		info.dpidr.Raw, info.selection, info.idr)
+	selector, err := info.selection.Value()
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(stdout, "DPIDR=%#08x AP%d_IDR=%#08x\n", info.dpidr.Raw, selector, info.idr)
 	return err
 }
 
@@ -57,15 +60,15 @@ func parseAP(command string, args []string) (dap.APSel, error) {
 	flags.SetOutput(io.Discard)
 	selection := flags.Uint("ap", 0, "access-port number")
 	if err := flags.Parse(args); err != nil {
-		return 0, &usageError{message: fmt.Sprintf("%s: %v", command, err)}
+		return dap.APSel{}, &usageError{message: fmt.Sprintf("%s: %v", command, err)}
 	}
 	if flags.NArg() != 0 {
-		return 0, &usageError{message: command + " accepts no arguments"}
+		return dap.APSel{}, &usageError{message: command + " accepts no arguments"}
 	}
 	if *selection > 255 {
-		return 0, &usageError{message: command + ": --ap exceeds 255"}
+		return dap.APSel{}, &usageError{message: command + ": --ap exceeds 255"}
 	}
-	return dap.APSel(*selection), nil
+	return dap.NewAPSel(uint8(*selection)), nil
 }
 
 func inspectDP(ctx context.Context) (_ dap.DPIDRInfo, err error) {

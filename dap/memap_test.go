@@ -14,10 +14,10 @@ func TestReadAlignedMEMAPWord(t *testing.T) {
 		0xe000ed00: 0x410cc200,
 	})
 	dp := enteredDAPClient(t, target)
-	if err := dp.WriteAP(t.Context(), 0, dap.APReg(0), 0xa5000051); err != nil {
+	if err := dp.WriteAP(t.Context(), apSel(0), dap.APReg(0), 0xa5000051); err != nil {
 		t.Fatal(err)
 	}
-	mem, err := dap.NewMemAP(t.Context(), dp, 0)
+	mem, err := dap.NewMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func TestReadAlignedMEMAPWord(t *testing.T) {
 	if value != 0x410cc200 {
 		t.Fatalf("ReadWord() = %#08x, want 0x410cc200", value)
 	}
-	csw, err := dp.ReadAP(t.Context(), 0, dap.APReg(0))
+	csw, err := dp.ReadAP(t.Context(), apSel(0), dap.APReg(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,13 +47,13 @@ func TestMEMAPReleaseRestoresRegisterState(t *testing.T) {
 		originalCSW = uint32(0xa5000051)
 		originalTAR = uint32(0x20000000)
 	)
-	if err := dp.WriteAP(t.Context(), 0, dap.APCSW, originalCSW); err != nil {
+	if err := dp.WriteAP(t.Context(), apSel(0), dap.APCSW, originalCSW); err != nil {
 		t.Fatal(err)
 	}
-	if err := dp.WriteAP(t.Context(), 0, dap.APTAR, originalTAR); err != nil {
+	if err := dp.WriteAP(t.Context(), apSel(0), dap.APTAR, originalTAR); err != nil {
 		t.Fatal(err)
 	}
-	mem, err := dap.NewMemAP(t.Context(), dp, 0)
+	mem, err := dap.NewMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestMEMAPReleaseCanRetry(t *testing.T) {
 	target := sim.New(0x2ba01477)
 	target.AddMEMAP(0, 0x00010001, map[uint32]uint32{0: 1})
 	dp := enteredDAPClient(t, target)
-	mem, err := dap.NewMemAP(t.Context(), dp, 0)
+	mem, err := dap.NewMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestMEMAPReleaseCanRetry(t *testing.T) {
 func TestMEMAPRejectsUnalignedWord(t *testing.T) {
 	target := sim.New(0x2ba01477)
 	target.AddMEMAP(0, 0x00010001, nil)
-	mem, err := dap.NewMemAP(t.Context(), enteredDAPClient(t, target), 0)
+	mem, err := dap.NewMemAP(t.Context(), enteredDAPClient(t, target), apSel(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,16 +104,16 @@ func TestNewMEMAPRejectsAbsentAndNonMemoryPorts(t *testing.T) {
 	target := sim.New(0x2ba01477)
 	target.AddAP(1, 0x00000001)
 	dp := enteredDAPClient(t, target)
-	if _, err := dap.NewMemAP(t.Context(), dp, 0); err == nil {
+	if _, err := dap.NewMemAP(t.Context(), dp, apSel(0)); err == nil {
 		t.Fatal("NewMemAP() accepted an absent AP")
 	}
-	if _, err := dap.NewMemAP(t.Context(), dp, 1); err == nil {
+	if _, err := dap.NewMemAP(t.Context(), dp, apSel(1)); err == nil {
 		t.Fatal("NewMemAP() accepted a non-MEM AP")
 	}
 }
 
 func TestNilMEMAPClient(t *testing.T) {
-	if _, err := dap.NewMemAP(t.Context(), nil, 0); err == nil {
+	if _, err := dap.NewMemAP(t.Context(), nil, apSel(0)); err == nil {
 		t.Fatal("NewMemAP() succeeded without a debug port")
 	}
 	var mem *dap.MemAP
@@ -127,7 +127,7 @@ func TestNilMEMAPClient(t *testing.T) {
 
 func assertAPRegister(t *testing.T, dp *dap.DebugPort, reg dap.APReg, want uint32) {
 	t.Helper()
-	got, err := dp.ReadAP(t.Context(), 0, reg)
+	got, err := dp.ReadAP(t.Context(), apSel(0), reg)
 	if err != nil {
 		t.Fatal(err)
 	}
