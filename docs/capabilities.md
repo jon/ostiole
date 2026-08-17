@@ -91,18 +91,18 @@ specification notes, and current physical observation.
 | MEM-AP configuration | Yes | `OpenMemAP` reads CFG, models BE, LA, and LD, and includes TARHI in retryable restoration when large addresses are available. |
 | Scalar target-memory access | Yes | `ReadScalar` and `WriteScalar` support aligned 8-, 16-, and 32-bit values and verify the implementation-defined CSW.Size before using the byte lane selected by CFG.BE. CFG.LA permits addresses above 32 bits; CFG.LD makes 64-bit access eligible for the same CSW check. Oversized write values fail before traffic, and writes finish with an AP completion barrier. If the first DRW access of a failed Size64 transfer might have started, ordinary traffic remains blocked until cleanup. `ReadWord` provides the 32-bit convenience operation. |
 | MEM-AP restoration | Yes | Saves and restores CSW, TAR, and TARHI when present; failed restoration remains retryable. MEM-AP restoration remains available while debug-port cleanup is pending. If framing is unknown, `Release` re-enters SWD before restoration. It terminates a possibly incomplete Size64 transfer through CSW before touching TAR or TARHI. If DAPABORT interrupts cleanup, the next `Release` retries every saved value. The invalidated handle remains invalid. |
-| Managed target-memory writes | Yes | `WriteScalar` is effectful. The caller selects the address; the API checks alignment and range, not whether that address is safe to modify. `WriteRawAP` remains an unmanaged escape hatch. |
+| Managed target-memory writes | Yes | `WriteScalar` and `WriteBlock` are effectful. The caller selects the address; the API checks alignment and range, not whether that address is safe to modify. `WriteRawAP` remains an unmanaged escape hatch. |
 | Block reads | Yes | Accepts empty, unaligned, and mixed-width ranges. No auto-incrementing word run crosses a 1 KiB TAR boundary. If the MEM-AP does not accept single address increment, the reader writes TAR before each word. It retries the same request after WAIT while selection and framing remain known, WAIT cleanup succeeds, and the context remains active. If selection, framing, or cleanup becomes uncertain, repair is required. A FAULT returns only the confirmed prefix. Cancellation and transport or protocol failures can also interrupt the read. Unread destination bytes remain untouched. |
-| Block writes | No | No arbitrary-range target-memory write exists. |
+| Block writes | Yes | Uses the block-read geometry and bounded buffered-write chunks. If the MEM-AP does not accept single address increment, `WriteBlock` writes TAR before each word. `WriteBlock` retries a clean WAIT on the same request until its context ends. An accepted write is not replayed; if its RDBUFF completion request returns WAIT, only that request is retried. Only chunks whose RDBUFF completion requests were accepted contribute to the returned prefix. If the current chunk might have been applied, `WriteBlock` returns `ErrIndeterminate` without retrying it. |
 | ADIv6 or JTAG-DP | No | The public implementation is the current minimal ADIv5 SW-DP path. |
 | Behavioral simulation | Yes | DP identity/power, posted AP access, and byte-addressed MEM-AP reads and writes in either target byte order. AP fixtures take `dap.APSel` values and reject duplicate selectors, zero APIDRs, non-MEM-AP identities passed to `AddMEMAP`, and unaligned target-word addresses. |
 | DAP-composed SWD entry | HIL | The FT232H/Cortex-M AP, transaction, and MEM-AP tests each counted one SWD connection performed by `DebugPort.Connect`; the reconnect test counted two. |
 | AP and MEM-AP access | HIL | Opt-in FTDI integration tests against an explicitly selected AP. One transaction clocked nine fixed requests in two SWDIO calls and received nine OK acknowledgements. A 64-byte block read matched scalar byte reads from the same SRAM range and counted 571 OK acknowledgements, no WAIT, FAULT, or invalid acknowledgement, and 563 fixed frames. A separately gated write test preserved that range, exercised 8-, 16-, and 32-bit writes without changing neighboring lanes, then restored and verified all 64 bytes. The selected range did not cross a TAR boundary, and the target did not advertise CFG.LD. |
 
-Connecting and using a MEM-AP changes volatile debug state;
-`MemAP.WriteScalar` also changes target memory. Applications must release the
-MEM-AP before the debug port so CSW, TAR, and TARHI when present are restored,
-bank selection returns to zero, and acquired power is released.
+Connecting and using a MEM-AP changes volatile debug state; its write methods
+also change target memory. Applications must release the MEM-AP before the
+debug port so CSW, TAR, and TARHI when present are restored, bank selection
+returns to zero, and acquired power is released.
 Calls which share a debug port, MEM-AP, or SWD connection must be serialized;
 the packages do not add locking.
 The [Arm Debug Access Port guide](ports/dap.md) describes ADIv5 register

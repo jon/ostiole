@@ -5,14 +5,16 @@
 // change. Release them in reverse order: the MemAP first, then the DebugPort.
 //
 // MemAP.ReadScalar and MemAP.WriteScalar perform aligned scalar target-memory
-// accesses; MemAP.ReadBlock accepts an arbitrary byte range and retries the
-// same request after WAIT while selection and framing remain known, WAIT
-// cleanup succeeds, and its context remains active. If single address increment
-// is unavailable, it writes TAR before each word. WriteScalar changes target
-// memory at the address selected by its caller; the package checks value width,
-// alignment, and advertised MEM-AP extensions, not whether that address is
-// safe to modify. If a failed Size64 transfer might have started its first DRW
-// access, release the MemAP and DebugPort before reconnecting.
+// accesses; MemAP.ReadBlock and MemAP.WriteBlock accept arbitrary byte ranges.
+// ReadBlock and WriteBlock retry a clean WAIT on the same request until their
+// context ends. An accepted write is not replayed; if its RDBUFF completion
+// request returns WAIT, WriteBlock retries only that request. If single address
+// increment is unavailable, block access writes TAR before each word. Writes
+// change target memory at the addresses selected by their callers. The package
+// checks scalar value width, alignment, and advertised MEM-AP extensions, not
+// whether an address is safe to modify. If a failed Size64 transfer might have
+// started its first DRW access, release the MemAP and DebugPort before
+// reconnecting.
 //
 // DebugPort and MemAP values are not safe for concurrent use. Serialize calls
 // that share either value or the underlying swd.Conn. A DebugPort requires

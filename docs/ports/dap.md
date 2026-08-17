@@ -237,15 +237,16 @@ through RDBUFF before its effect can be attributed.
 
 Automatic address increment is guaranteed only across TAR bits `[9:0]`.
 Whether it crosses a 1 KiB boundary is implementation-defined in ADIv5. A
-portable block reader therefore stops the incrementing run and reprograms TAR
-at each boundary. It cannot assume TAR advances linearly across the boundary
-because it worked for the first kilobyte. The host also has to read CSW back
-after requesting single address increment. If the setting does not stick, it
-can disable increment and write TAR before every word.
+portable block implementation therefore ends each incrementing run and
+reprograms TAR at the boundary. It cannot assume TAR advances linearly across
+the boundary because it worked for the first kilobyte. The host also has to
+read CSW back after requesting single address increment. If the setting does
+not stick, it can disable increment and write TAR before every word.
 
-Posted reads expose no result until a later AP read or RDBUFF. A failed
-completion therefore leaves the last read undelivered even if its memory
-access already happened.
+Posted reads expose no result until a later AP read or RDBUFF. Buffered writes
+expose no per-write completion point before a draining operation. A failed
+completion therefore leaves the last read undelivered and the affected writes
+ambiguous; replaying those writes can duplicate effects.
 
 Even a memory read can change debug-side state: SELECT, CSW, TAR, TARHI, and
 the DAP power requests. Saving and restoring that state matters when another
@@ -336,8 +337,8 @@ go test -count=1 -p 1 -tags=integration -v ./dap \
 ```
 
 That is enough to identify one working DP/AP/MEM-AP path and one physical
-WDATAERR recovery path, and to demonstrate reversible scalar writes to one
-known SRAM range. It says nothing yet about sparse APs, delayed power
+WDATAERR recovery path, and to demonstrate reversible scalar and block writes
+to one known SRAM range. It says nothing yet about sparse APs, delayed power
 acknowledgements, physical WAIT responses, auto-increment across 1 KiB, or
 64-bit transfers. Those are better experiments than collecting more CPUID
 values from the same board.

@@ -39,8 +39,8 @@ const (
 	Size64
 )
 
-// MemAP reads arbitrary byte ranges and performs aligned scalar reads and
-// writes through one memory access port.
+// MemAP performs arbitrary-range and aligned-scalar reads and writes through one
+// memory access port.
 //
 // Its methods and all uses of its DebugPort must be serialized. Release the
 // MemAP before releasing its DebugPort. Reads and writes change volatile

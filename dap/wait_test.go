@@ -157,6 +157,11 @@ func (t *waitTarget) armFault(req swdsim.Request) {
 	t.fault = true
 }
 
+func (t *waitTarget) armFaultAfter(req swdsim.Request, successful int) {
+	t.armFault(req)
+	t.faultAfter = successful
+}
+
 func (t *waitTarget) Acknowledge(ctx context.Context, req swdsim.Request) error {
 	t.requests = append(t.requests, req)
 	if err := t.acknowledgeTarget(ctx, req); err != nil {
