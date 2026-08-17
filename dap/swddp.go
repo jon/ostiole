@@ -25,7 +25,7 @@ type DebugPort struct {
 }
 
 func (dp *DebugPort) selectDPBankZero(ctx context.Context) error {
-	err := dp.conn.WriteDP(ctx, uint8(SELECT), 0)
+	err := dp.conn.WriteDP(ctx, dpRegisterOffset(SELECT), 0)
 	if err != nil {
 		dp.state.loseFraming()
 		return fmt.Errorf("dap: select DP bank zero before checking CTRL/STAT: %w", err)
@@ -49,96 +49,59 @@ func NewSWDP(conn *swd.Conn) *DebugPort {
 	return &DebugPort{conn: conn}
 }
 
-// ReadDP reads reg in the currently selected debug-port bank.
-//
-// Raw DP access does not require Connect, but it fails while cleanup is
-// pending.
-func (dp *DebugPort) ReadDP(ctx context.Context, reg DPReg) (uint32, error) {
+// ReadDP reads one logical ADIv5 debug-port register. Bank-independent and
+// bank-zero registers remain distinct. Nonzero banks require an active DPv1 or
+// DPv2 connection; DPv3 uses the ADIv6 map.
+func (dp *DebugPort) ReadDP(ctx context.Context, reg DPRegister) (uint32, error) {
 	if err := dp.requireOperational(); err != nil {
 		return 0, err
 	}
 	return dp.readDP(ctx, reg)
 }
 
-// ReadDPAt reads one explicitly banked ADIv5 debug-port register. Nonzero
-// banks require an active DPv1 or DPv2 connection; DPv3 uses the ADIv6 map.
-func (dp *DebugPort) ReadDPAt(ctx context.Context, addr DPAddress) (uint32, error) {
-	if err := dp.requireOperational(); err != nil {
-		return 0, err
-	}
-	if err := dp.validateDPAddress(addr, false); err != nil {
-		return 0, err
-	}
-	return dp.readDPAt(ctx, addr)
-}
-
-func (dp *DebugPort) readDPAt(ctx context.Context, addr DPAddress) (uint32, error) {
-	if addr.Addr == CTRLSTAT {
-		if err := dp.selectDPBank(ctx, addr.Bank); err != nil {
-			return 0, err
-		}
-	}
-	return dp.readDP(ctx, addr.Addr)
-}
-
-func (dp *DebugPort) readDP(ctx context.Context, reg DPReg) (uint32, error) {
+func (dp *DebugPort) readDP(ctx context.Context, reg DPRegister) (uint32, error) {
 	if dp == nil || dp.conn == nil {
 		return 0, errors.New("dap: nil SWD connection")
 	}
-	if uint8(reg)&^0x0c != 0 {
-		return 0, fmt.Errorf("dap: invalid DP register address %#02x", reg)
+	info, err := dp.validateDPRegister(reg, false)
+	if err != nil {
+		return 0, err
 	}
-	if reg == CTRLSTAT && dp.state.dpBankAmbiguous() {
+	if !info.bankIndependent && dp.state.dpBankAmbiguous() {
 		return 0, errors.New("dap: DP register bank is ambiguous after an unconfirmed SELECT write")
 	}
+	if !info.bankIndependent {
+		if err := dp.selectDPBank(ctx, info.bank); err != nil {
+			return 0, err
+		}
+	}
+	return dp.readDPRegister(ctx, reg, info)
+}
+
+func (dp *DebugPort) readDPRegister(ctx context.Context, reg DPRegister, info dpRegisterInfo) (uint32, error) {
 	var value uint32
 	var err error
 	if reg == RDBUFF && dp.state.dpWritePending {
 		value, err = dp.transferDPWriteBarrier(ctx)
 	} else {
-		value, err = dp.transfer(ctx, transferRequest{Read: true, Addr: uint8(reg)}, 0)
+		value, err = dp.transfer(ctx, dpTransferRequest(reg, true), 0)
 	}
 	if err != nil {
-		return 0, fmt.Errorf("dap: read DP register %#02x: %w", reg, err)
+		return 0, fmt.Errorf("dap: read %s: %w", info.name, err)
 	}
 	dp.recordDPRead(reg, value)
 	return value, nil
 }
 
-// WriteDP writes reg in the currently selected debug-port bank.
-//
-// Raw DP access does not require Connect, but it fails while cleanup is
-// pending. Release does not own or restore power-request bits changed through
-// raw access. A successful DAPABORT write invalidates existing MemAP values.
-func (dp *DebugPort) WriteDP(ctx context.Context, reg DPReg, value uint32) error {
+// WriteDP writes one logical ADIv5 debug-port register. Writes that would
+// enable an unsupported SWD response mode or turnaround are rejected before
+// traffic. Release does not own power-request bits changed through this method.
+// A successful DAPABORT write invalidates existing MemAP values.
+func (dp *DebugPort) WriteDP(ctx context.Context, reg DPRegister, value uint32) error {
 	if err := dp.requireOperational(); err != nil {
 		return err
 	}
 	return dp.writeDP(ctx, reg, value)
-}
-
-// WriteDPAt writes one explicitly banked ADIv5 debug-port register. Nonzero
-// banks require an active DPv1 or DPv2 connection; DPv3 uses the ADIv6 map.
-// Writes which require unsupported SWD framing are rejected before traffic.
-// Release does not own power-request bits changed through this method. A
-// successful DAPABORT write invalidates existing MemAP values.
-func (dp *DebugPort) WriteDPAt(ctx context.Context, addr DPAddress, value uint32) error {
-	if err := dp.requireOperational(); err != nil {
-		return err
-	}
-	if err := dp.validateDPWrite(addr, value); err != nil {
-		return err
-	}
-	return dp.writeDPAt(ctx, addr, value)
-}
-
-func (dp *DebugPort) writeDPAt(ctx context.Context, addr DPAddress, value uint32) error {
-	if addr.Addr == CTRLSTAT {
-		if err := dp.selectDPBank(ctx, addr.Bank); err != nil {
-			return err
-		}
-	}
-	return dp.writeDP(ctx, addr.Addr, value)
 }
 
 func (dp *DebugPort) selectDPBank(ctx context.Context, bank uint8) error {
@@ -165,105 +128,84 @@ func (dp *DebugPort) confirmPendingSELECT(ctx context.Context) error {
 	return nil
 }
 
-func (dp *DebugPort) validateDPAddress(addr DPAddress, write bool) error {
-	if uint8(addr.Addr)&^0x0c != 0 {
-		return fmt.Errorf("dap: invalid DP register address %#02x", addr.Addr)
+func (dp *DebugPort) validateDPRegister(reg DPRegister, write bool) (dpRegisterInfo, error) {
+	info, ok := describeDPRegister(reg)
+	if !ok {
+		return dpRegisterInfo{}, fmt.Errorf("dap: invalid DP register %#04x", uint16(reg))
 	}
-	if addr.Bank > 0x0f {
-		return fmt.Errorf("dap: DP register bank %d exceeds DPBANKSEL", addr.Bank)
+	if write && !info.writable {
+		return dpRegisterInfo{}, fmt.Errorf("dap: %s is read-only", info.name)
 	}
-	if addr.Addr != CTRLSTAT {
-		if addr.Bank != 0 {
-			return fmt.Errorf("dap: DP register %#02x is not banked in ADIv5", addr.Addr)
+	if !write && !info.readable {
+		return dpRegisterInfo{}, fmt.Errorf("dap: %s is write-only", info.name)
+	}
+	if !info.bankIndependent && info.bank != 0 {
+		if err := dp.validateBankedDPRegister(info); err != nil {
+			return dpRegisterInfo{}, err
 		}
-		if write && addr.Addr == RDBUFF {
-			return errors.New("dap: RDBUFF is read-only in ADIv5")
-		}
-		return nil
 	}
-	if addr.Bank == 0 {
-		return nil
-	}
-	return dp.validateBankedCTRLSTAT(addr.Bank, write)
+	return info, nil
 }
 
-func (dp *DebugPort) validateDPWrite(addr DPAddress, value uint32) error {
-	if err := dp.validateDPAddress(addr, true); err != nil {
-		return err
+func (dp *DebugPort) validateDPWrite(reg DPRegister, value uint32) (dpRegisterInfo, error) {
+	info, err := dp.validateDPRegister(reg, true)
+	if err != nil {
+		return dpRegisterInfo{}, err
 	}
-	if addr.Addr == CTRLSTAT && addr.Bank == 0 && value&overrunDetect != 0 {
-		return errors.New("dap: write CTRL/STAT: ORUNDETECT requires unsupported overrun-response framing")
+	if reg == CTRLSTAT && value&overrunDetect != 0 {
+		return dpRegisterInfo{}, errors.New("dap: write CTRL/STAT: DebugPort cannot enable ORUNDETECT while using simple responses")
 	}
-	if addr.Addr == CTRLSTAT && addr.Bank == 1 && value&dlcrTurnaroundMask != 0 {
-		return errors.New("dap: write DLCR: variable turnaround requires unsupported SWD framing")
+	if reg == DLCR && value&dlcrTurnaroundMask != 0 {
+		return dpRegisterInfo{}, errors.New("dap: write DLCR: variable turnaround requires unsupported SWD framing")
 	}
-	return nil
+	return info, nil
 }
 
-func (dp *DebugPort) validateBankedCTRLSTAT(bank uint8, write bool) error {
+func (dp *DebugPort) validateBankedDPRegister(info dpRegisterInfo) error {
 	if dp.state.session != sessionConnected || !dp.identified {
 		return errors.New("dap: banked DP access requires an active connection")
 	}
 	if dp.identity.Version > 2 {
 		return fmt.Errorf("dap: ADIv5 banked DP access does not support DPv%d", dp.identity.Version)
 	}
-	switch bank {
-	case 1:
-		if dp.identity.Version < 1 {
-			return errors.New("dap: DLCR requires DPv1 or later")
-		}
-	case 2, 3, 4:
-		if dp.identity.Version < 2 {
-			return fmt.Errorf("dap: DP register bank %d requires DPv2 or later", bank)
-		}
-	default:
-		return fmt.Errorf("dap: DP register bank %d is reserved in ADIv5", bank)
-	}
-	if write && bank >= 2 {
-		return fmt.Errorf("dap: DP register bank %d is read-only in ADIv5", bank)
+	if dp.identity.Version < info.minVersion {
+		return fmt.Errorf("dap: %s requires DPv%d or later", info.name, info.minVersion)
 	}
 	return nil
 }
 
-func (dp *DebugPort) writeDP(ctx context.Context, reg DPReg, value uint32) error {
+func (dp *DebugPort) writeDP(ctx context.Context, reg DPRegister, value uint32) error {
 	if dp == nil || dp.conn == nil {
 		return errors.New("dap: nil SWD connection")
 	}
-	if err := dp.validateRawDPWrite(reg, value); err != nil {
+	info, err := dp.validateDPWrite(reg, value)
+	if err != nil {
 		return err
 	}
-	_, err := dp.transfer(ctx, transferRequest{Addr: uint8(reg)}, value)
+	if !info.bankIndependent && dp.state.dpBankAmbiguous() {
+		return errors.New("dap: DP register bank is ambiguous after an unconfirmed SELECT write")
+	}
+	if !info.bankIndependent {
+		if err := dp.selectDPBank(ctx, info.bank); err != nil {
+			return err
+		}
+	}
+	_, err = dp.transfer(ctx, dpTransferRequest(reg, false), value)
 	if err != nil {
-		return fmt.Errorf("dap: write DP register %#02x: %w", reg, err)
+		return fmt.Errorf("dap: write %s: %w", info.name, err)
 	}
 	dp.recordDPWrite(reg, value)
 	return nil
 }
 
-func (dp *DebugPort) validateRawDPWrite(reg DPReg, value uint32) error {
-	if uint8(reg)&^0x0c != 0 {
-		return fmt.Errorf("dap: invalid DP register address %#02x", reg)
-	}
-	if reg == CTRLSTAT && dp.state.dpBankAmbiguous() {
-		return errors.New("dap: DP register bank is ambiguous after an unconfirmed SELECT write")
-	}
-	if reg == CTRLSTAT && dp.state.selectDP.valid && dp.state.dpBank() == 0 && value&overrunDetect != 0 {
-		return errors.New("dap: write CTRL/STAT: ORUNDETECT requires unsupported overrun-response framing")
-	}
-	if reg == CTRLSTAT && dp.state.selectDP.valid && dp.state.dpBank() == 1 && value&dlcrTurnaroundMask != 0 {
-		return errors.New("dap: write DLCR: variable turnaround requires unsupported SWD framing")
-	}
-	return nil
-}
-
-func (dp *DebugPort) recordDPWrite(reg DPReg, value uint32) {
+func (dp *DebugPort) recordDPWrite(reg DPRegister, value uint32) {
 	dp.recordDPWriteState(reg, value)
 	if reg == ABORT && value&dapAbort != 0 {
 		dp.state.invalidateAP()
 	}
 }
 
-func (dp *DebugPort) recordDPWriteState(reg DPReg, value uint32) {
+func (dp *DebugPort) recordDPWriteState(reg DPRegister, value uint32) {
 	dp.state.beginDPWrite()
 	if reg == SELECT {
 		dp.state.recordSELECT(value)
@@ -273,7 +215,7 @@ func (dp *DebugPort) recordDPWriteState(reg DPReg, value uint32) {
 	}
 }
 
-func (dp *DebugPort) recordDPRead(reg DPReg, value uint32) {
+func (dp *DebugPort) recordDPRead(reg DPRegister, value uint32) {
 	if reg != DPIDR {
 		dp.state.settleDPWrite()
 	}

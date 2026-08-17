@@ -10,7 +10,7 @@ import (
 	swdsim "github.com/jon/ostiole/swd/sim"
 )
 
-func TestRawDebugPortAccess(t *testing.T) {
+func TestImmediateDebugPortAccess(t *testing.T) {
 	ctx := context.Background()
 	target := sim.New(0x2ba01477)
 	conn := swd.New(swdsim.New(target))

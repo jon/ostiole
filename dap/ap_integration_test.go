@@ -84,7 +84,7 @@ func TestTransactionOverFTDI(t *testing.T) {
 	}
 
 	txn := dp.NewTxn()
-	dpidr := txn.ReadDP(dap.DPIDRAddr)
+	dpidr := txn.ReadDP(dap.DPIDR)
 	idr := txn.ReadAP(hardwareAP, dap.APIDR)
 	csw := txn.ReadAP(hardwareAP, dap.APCSW)
 	if err := txn.Commit(ctx); err != nil {

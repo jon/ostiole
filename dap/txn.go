@@ -44,7 +44,7 @@ const (
 
 type txnOp struct {
 	kind   txnOpKind
-	dpAddr DPAddress
+	dpReg  DPRegister
 	apSel  APSel
 	apReg  APReg
 	data   uint32
@@ -67,17 +67,17 @@ func (dp *DebugPort) NewTxn() *Txn {
 	return &Txn{dp: dp}
 }
 
-// ReadDP queues one explicitly banked debug-port read.
-func (t *Txn) ReadDP(addr DPAddress) *Result {
-	return t.queue(txnOp{kind: txnReadDP, dpAddr: addr})
+// ReadDP queues one logical debug-port read.
+func (t *Txn) ReadDP(reg DPRegister) *Result {
+	return t.queue(txnOp{kind: txnReadDP, dpReg: reg})
 }
 
-// WriteDP queues one explicitly banked debug-port write. Commit settles the
+// WriteDP queues one logical debug-port write. Commit settles the
 // write through RDBUFF before its Result reports success. Release does not own
 // power-request bits changed this way. Rejection does not invalidate existing
 // MemAP values by itself; a completed or indeterminate DAPABORT does.
-func (t *Txn) WriteDP(addr DPAddress, value uint32) *Result {
-	return t.queue(txnOp{kind: txnWriteDP, dpAddr: addr, data: value})
+func (t *Txn) WriteDP(reg DPRegister, value uint32) *Result {
+	return t.queue(txnOp{kind: txnWriteDP, dpReg: reg, data: value})
 }
 
 // ReadAP queues one posted access-port read.
@@ -101,10 +101,10 @@ func (t *Txn) queue(op txnOp) *Result {
 	return result
 }
 
-// Commit validates the complete queue, settles any earlier raw DP write, then
-// executes queued operations in order until one fails. Failure while settling
-// the earlier write leaves every queued operation unexecuted. Commit resolves
-// every Result before returning. A Txn can be committed only once.
+// Commit validates the complete queue, settles any earlier immediate DP write,
+// then executes queued operations in order until one fails. Failure while
+// settling the earlier write leaves every queued operation unexecuted. Commit
+// resolves every Result before returning. A Txn can be committed only once.
 func (t *Txn) Commit(ctx context.Context) error {
 	if t == nil || t.committed {
 		return ErrTxnCommitted
@@ -150,9 +150,9 @@ func (t *Txn) validate() error {
 		op := &t.ops[i]
 		switch op.kind {
 		case txnReadDP:
-			op.err = t.dp.validateDPAddress(op.dpAddr, false)
+			_, op.err = t.dp.validateDPRegister(op.dpReg, false)
 		case txnWriteDP:
-			op.err = t.dp.validateDPWrite(op.dpAddr, op.data)
+			_, op.err = t.dp.validateDPWrite(op.dpReg, op.data)
 		case txnReadAP, txnWriteAP:
 			op.err = validateAPReg(op.apReg)
 		}
@@ -207,6 +207,7 @@ func faultHasValidState(err error) bool {
 
 type txnStep struct {
 	req              transferRequest
+	dpReg            DPRegister
 	data             uint32
 	op               int
 	deliver          bool
@@ -244,15 +245,14 @@ func (p *txnPlanner) lower(index int, op txnOp) {
 }
 
 func (p *txnPlanner) lowerDP(index int, op txnOp) {
-	if op.dpAddr.Addr == CTRLSTAT {
-		p.selectBank(index, op.dpAddr.Bank)
+	info, _ := describeDPRegister(op.dpReg)
+	if !info.bankIndependent {
+		p.selectBank(index, info.bank)
 	}
-	invalidatesAP := op.kind == txnWriteDP && op.dpAddr.Addr == ABORT && op.data&dapAbort != 0
+	invalidatesAP := op.kind == txnWriteDP && op.dpReg == ABORT && op.data&dapAbort != 0
 	step := txnStep{
-		req: transferRequest{
-			Read: op.kind == txnReadDP,
-			Addr: uint8(op.dpAddr.Addr),
-		},
+		req:           txnDPRequest(op, info),
+		dpReg:         op.dpReg,
 		data:          op.data,
 		op:            index,
 		deliver:       op.kind == txnReadDP,
@@ -260,11 +260,11 @@ func (p *txnPlanner) lowerDP(index int, op txnOp) {
 		invalidatesAP: invalidatesAP,
 	}
 	p.steps = append(p.steps, step)
-	if op.kind == txnWriteDP && op.dpAddr.Addr == SELECT {
+	if op.kind == txnWriteDP && op.dpReg == SELECT {
 		p.selectDP = selectState{value: op.data, valid: true}
 		p.selectPending = true
 	}
-	if op.kind == txnWriteDP && op.dpAddr.Addr == ABORT && p.selectPending {
+	if op.kind == txnWriteDP && op.dpReg == ABORT && p.selectPending {
 		p.selectDP = selectState{}
 		p.selectPending = false
 	}
@@ -273,7 +273,8 @@ func (p *txnPlanner) lowerDP(index int, op txnOp) {
 	}
 	if op.kind == txnWriteDP {
 		p.steps = append(p.steps, txnStep{
-			req:              transferRequest{Read: true, Addr: uint8(RDBUFF)},
+			req:              dpTransferRequest(RDBUFF, true),
+			dpReg:            RDBUFF,
 			op:               index,
 			deliver:          true,
 			operationStarted: true,
@@ -285,17 +286,23 @@ func (p *txnPlanner) lowerDP(index int, op txnOp) {
 	}
 }
 
+func txnDPRequest(op txnOp, info dpRegisterInfo) transferRequest {
+	return transferRequest{Read: op.kind == txnReadDP, Addr: info.offset}
+}
+
 func (p *txnPlanner) lowerAP(index int, op txnOp) {
 	value := uint32(op.apSel)<<24 | uint32(op.apReg&0xf0)
 	p.selectValue(index, value)
+	req := apTransferRequest(uint8(op.apReg&0x0c), op.kind == txnReadAP)
 	p.steps = append(p.steps, txnStep{
-		req:  transferRequest{AP: true, Read: op.kind == txnReadAP, Addr: uint8(op.apReg) & 0x0c},
+		req:  req,
 		data: op.data,
 		op:   index,
 	})
 	p.selectPending = false
 	p.steps = append(p.steps, txnStep{
-		req:              transferRequest{Read: true, Addr: uint8(RDBUFF)},
+		req:              dpTransferRequest(RDBUFF, true),
+		dpReg:            RDBUFF,
 		op:               index,
 		deliver:          true,
 		deliverValue:     op.kind == txnReadAP,
@@ -318,9 +325,10 @@ func (p *txnPlanner) selectValue(index int, value uint32) {
 		return
 	}
 	p.steps = append(p.steps, txnStep{
-		req:  transferRequest{Addr: uint8(SELECT)},
-		data: value,
-		op:   index,
+		req:   dpTransferRequest(SELECT, false),
+		dpReg: SELECT,
+		data:  value,
+		op:    index,
 	})
 	p.selectDP = selectState{value: value, valid: true}
 	p.selectPending = true
@@ -330,18 +338,18 @@ func (p *txnPlanner) settleSELECT(index int) {
 	if !p.selectPending {
 		return
 	}
-	p.steps = append(p.steps, txnStep{req: transferRequest{Read: true, Addr: uint8(RDBUFF)}, op: index, settlesDPWrite: true})
+	p.steps = append(p.steps, txnStep{req: dpTransferRequest(RDBUFF, true), dpReg: RDBUFF, op: index, settlesDPWrite: true})
 	p.selectPending = false
 }
 
 func settlesSELECT(req transferRequest) bool {
-	if req.AP || req.Addr == uint8(RDBUFF) {
+	if req.AP || req.Addr == dpRegisterOffset(RDBUFF) {
 		return true
 	}
 	if req.Read {
-		return req.Addr != uint8(DPIDR)
+		return req.Addr != dpRegisterOffset(DPIDR)
 	}
-	return req.Addr != uint8(ABORT) && req.Addr != uint8(SELECT)
+	return req.Addr != dpRegisterOffset(ABORT) && req.Addr != dpRegisterOffset(SELECT)
 }
 
 func (t *Txn) execute(ctx context.Context, steps []txnStep) error {
@@ -359,13 +367,13 @@ func (t *Txn) execute(ctx context.Context, steps []txnStep) error {
 func (t *Txn) acceptStep(step txnStep, value uint32) {
 	if !step.req.Read && !step.req.AP {
 		if step.invalidatesAP {
-			t.dp.recordDPWriteState(DPReg(step.req.Addr), step.data)
+			t.dp.recordDPWriteState(step.dpReg, step.data)
 		} else {
-			t.dp.recordDPWrite(DPReg(step.req.Addr), step.data)
+			t.dp.recordDPWrite(step.dpReg, step.data)
 		}
 	}
 	if step.req.Read && !step.req.AP {
-		t.dp.recordDPRead(DPReg(step.req.Addr), value)
+		t.dp.recordDPRead(step.dpReg, value)
 	}
 	if step.completesWrite && step.invalidatesAP {
 		t.dp.state.invalidateAP()

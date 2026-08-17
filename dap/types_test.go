@@ -35,20 +35,39 @@ func TestDecodeDPIDRRejectsInvalidConstantBit(t *testing.T) {
 	}
 }
 
-func TestDebugPortRegisterAddresses(t *testing.T) {
+func TestDebugPortRegisterDescriptions(t *testing.T) {
 	tests := []struct {
-		reg  DPReg
-		want uint8
+		reg             DPRegister
+		offset          uint8
+		bank            uint8
+		bankIndependent bool
+		readable        bool
+		writable        bool
 	}{
-		{ABORT, 0x00},
-		{DPIDR, 0x00},
-		{CTRLSTAT, 0x04},
-		{SELECT, 0x08},
-		{RDBUFF, 0x0c},
+		{reg: DPIDR, offset: 0x00, bankIndependent: true, readable: true},
+		{reg: ABORT, offset: 0x00, bankIndependent: true, writable: true},
+		{reg: CTRLSTAT, offset: 0x04, readable: true, writable: true},
+		{reg: DLCR, offset: 0x04, bank: 1, readable: true, writable: true},
+		{reg: TARGETID, offset: 0x04, bank: 2, readable: true},
+		{reg: DLPIDR, offset: 0x04, bank: 3, readable: true},
+		{reg: EVENTSTAT, offset: 0x04, bank: 4, readable: true},
+		{reg: SELECT, offset: 0x08, bankIndependent: true, writable: true},
+		{reg: RESEND, offset: 0x08, bankIndependent: true, readable: true},
+		{reg: RDBUFF, offset: 0x0c, bankIndependent: true, readable: true},
 	}
 	for _, test := range tests {
-		if uint8(test.reg) != test.want {
-			t.Errorf("register address = %#02x, want %#02x", test.reg, test.want)
+		info, ok := describeDPRegister(test.reg)
+		if !ok {
+			t.Fatalf("describeDPRegister(%v) failed", test.reg)
 		}
+		if info.offset != test.offset || info.bank != test.bank || info.bankIndependent != test.bankIndependent || info.readable != test.readable || info.writable != test.writable {
+			t.Errorf("describeDPRegister(%v) = %+v", test.reg, info)
+		}
+		if test.reg.String() != info.name {
+			t.Errorf("%v.String() = %q, want %q", test.reg, test.reg.String(), info.name)
+		}
+	}
+	if _, ok := describeDPRegister(0); ok {
+		t.Fatal("zero DPRegister has a description")
 	}
 }
