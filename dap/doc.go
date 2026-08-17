@@ -40,9 +40,10 @@
 //
 // A Txn queues an ordered group of DP and AP operations. Commit validates the
 // complete queue, settles any earlier immediate DP write, then sends queued
-// traffic.
-// DP writes and AP operations settle through RDBUFF. If an operation fails,
-// earlier confirmed results remain available and later operations report that
-// they were not executed. If traffic was clocked but completion cannot be
-// established, the Result reports ErrIndeterminate.
+// traffic. ReadResult.Value reports data from a queued read; WriteResult.Err
+// reports completion of a queued write. DP writes and AP operations settle
+// through RDBUFF. If an operation fails, earlier confirmed results remain
+// available and later operations report that they were not executed. A result
+// reports ErrIndeterminate when traffic was clocked but completion cannot be
+// established.
 package dap
