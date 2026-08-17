@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -22,8 +23,8 @@ func TestEnumeratorListsMatchingUSBDevicesWithoutStrings(t *testing.T) {
 	enumerator := newEnumerator(root, "/dev/bus/usb")
 
 	got, err := enumerator.List(context.Background(), []DeviceFilter{
-		{VID: 0x0403, PID: 0x6014},
-		{VID: 0x0403, PID: 0x6011},
+		ExactDevice(0x0403, 0x6014),
+		ExactDevice(0x0403, 0x6011),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -37,11 +38,18 @@ func TestEnumeratorListsMatchingUSBDevicesWithoutStrings(t *testing.T) {
 	}
 }
 
+func TestEnumeratorRejectsInvalidFilterBeforeReadingSysfs(t *testing.T) {
+	_, err := newEnumerator(filepath.Join(t.TempDir(), "missing"), "/dev/bus/usb").List(t.Context(), []DeviceFilter{{}})
+	if err == nil || !strings.Contains(err.Error(), "invalid device filter") {
+		t.Fatalf("List() error = %v, want invalid device filter", err)
+	}
+}
+
 func TestEnumeratorHonorsCancellationBeforeReadingSysfs(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := newEnumerator(t.TempDir(), "/dev/bus/usb").List(ctx, []DeviceFilter{{VID: 0x0403}})
+	_, err := newEnumerator(t.TempDir(), "/dev/bus/usb").List(ctx, []DeviceFilter{VendorDevices(0x0403)})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("List() error = %v, want context.Canceled", err)
 	}
@@ -55,10 +63,7 @@ func TestEnumeratorFollowsSysfsDeviceSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := newEnumerator(inventory, "/dev/bus/usb").List(context.Background(), []DeviceFilter{{
-		VID: 0x0403,
-		PID: 0x6014,
-	}})
+	got, err := newEnumerator(inventory, "/dev/bus/usb").List(context.Background(), []DeviceFilter{ExactDevice(0x0403, 0x6014)})
 	if err != nil {
 		t.Fatal(err)
 	}

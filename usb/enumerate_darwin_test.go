@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -28,7 +29,7 @@ func TestDarwinListFiltersAndSortsAttachments(t *testing.T) {
 	}}
 	bus := newDarwinEnumerator(inventory)
 
-	got, err := bus.List(context.Background(), []DeviceFilter{{VID: 0x0403}})
+	got, err := bus.List(context.Background(), []DeviceFilter{VendorDevices(0x0403)})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -38,6 +39,17 @@ func TestDarwinListFiltersAndSortsAttachments(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("List = %#v, want %#v", got, want)
+	}
+}
+
+func TestDarwinListRejectsInvalidFilterBeforeReadingInventory(t *testing.T) {
+	inventory := &fakeDarwinInventory{}
+	_, err := newDarwinEnumerator(inventory).List(t.Context(), []DeviceFilter{{}})
+	if err == nil || !strings.Contains(err.Error(), "invalid device filter") {
+		t.Fatalf("List() error = %v, want invalid device filter", err)
+	}
+	if inventory.calls != 0 {
+		t.Fatalf("inventory calls = %d, want 0", inventory.calls)
 	}
 }
 
@@ -70,7 +82,7 @@ func TestDarwinListValidatesContextAndReceiver(t *testing.T) {
 func TestDarwinListReportsInventoryFailure(t *testing.T) {
 	want := errors.New("inventory unavailable")
 	bus := newDarwinEnumerator(&fakeDarwinInventory{err: want})
-	_, err := bus.List(context.Background(), []DeviceFilter{{VID: 1}})
+	_, err := bus.List(context.Background(), []DeviceFilter{VendorDevices(1)})
 	if !errors.Is(err, want) {
 		t.Fatalf("List error = %v, want %v", err, want)
 	}

@@ -7,15 +7,56 @@ package usb
 
 import (
 	"errors"
+	"fmt"
 )
 
 // ErrStaleCandidate reports that an attachment changed after enumeration.
 var ErrStaleCandidate = errors.New("usb: stale candidate")
 
-// DeviceFilter selects devices by vendor and product ID.
-// A zero PID matches any product from the selected vendor.
+// DeviceFilter selects either one exact USB identity or every product from one
+// vendor. Its zero value is invalid.
 type DeviceFilter struct {
-	VID, PID uint16
+	kind filterKind
+	vid  uint16
+	pid  uint16
+}
+
+type filterKind uint8
+
+const (
+	filterExact filterKind = iota + 1
+	filterVendor
+)
+
+// ExactDevice selects one exact vendor and product ID. Product ID zero is an
+// exact product value, not a wildcard.
+func ExactDevice(vid, pid uint16) DeviceFilter {
+	return DeviceFilter{kind: filterExact, vid: vid, pid: pid}
+}
+
+// VendorDevices selects every product from one vendor.
+func VendorDevices(vid uint16) DeviceFilter {
+	return DeviceFilter{kind: filterVendor, vid: vid}
+}
+
+func (f DeviceFilter) valid() bool {
+	return f.kind == filterExact || f.kind == filterVendor
+}
+
+func (f DeviceFilter) matches(info DeviceInfo) bool {
+	if info.VID != f.vid {
+		return false
+	}
+	return f.kind == filterVendor || f.kind == filterExact && info.PID == f.pid
+}
+
+func validateFilters(filters []DeviceFilter) error {
+	for i, filter := range filters {
+		if !filter.valid() {
+			return fmt.Errorf("usb: invalid device filter at index %d", i)
+		}
+	}
+	return nil
 }
 
 // DeviceInfo identifies one physical USB attachment.

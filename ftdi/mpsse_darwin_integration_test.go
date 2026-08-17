@@ -20,7 +20,7 @@ func TestHILDarwinFT232HMPSSEHandshake(t *testing.T) {
 	defer cancel()
 
 	bus := usb.New()
-	devices, err := bus.List(ctx, []usb.DeviceFilter{{VID: ftdi.VID, PID: ftdi.PIDFT232H}})
+	devices, err := bus.List(ctx, []usb.DeviceFilter{usb.ExactDevice(ftdi.VID, ftdi.PIDFT232H)})
 	if err != nil {
 		t.Fatal(err)
 	}
