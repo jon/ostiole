@@ -102,6 +102,11 @@ traffic or cleanup, or bad input reaches hardware before it is rejected.
   examples, and stated limitations against the current tree.
 - Require documentation in the same commit as exported API, ownership,
   lifecycle, safety, platform, composition, or validation-claim changes.
+- When an API or user-facing capability changes, check whether a compact usage
+  example would make the intended interface clearer. Require any example to
+  preserve the real ownership, cleanup, and safety rules.
+- Keep routine checks which GitHub reports independently out of pull-request
+  prose. They remain required publication guards, not evidence to advertise.
 - Require physical HIL claims to identify the exercised path and bench.
 - When commit context is available, flag unrelated changes, non-bisectable
   commits, weak messages, missing same-commit tests or documentation, and

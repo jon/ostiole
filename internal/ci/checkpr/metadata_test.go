@@ -11,15 +11,37 @@ Adds deterministic policy checks.
 
 ## Why
 
-Keep objective rules reproducible.
+Objective pull-request rules should produce the same result locally and on GitHub.
 
-## Validation
+## Documentation
 
-Ran the unit tests.
+Updated the contribution guide.
+`,
+	}
 
-## Documentation and evidence
+	if findings := checkPullRequest(metadata); len(findings) != 0 {
+		t.Fatalf("checkPullRequest() = %#v, want no findings", findings)
+	}
+}
 
-Updated the contribution guide; no HIL was run.
+func TestCheckPullRequestAcceptsOptionalHardwareEvidence(t *testing.T) {
+	metadata := pullRequestMetadata{
+		Title: "Enforce pull-request policy.",
+		Body: `## What this does
+
+Adds deterministic policy checks.
+
+## Why
+
+Objective pull-request rules should produce the same result locally and on GitHub.
+
+## Hardware evidence
+
+On the FT232H bench, the target returned the expected DPIDR and the channel closed without error.
+
+## Documentation
+
+Updated the contribution guide.
 `,
 	}
 
@@ -68,12 +90,8 @@ A concrete result.
 
 A concrete rationale.
 
-## Validation
+## Documentation
 
-A concrete test result.
-
-## Documentation and evidence
-
-Documentation remains accurate; no HIL was run.
+Documentation remains accurate.
 `
 }

@@ -19,8 +19,7 @@ var htmlComment = regexp.MustCompile(`(?s)<!--.*?-->`)
 var requiredPullRequestSections = []string{
 	"What this does",
 	"Why",
-	"Validation",
-	"Documentation and evidence",
+	"Documentation",
 }
 
 func readPullRequestEvent(name string) (pullRequestMetadata, error) {
