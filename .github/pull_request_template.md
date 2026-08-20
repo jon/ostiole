@@ -1,9 +1,13 @@
 ## What this does
 
 <!--
-Describe the resulting behavior and scope. When the pull request adds or
-changes an API or user-facing capability, include a compact usage example if
-it makes the intended interface clearer.
+Describe the resulting behavior and scope. For each new API, show
+representative calls. For each changed API, show representative calls before
+and after the change. Keep the examples faithful to ordinary ownership,
+cleanup, and safety rules.
+
+Leave each prose paragraph on one source line and let GitHub wrap it. Format
+lists and code blocks according to their own structure.
 -->
 
 ## Why
