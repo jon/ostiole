@@ -137,13 +137,17 @@ commits near the 200-line review checkpoint, likely missing tests or docs,
 mixed capabilities, and changes to review-policy files. Codex and the
 maintainer assess correctness, ownership, cleanup, hardware safety,
 architecture, behavioral coverage, and documentation claims. A completed
-standard Codex review must match the current pull-request head. On the final
-head, comment `@codex review`; a clean review may instead complete with a
-SHA-labeled Codex result comment. Automatic review begins when a pull request
-becomes ready, but only a formal review or SHA-labeled clean result for the
-exact head satisfies the gate. A Codex opinion does not count as an approval.
-Resolve its actionable conversations or explain the disposition before
-merging.
+standard Codex review must match the current pull-request head. Codex must
+reject a pull request which adds an API without representative calls in “What
+this does,” or changes an API without representative calls before and after
+the change. It must also reject examples which hide ownership, cleanup, safety,
+or migration details needed to understand ordinary use, and prose paragraphs
+which are hard-wrapped in the Markdown source. On the final head, comment
+`@codex review`; a clean review may instead complete with a SHA-labeled Codex
+result comment. Automatic review begins when a pull request becomes ready, but
+only a formal review or SHA-labeled clean result for the exact head satisfies
+the gate. A Codex opinion does not count as an approval. Resolve its actionable
+conversations or explain the disposition before merging.
 If Codex completes after the gate's polling window, rerun the failed
 `codex-reviewed` job to evaluate the completed result.
 
@@ -159,10 +163,15 @@ hardware path.
 
 ## Pull-request descriptions
 
-Use “What this does” for the resulting behavior and scope. When a change adds
-or revises an API or user-facing capability, include a compact example if it
-makes the intended use easier to see. The example should preserve the same
-ownership, cleanup, and safety rules as ordinary code.
+Use “What this does” for the resulting behavior and scope. For every new API,
+show representative calls which make ordinary use concrete. For every changed
+API, show representative calls before and after the change so that the
+migration is visible. The examples must preserve the same ownership, cleanup,
+and safety rules as ordinary code.
+
+Leave each prose paragraph on one line in the Markdown source and let GitHub
+wrap it for display. Do not insert source line breaks merely to meet a column
+limit. Format lists and code blocks according to their own structure.
 
 Use “Why” for the old constraint, the reason for the change, and any design
 choice that is not evident from the result. Use “Documentation” to name the
