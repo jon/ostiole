@@ -157,6 +157,25 @@ warning-clean C build with the commands used by `.github/workflows/test.yml`.
 Run the relevant opt-in HIL tests when the contribution changes an exercised
 hardware path.
 
+## Pull-request descriptions
+
+Use “What this does” for the resulting behavior and scope. When a change adds
+or revises an API or user-facing capability, include a compact example if it
+makes the intended use easier to see. The example should preserve the same
+ownership, cleanup, and safety rules as ordinary code.
+
+Use “Why” for the old constraint, the reason for the change, and any design
+choice that is not evident from the result. Use “Documentation” to name the
+public material changed or explain why the existing documentation remains
+enough.
+
+“Hardware evidence” is optional. Include it for physical HIL, a manual bench
+experiment, or other evidence which GitHub cannot reproduce. Name the command
+or procedure, the bench, what happened, whether state was restored, and what
+the result does not establish. Do not list or claim routine format, build,
+test, lint, policy, vulnerability, or compilation checks which GitHub reports
+independently.
+
 ## Documentation
 
 Every pull request must leave the public documentation consistent with the
@@ -227,4 +246,5 @@ timeless and omit internal planning, construction history, and agent activity.
 
 Before requesting review, confirm that every commit builds and tests on its
 own, the final worktree is clean, the documentation matches the code, and the
-pull-request description reports validation without overstating support.
+pull-request description reports any evidence GitHub cannot reproduce without
+overstating support.
