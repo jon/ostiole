@@ -240,6 +240,12 @@ AP0 CSW = 0x23000040
 CPUID   = 0x410fc241
 ```
 
+On 2026-08-22, the same bench read DPIDR, AP0 IDR, and AP0 CSW in one queued
+transaction. The nine underlying SWD requests used two probe calls: one for
+DPIDR and one containing the remaining eight fixed frames. All nine responses
+were OK. The target did not produce a WAIT, so recovery from a partially
+abandoned queue remains a simulator result.
+
 AP0's IDR has class `0b1000`, identifying an ADIv5 MEM-AP. The run read CPUID
 through CSW, TAR, and DRW, then verified that the saved CSW and TAR values were
 restored. The debug and system power-request bits were zero both before and

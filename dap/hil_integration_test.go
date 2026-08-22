@@ -16,15 +16,28 @@ import (
 )
 
 type ackCountingWire struct {
-	inner   swd.Wire
-	counts  [8]int
-	entries int
-	fixed   int
+	inner      swd.Wire
+	counts     [8]int
+	entries    int
+	calls      int
+	fixedCalls int
+	fixed      int
 }
 
 type parityFaultWire struct {
 	inner swd.Wire
 	armed bool
+}
+
+func (w *ackCountingWire) MaxTransferBits() int { return wireTransferLimit(w.inner) }
+
+func (w *parityFaultWire) MaxTransferBits() int { return wireTransferLimit(w.inner) }
+
+func wireTransferLimit(w swd.Wire) int {
+	if limits, ok := w.(swd.TransferLimits); ok {
+		return limits.MaxTransferBits()
+	}
+	return 54
 }
 
 func (w *parityFaultWire) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
@@ -42,23 +55,32 @@ func (w *parityFaultWire) SWDIO(ctx context.Context, direction, output []byte, b
 }
 
 func (w *ackCountingWire) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
+	w.calls++
 	input, err := w.inner.SWDIO(ctx, direction, output, bits)
 	if err == nil && bits == 136 {
 		w.entries++
 	}
-	if err == nil && (bits == 12 || bits == 54) && len(input) >= 2 {
-		if bits == 54 {
-			w.fixed++
+	if err == nil && bits == 12 && len(input) >= 2 {
+		w.counts[ackAt(input, 9)]++
+	}
+	if err == nil && bits >= 54 && bits%54 == 0 {
+		w.fixedCalls++
+		w.fixed += bits / 54
+		for offset := 0; offset < bits; offset += 54 {
+			w.counts[ackAt(input, offset+9)]++
 		}
-		var ack byte
-		for bit := range 3 {
-			if input[(9+bit)/8]>>(uint(9+bit)%8)&1 != 0 {
-				ack |= 1 << uint(bit)
-			}
-		}
-		w.counts[ack]++
 	}
 	return input, err
+}
+
+func ackAt(input []byte, offset int) byte {
+	var ack byte
+	for bit := range 3 {
+		if input[(offset+bit)/8]>>(uint(offset+bit)%8)&1 != 0 {
+			ack |= 1 << uint(bit)
+		}
+	}
+	return ack
 }
 
 func openHardwareDebugPort(t *testing.T, ctx context.Context) *dap.DebugPort {
@@ -120,8 +142,7 @@ func openHardwareDebugPortWithFaultWire(t *testing.T, ctx context.Context) (*dap
 				invalid += count
 			}
 		}
-		t.Logf("SWD entries=%d physical ACKs: OK=%d WAIT=%d FAULT=%d invalid=%d fixed_frames=%d", wire.entries,
-			wire.counts[0b001], wire.counts[0b010], wire.counts[0b100], invalid, wire.fixed)
+		t.Logf("SWD entries=%d SWDIO_calls=%d physical ACKs: OK=%d WAIT=%d FAULT=%d invalid=%d fixed_calls=%d fixed_frames=%d", wire.entries, wire.calls, wire.counts[0b001], wire.counts[0b010], wire.counts[0b100], invalid, wire.fixedCalls, wire.fixed)
 	})
 	return dap.NewDebugPort(conn), faultWire
 }

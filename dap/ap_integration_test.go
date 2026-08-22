@@ -72,7 +72,7 @@ func TestTransactionOverFTDI(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
-	dp := openHardwareDebugPort(t, ctx)
+	dp, faultWire := openHardwareDebugPortWithFaultWire(t, ctx)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Second)
 		defer cleanupCancel()
@@ -83,6 +83,11 @@ func TestTransactionOverFTDI(t *testing.T) {
 	if _, err := dp.Connect(ctx); err != nil {
 		t.Fatal(err)
 	}
+	counter := faultWire.inner.(*ackCountingWire)
+	beforeCalls := counter.calls
+	beforeFixedCalls := counter.fixedCalls
+	beforeFixed := counter.fixed
+	beforeOK := counter.counts[0b001]
 
 	txn := dp.NewTxn()
 	dpidr := txn.ReadDP(dap.DPIDR)
@@ -94,6 +99,13 @@ func TestTransactionOverFTDI(t *testing.T) {
 	dpidrValue, err := dpidr.Value()
 	if err != nil {
 		t.Fatal(err)
+	}
+	calls := counter.calls - beforeCalls
+	fixedCalls := counter.fixedCalls - beforeFixedCalls
+	frames := counter.fixed - beforeFixed
+	ok := counter.counts[0b001] - beforeOK
+	if calls != 2 || fixedCalls != 2 || frames != 9 || ok != 9 {
+		t.Fatalf("transaction used SWDIO calls=%d fixed calls=%d frames=%d OK=%d; want 2, 2, 9, 9", calls, fixedCalls, frames, ok)
 	}
 	idrValue, err := idr.Value()
 	if err != nil {
@@ -107,5 +119,5 @@ func TestTransactionOverFTDI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("transaction DPIDR=%#08x AP%d_IDR=%#08x AP%d_CSW=%#08x", dpidrValue, selector, idrValue, selector, cswValue)
+	t.Logf("transaction DPIDR=%#08x AP%d_IDR=%#08x AP%d_CSW=%#08x logical_requests=9 SWDIO_calls=2 fixed_frames=9 OK=9", dpidrValue, selector, idrValue, selector, cswValue)
 }

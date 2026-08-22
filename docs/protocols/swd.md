@@ -249,6 +249,21 @@ ORUNDETECT setting. The induced case demonstrates this target's write-parity,
 fixed-frame FAULT, and sticky cleanup path. It does not manufacture an ACK in
 the probe and it still is not a waveform capture.
 
+The same FT232H and Cortex-M bench exercised packed fixed frames with:
+
+```sh
+OSTIOLE_FTDI_HIL=1 OSTIOLE_FTDI_HIL_FAULT=1 \
+  go test -count=1 -p 1 -tags=integration -v ./swd ./dap
+```
+
+One DAP transaction read DPIDR, AP0 IDR, and AP0 CSW. Those logical operations
+required nine SWD requests. DPIDR kept its own physical boundary; the remaining
+eight fixed frames shared the second call. The probe therefore made two SWDIO
+calls and received nine OK acknowledgements. AP0 IDR was `0x24770011` and CSW
+was `0x23000040`. The transaction completed `DebugPort.Release`, and the test
+closed the FTDI channel. The target returned no WAIT during this run. Packed
+WAIT recovery remains simulator evidence.
+
 Measuring turnaround requires a capture of SWCLK, SWDIO, and the FTDI
 direction pin. A real WAIT still requires a target which can be made to stall;
 the ordinary transfers here did not produce one.
