@@ -3,6 +3,7 @@ package dap_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/jon/ostiole/dap"
@@ -13,6 +14,91 @@ import (
 type readParityWire struct {
 	inner swd.Wire
 	armed bool
+}
+
+type packedTxnWire struct {
+	inner      swd.Wire
+	limit      int
+	calls      []int
+	failCall   int
+	err        error
+	cancel     context.CancelFunc
+	cancelCall int
+}
+
+type acceptedBatchSuffixWire struct {
+	inner swd.Wire
+	armed bool
+}
+
+type cleanupWAITWire struct {
+	inner swd.Wire
+	armed bool
+	calls int
+}
+
+func (w *packedTxnWire) MaxTransferBits() int { return w.limit }
+
+func (w *acceptedBatchSuffixWire) MaxTransferBits() int { return 16_384 }
+
+func (w *cleanupWAITWire) MaxTransferBits() int { return 16_384 }
+
+func (w *cleanupWAITWire) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
+	w.calls++
+	input, err := w.inner.SWDIO(ctx, direction, output, bits)
+	if err == nil && w.armed && bits == 54 && len(output) != 0 && output[0] == 0x81 {
+		setTxnTestACK(input, 9, 0b010)
+		w.armed = false
+	}
+	return input, err
+}
+
+func (w *acceptedBatchSuffixWire) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
+	input, err := w.inner.SWDIO(ctx, direction, output, bits)
+	if err != nil || !w.armed || bits < 108 || bits%54 != 0 {
+		return input, err
+	}
+	for offset := 0; offset+108 <= bits; offset += 54 {
+		if txnTestACK(input, offset+9) == 0b010 && txnTestACK(input, offset+63) == 0b100 {
+			setTxnTestACK(input, offset+63, 0b001)
+			w.armed = false
+			break
+		}
+	}
+	return input, nil
+}
+
+func txnTestACK(input []byte, offset int) byte {
+	var ack byte
+	for bit := range 3 {
+		if input[(offset+bit)/8]>>(uint(offset+bit)%8)&1 != 0 {
+			ack |= 1 << uint(bit)
+		}
+	}
+	return ack
+}
+
+func setTxnTestACK(input []byte, offset int, ack byte) {
+	for bit := range 3 {
+		mask := byte(1 << (uint(offset+bit) % 8))
+		input[(offset+bit)/8] &^= mask
+		if ack>>uint(bit)&1 != 0 {
+			input[(offset+bit)/8] |= mask
+		}
+	}
+}
+
+func (w *packedTxnWire) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
+	w.calls = append(w.calls, bits)
+	input, err := w.inner.SWDIO(ctx, direction, output, bits)
+	if err == nil && w.cancel != nil && len(w.calls) == w.cancelCall {
+		w.cancel()
+		w.cancel = nil
+	}
+	if err == nil && len(w.calls) == w.failCall {
+		return nil, w.err
+	}
+	return input, err
 }
 
 type rdbuffWaitTarget struct {
@@ -81,6 +167,293 @@ func TestDebugPortTransactionResolvesOrderedOperations(t *testing.T) {
 	}
 	if err := txn.WriteDP(dap.ABORT, 0).Err(); !errors.Is(err, dap.ErrTxnCommitted) {
 		t.Fatalf("queue write after Commit error = %v, want committed", err)
+	}
+}
+
+func TestDebugPortTransactionPacksRawSWDRequests(t *testing.T) {
+	target := newWaitTarget()
+	addAP(t, target, 0, 0x24770011)
+	wire := &packedTxnWire{inner: swdsim.New(target), limit: 16_384}
+	dp := dap.NewDebugPort(swd.New(wire))
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	wire.calls = nil
+	txn := dp.NewTxn()
+	dpidr := txn.ReadDP(dap.DPIDR)
+	idr := txn.ReadAPIDR(apSel(0))
+	csw := txn.ReadRawAP(apSel(0).Address(0x00))
+	if err := txn.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	assertTxnValue(t, dpidr, 0x2ba01477)
+	assertTxnValue(t, idr, 0x24770011)
+	assertTxnValue(t, csw, 0)
+	if !slices.Equal(wire.calls, []int{54, 432}) {
+		t.Fatalf("transaction SWDIO bit counts = %v, want DPIDR then one eight-frame call", wire.calls)
+	}
+}
+
+func TestDebugPortTransactionKeepsPrefixWhenContextIsCanceledBeforeNextBatch(t *testing.T) {
+	target := newWaitTarget()
+	addAP(t, target, 0, 0x24770011)
+	wire := &packedTxnWire{inner: swdsim.New(target), limit: 16_384}
+	dp := dap.NewDebugPort(swd.New(wire))
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	wire.calls = nil
+	wire.cancel = cancel
+	wire.cancelCall = 1
+	txn := dp.NewTxn()
+	dpidr := txn.ReadDP(dap.DPIDR)
+	idr := txn.ReadAPIDR(apSel(0))
+	suffix := txn.ReadDP(dap.DPIDR)
+	if err := txn.Commit(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Commit() error = %v, want context cancellation", err)
+	}
+	assertTxnValue(t, dpidr, 0x2ba01477)
+	if _, err := idr.Value(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("ReadAPIDR result error = %v, want context cancellation", err)
+	}
+	if _, err := suffix.Value(); !errors.Is(err, dap.ErrNotExecuted) {
+		t.Fatalf("suffix result error = %v, want ErrNotExecuted", err)
+	}
+	if !slices.Equal(wire.calls, []int{54}) {
+		t.Fatalf("SWDIO bit counts = %v, want [54]", wire.calls)
+	}
+	if _, err := dp.ReadDP(t.Context(), dap.DPIDR); err != nil {
+		t.Fatalf("ReadDP() after cancellation: %v", err)
+	}
+}
+
+func TestDebugPortTransactionMarksPostedReadIndeterminateWhenCancellationStopsBarrier(t *testing.T) {
+	target := newWaitTarget()
+	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 1})
+	wire := &packedTxnWire{inner: swdsim.New(target), limit: 54}
+	dp := dap.NewDebugPort(swd.New(wire))
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := dap.OpenMemAP(t.Context(), dp, apSel(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	wire.calls = nil
+	wire.cancel = cancel
+	wire.cancelCall = 1
+	txn := dp.NewTxn()
+	read := txn.ReadRawAP(apSel(0).Address(0x00))
+	suffix := txn.ReadDP(dap.DPIDR)
+	if err := txn.Commit(ctx); !errors.Is(err, context.Canceled) || !errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("Commit() error = %v, want cancellation and indeterminate outcome", err)
+	}
+	if _, err := read.Value(); !errors.Is(err, context.Canceled) || !errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("raw AP read result error = %v, want cancellation and indeterminate outcome", err)
+	}
+	if _, err := suffix.Value(); !errors.Is(err, dap.ErrNotExecuted) {
+		t.Fatalf("suffix result error = %v, want ErrNotExecuted", err)
+	}
+	traffic := len(wire.calls)
+	if _, err := mem.ReadWord(t.Context(), 0); err == nil {
+		t.Fatal("ReadWord() succeeded after an uncompleted posted read")
+	}
+	if len(wire.calls) != traffic {
+		t.Fatalf("blocked MEM-AP read added %d SWDIO calls", len(wire.calls)-traffic)
+	}
+	if _, err := dp.ReadDP(t.Context(), dap.DPIDR); err != nil {
+		t.Fatalf("ReadDP() after cancellation: %v", err)
+	}
+}
+
+func TestDebugPortTransactionRetriesPackedWAITAndAbandonedSuffix(t *testing.T) {
+	target := newWaitTarget()
+	addAP(t, target, 0, 0x24770011)
+	wire := &packedTxnWire{inner: swdsim.New(target), limit: 16_384}
+	dp := dap.NewDebugPort(swd.New(wire))
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	target.arm(apRead(0x0c), 1)
+	wire.calls = nil
+	txn := dp.NewTxn()
+	idr := txn.ReadAPIDR(apSel(0))
+	if err := txn.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	assertTxnValue(t, idr, 0x24770011)
+	if target.attempts != 2 || target.executed[apRead(0x0c)] != 1 {
+		t.Fatalf("AP request attempts = %d, executions = %d", target.attempts, target.executed[apRead(0x0c)])
+	}
+	if !slices.Equal(wire.calls, []int{216, 54, 108}) {
+		t.Fatalf("packed WAIT SWDIO bit counts = %v, want [216 54 108]", wire.calls)
+	}
+}
+
+func TestDebugPortTransactionLosesFramingWhenPackedWAITCleanupFails(t *testing.T) {
+	cleanupErr := errors.New("injected STICKYORUN cleanup failure")
+	target := newWaitTarget()
+	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 1})
+	wire := &packedTxnWire{inner: swdsim.New(target), limit: 16_384, err: cleanupErr}
+	dp := dap.NewDebugPort(swd.New(wire))
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := dap.OpenMemAP(t.Context(), dp, apSel(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	target.arm(apRead(0x0c), 1)
+	wire.calls = nil
+	wire.failCall = 2
+	txn := dp.NewTxn()
+	read := txn.ReadAPIDR(apSel(0))
+	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrWait) || !errors.Is(err, cleanupErr) {
+		t.Fatalf("Commit() error = %v, want WAIT and cleanup failure", err)
+	}
+	if _, err := read.Value(); !errors.Is(err, swd.ErrWait) || !errors.Is(err, cleanupErr) {
+		t.Fatalf("AP result error = %v, want WAIT and cleanup failure", err)
+	}
+	traffic := len(wire.calls)
+	if _, err := dp.ReadDP(t.Context(), dap.DPIDR); err == nil {
+		t.Fatal("ReadDP() succeeded after packed WAIT cleanup failure")
+	}
+	if _, err := mem.ReadWord(t.Context(), 0); err == nil {
+		t.Fatal("ReadWord() succeeded after packed WAIT cleanup failure")
+	}
+	if len(wire.calls) != traffic {
+		t.Fatalf("blocked operations added %d SWDIO calls", len(wire.calls)-traffic)
+	}
+}
+
+func TestDebugPortTransactionLosesFramingWhenPackedWAITCleanupABORTReturnsWAIT(t *testing.T) {
+	target := newWaitTarget()
+	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 1})
+	wire := &cleanupWAITWire{inner: swdsim.New(target)}
+	dp := dap.NewDebugPort(swd.New(wire))
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := dap.OpenMemAP(t.Context(), dp, apSel(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	target.arm(apRead(0x0c), 1)
+	wire.armed = true
+	txn := dp.NewTxn()
+	read := txn.ReadAPIDR(apSel(0))
+	if err := txn.Commit(t.Context()); err == swd.ErrWait || !errors.Is(err, swd.ErrWait) {
+		t.Fatalf("Commit() error = %v, want WAIT with cleanup failure", err)
+	}
+	if _, err := read.Value(); err == swd.ErrWait || !errors.Is(err, swd.ErrWait) {
+		t.Fatalf("AP result error = %v, want WAIT with cleanup failure", err)
+	}
+	traffic := wire.calls
+	if _, err := dp.ReadDP(t.Context(), dap.DPIDR); err == nil {
+		t.Fatal("ReadDP() succeeded after cleanup ABORT returned WAIT")
+	}
+	if _, err := mem.ReadWord(t.Context(), 0); err == nil {
+		t.Fatal("ReadWord() succeeded after cleanup ABORT returned WAIT")
+	}
+	if wire.calls != traffic {
+		t.Fatalf("blocked operations added %d SWDIO calls", wire.calls-traffic)
+	}
+}
+
+func TestDebugPortTransactionLosesFramingWhenRequestedABORTReturnsWAIT(t *testing.T) {
+	target := newWaitTarget()
+	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 1})
+	dp := newDebugPort(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := dap.OpenMemAP(t.Context(), dp, apSel(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	target.arm(dpWrite(0x00), 1)
+	txn := dp.NewTxn()
+	abort := txn.WriteDP(dap.ABORT, 0)
+	if err := txn.Commit(t.Context()); err == swd.ErrWait || !errors.Is(err, swd.ErrWait) {
+		t.Fatalf("Commit() error = %v, want WAIT with unavailable cleanup", err)
+	}
+	if err := abort.Err(); err == swd.ErrWait || !errors.Is(err, swd.ErrWait) {
+		t.Fatalf("ABORT result error = %v, want WAIT with unavailable cleanup", err)
+	}
+	traffic := len(target.requests)
+	if _, err := dp.ReadDP(t.Context(), dap.DPIDR); err == nil {
+		t.Fatal("ReadDP() succeeded after requested ABORT returned WAIT")
+	}
+	if _, err := mem.ReadWord(t.Context(), 0); err == nil {
+		t.Fatal("ReadWord() succeeded after requested ABORT returned WAIT")
+	}
+	if len(target.requests) != traffic {
+		t.Fatalf("blocked operations added %d requests", len(target.requests)-traffic)
+	}
+}
+
+func TestDebugPortTransactionRejectsAcceptedPackedWAITSuffix(t *testing.T) {
+	target := newWaitTarget()
+	addAP(t, target, 0, 0x24770011)
+	wire := &acceptedBatchSuffixWire{inner: swdsim.New(target)}
+	dp := dap.NewDebugPort(swd.New(wire))
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	target.arm(apRead(0x0c), 1)
+	wire.armed = true
+	txn := dp.NewTxn()
+	first := txn.ReadAPIDR(apSel(0))
+	second := txn.ReadRawAP(apSel(0).Address(0x00))
+	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrWait) || !errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("Commit() error = %v, want WAIT and indeterminate outcome", err)
+	}
+	for i, result := range []*dap.ReadResult{first, second} {
+		if _, err := result.Value(); !errors.Is(err, dap.ErrIndeterminate) {
+			t.Fatalf("result %d error = %v, want indeterminate", i, err)
+		}
+	}
+	if _, err := dp.ReadDP(t.Context(), dap.DPIDR); err == nil {
+		t.Fatal("ReadDP() succeeded after an accepted packed WAIT suffix")
+	}
+}
+
+func TestDebugPortTransactionAttributesFailedPackedChunk(t *testing.T) {
+	transferErr := errors.New("injected packed transfer failure")
+	target := newWaitTarget()
+	addAP(t, target, 0, 0x24770011)
+	wire := &packedTxnWire{inner: swdsim.New(target), limit: 108, err: transferErr}
+	dp := dap.NewDebugPort(swd.New(wire))
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	addr := apSel(0).Address(0x00)
+	if _, err := dp.ReadRawAP(t.Context(), addr); err != nil {
+		t.Fatal(err)
+	}
+	wire.calls = nil
+	wire.failCall = 2
+	txn := dp.NewTxn()
+	results := []*dap.ReadResult{
+		txn.ReadRawAP(addr),
+		txn.ReadRawAP(addr),
+		txn.ReadRawAP(addr),
+	}
+	if err := txn.Commit(t.Context()); !errors.Is(err, transferErr) || !errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("Commit() error = %v, want transport failure and indeterminate outcome", err)
+	}
+	for i, result := range results {
+		_, err := result.Value()
+		switch {
+		case i == 0 && err != nil:
+			t.Fatalf("confirmed result %d error = %v", i, err)
+		case i == 1 && !errors.Is(err, dap.ErrIndeterminate):
+			t.Fatalf("clocked result %d error = %v, want indeterminate", i, err)
+		case i == 2 && !errors.Is(err, dap.ErrNotExecuted):
+			t.Fatalf("unsent result error = %v, want not executed", err)
+		}
 	}
 }
 

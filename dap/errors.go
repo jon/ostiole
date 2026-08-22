@@ -12,7 +12,8 @@ var (
 	ErrResultPending = errors.New("dap: transaction result is pending")
 	// ErrTxnCommitted reports reuse of a single-use transaction.
 	ErrTxnCommitted = errors.New("dap: transaction is already committed")
-	// ErrNotExecuted reports an operation left untouched by an earlier error.
+	// ErrNotExecuted reports an operation not sent because validation or
+	// earlier execution stopped the transaction.
 	ErrNotExecuted = errors.New("dap: operation was not executed")
 	// ErrIndeterminate reports an operation which might have taken effect.
 	ErrIndeterminate = errors.New("dap: operation outcome is indeterminate")

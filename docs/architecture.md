@@ -134,7 +134,10 @@ preserves the AP fields while changing DPBANKSEL, and requests acknowledged
 debug and system power. CTRL/STAT writes preserve connection-owned ORUNDETECT,
 and a non-default DLCR turnaround remains unsupported. The debug port retries
 the exact physical request which returned WAIT and completes posted AP
-transactions through RDBUFF.
+transactions through RDBUFF. Ordered transactions use `swd.Batch` for ordinary
+fixed frames but keep sticky-exempt DPIDR, CTRL/STAT, and ABORT operations at a
+physical boundary. A packed WAIT retries the WAITed request and the suffix the
+target abandoned; it does not repeat the confirmed prefix.
 `NewAPSel` constructs an AP selector whose zero value is invalid.
 `APSel.Address` combines it with a
 complete eight-bit register address; the resulting `APAddress` also has an

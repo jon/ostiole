@@ -111,8 +111,10 @@ that lifecycle.
 
 Use `DebugPort.NewTxn` when several DP or AP accesses need ordered results.
 `Commit` validates the complete queue, settles an earlier immediate DP write if
-necessary, then executes one SWD request at a time. DP writes and AP operations
-settle through RDBUFF before reporting success. Queued reads return a
+necessary, then lets the SWD connection pack fixed frames within its wire
+limit. Sticky-exempt DPIDR, CTRL/STAT, and ABORT operations remain separate so
+an earlier WAIT or FAULT cannot hide behind one of them. DP writes and AP
+operations settle through RDBUFF before reporting success. Queued reads return a
 `ReadResult`, whose `Value` method returns the data. Queued writes return a
 `WriteResult`, whose `Err` method reports completion without a placeholder
 value. If the earlier write cannot be settled, none of the queued operations
