@@ -31,6 +31,19 @@ type acknowledgingTarget struct {
 	writes    int
 }
 
+type overrunTarget struct {
+	acknowledgingTarget
+	observed []error
+}
+
+func (*overrunTarget) OverrunDetectEnabled() bool {
+	return true
+}
+
+func (t *overrunTarget) ObserveResponse(err error) {
+	t.observed = append(t.observed, err)
+}
+
 func (t *acknowledgingTarget) Acknowledge(context.Context, sim.Request) error {
 	return t.ack
 }
