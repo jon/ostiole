@@ -77,18 +77,25 @@ func (c *Conn) execute(ctx context.Context, req request, value uint32) (uint32, 
 		c.requireRepair()
 		return result, errors.Join(err, errors.New("swd: ABORT returned WAIT; STICKYORUN cleanup is unavailable"))
 	}
-	abort, requestErr := newRequest(false, false, 0x00)
-	if requestErr != nil {
-		panic(requestErr)
-	}
-	if _, cleanupErr := c.transferFrame(ctx, abort, 1<<4); cleanupErr != nil {
-		c.requireRepair()
-		return 0, errors.Join(err, fmt.Errorf("swd: clear STICKYORUN after WAIT: %w", cleanupErr))
+	if cleanupErr := c.clearOverrunAfterWAIT(ctx); cleanupErr != nil {
+		return 0, errors.Join(err, cleanupErr)
 	}
 	if c.selectPending {
 		c.requireRepair()
 	}
 	return result, err
+}
+
+func (c *Conn) clearOverrunAfterWAIT(ctx context.Context) error {
+	abort, err := newRequest(false, false, 0x00)
+	if err != nil {
+		panic(err)
+	}
+	if _, err := c.transferFrame(ctx, abort, 1<<4); err != nil {
+		c.requireRepair()
+		return fmt.Errorf("swd: clear STICKYORUN after WAIT: %w", err)
+	}
+	return nil
 }
 
 func (c *Conn) transferFrame(ctx context.Context, req request, value uint32) (uint32, error) {
@@ -206,6 +213,15 @@ func (c *Conn) requireRepair() {
 }
 
 func (c *Conn) transferOverrun(ctx context.Context, req request, value uint32) (uint32, error) {
+	frame := c.fixedFrame(req, value)
+	input, err := c.exchange(ctx, frame)
+	if err != nil {
+		return 0, err
+	}
+	return decodeFixedFrame(input, 0, req)
+}
+
+func (c *Conn) fixedFrame(req request, value uint32) *sequence {
 	frame := &sequence{}
 	frame.appendByte(true, requestByte(req))
 	frame.appendN(c.turnaround+3, false, false)
@@ -219,19 +235,19 @@ func (c *Conn) transferOverrun(ctx context.Context, req request, value uint32) (
 		frame.append(true, parity32(value))
 	}
 	frame.appendN(c.idleCycles, true, false)
-	input, err := c.exchange(ctx, frame)
-	if err != nil {
-		return 0, err
-	}
-	if err := ackError(readACK(input, 8+c.turnaround)); err != nil {
+	return frame
+}
+
+func decodeFixedFrame(input []byte, offset int, req request) (uint32, error) {
+	if err := ackError(readACK(input, offset+9)); err != nil {
 		return 0, err
 	}
 	if !req.isRead() {
 		return 0, nil
 	}
-	offset := 8 + c.turnaround + 3
-	data := extractUint32At(input, offset)
-	if bitAt(input, offset+32) != parity32(data) {
+	dataOffset := offset + 12
+	data := extractUint32At(input, dataOffset)
+	if bitAt(input, dataOffset+32) != parity32(data) {
 		return 0, ErrParity
 	}
 	return data, nil

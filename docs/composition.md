@@ -62,8 +62,11 @@ WAIT, the connection clears STICKYORUN before returning it.
 Use `Conn.NewBatch` for an ordered group of raw register operations. Queue each
 operation with the direction-specific DP or AP method, call `Commit`, then read
 each direction-specific result. The batch uses the connection's established
-response grammar, sends one request at a time, stops at the first error, and
-never replays a requested operation.
+response grammar. In simple mode it sends one request at a time; in overrun
+mode it packs complete fixed frames when the wire reports room for more than
+one. A transport failure makes the operations in that physical chunk
+indeterminate and leaves later chunks unsent. WAIT and FAULT still stop the
+batch, and the connection never replays a requested operation.
 The [SWD protocol guide](protocols/swd.md) describes the wire transaction and
 the specification details which are easiest to misread.
 

@@ -35,8 +35,8 @@ debugger service.
 | --- | --- |
 | `usb` | Enumerate, open, claim, transfer through, and close one host USB attachment. |
 | `ftdi` | Own one explicitly selected FTDI MPSSE port and expose direction-safe SWD bits. |
-| `swd` | Enter SWD, establish its response grammar, and encode, execute, and validate individual or ordered DP/AP register transactions. |
-| `swd/sim` | Model SWD protocol entry and basic register transfers without hardware. |
+| `swd` | Enter SWD, establish its response grammar, and encode, execute, and validate individual or packed DP/AP register transactions. |
+| `swd/sim` | Model SWD protocol entry, register transfers, fixed-frame packing, and transfer limits without hardware. |
 | `dap` | Manage SW-DP identity and power, ordered DP/AP transactions, posted AP access, and one MEM-AP view. |
 | `dap/sim` | Model the DP, AP, and target-word state consumed by `dap`. |
 | `target/cortexm` | Read and decode the architectural Cortex-M CPUID value. |
@@ -115,9 +115,14 @@ before sending traffic. They send the requested transaction once. In overrun
 mode a returned WAIT also causes an ABORT write which clears STICKYORUN;
 retrying the request remains the caller's decision.
 
-`swd.Batch` validates its complete queue before traffic, then sends each
-request in order using the response grammar established by `Connect`. It stops
-at the first error and does not replay the failed operation. See
+`swd.Batch` validates its complete queue before traffic. It uses the response
+grammar already established by `Connect`; callers cannot select another one.
+Simple responses run one request at a time. Overrun responses pack complete
+fixed frames up to the limit reported by the wire. A failed physical call makes
+every operation in that chunk indeterminate and leaves later chunks unsent.
+`Batch` assigns WAIT to the operation which received it after the connection
+clears STICKYORUN; the connection does not replay that operation or its
+abandoned suffix. See
 [Serial Wire Debug](protocols/swd.md) for the wire protocol and current bench
 notes.
 

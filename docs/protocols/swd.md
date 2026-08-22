@@ -92,6 +92,14 @@ keep using the simpler transfer grammar; it will lose alignment on the first
 non-OK response. Fixed frames avoid that ambiguity by clocking the request,
 acknowledgement, data phase, turnaround, and idle clocks as one unit.
 
+With the default one-clock turnaround and eight idle clocks, either fixed
+response is 54 clocks. Several complete frames can share one transport
+exchange; that changes the host/probe boundary, not the SWD packet format. A
+WAIT in such an exchange sets STICKYORUN, so the target abandons later requests
+and returns FAULT for them. The host can clear STICKYORUN and resume at the
+request which returned WAIT. If a later request instead appears to complete,
+its effect is no longer safe to guess.
+
 In overrun mode, WAIT sets STICKYORUN and later requests can be abandoned. The
 host clears STICKYORUN through ABORT before retrying the exact request which
 returned WAIT. If SELECT was still buffered when that request returned WAIT,

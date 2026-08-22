@@ -63,9 +63,9 @@ wires its MPSSE port for debugging.
 | Read parity | Yes | Invalid read parity is reported. |
 | Automatic retries | No | A raw register call does not replay the requested transaction. In overrun mode it clears STICKYORUN before returning WAIT; retry policy belongs to the caller. |
 | Ordered raw queue | Yes | `swd.Batch` validates all queued DP/AP operations before traffic, sends them in order, resolves direction-specific results, and never replays the operation which first fails. |
-| Batching or pipelining | No | The ordered queue still executes one complete transaction at a time. |
+| Fixed-frame batching | Yes | In overrun mode the ordered queue packs complete 54-bit frames up to an optional wire limit; simple mode remains sequential. Operations in a failed physical chunk are indeterminate; later chunks remain unsent, and requested operations are never replayed. |
 | Multidrop or dormant state | No | The public connection models one entered SWD target. |
-| Behavioral simulation | Yes | Protocol entry and line-reset effects, live overrun response grammar, DP/AP register transfers, and request-phase WAIT or FAULT injection. |
+| Behavioral simulation | Yes | Protocol entry and line-reset effects, live overrun response grammar, DP/AP register transfers, packed fixed frames, transfer limits, and request-phase WAIT or FAULT injection. |
 | Physical DPIDR read | HIL | Opt-in FTDI test and trivial example on Linux and macOS. |
 
 The public `swd.Wire` boundary permits another wire implementation, but FTDI

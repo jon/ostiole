@@ -89,3 +89,19 @@ func TestWireRejectsInvalidCalls(t *testing.T) {
 		t.Fatalf("unknown-sequence SWDIO error = %v", err)
 	}
 }
+
+func TestWireRejectsInvalidTransferLimits(t *testing.T) {
+	wire := sim.New(nil)
+	if err := wire.SetMaxTransferBits(-1); err == nil {
+		t.Fatal("SetMaxTransferBits(-1) succeeded")
+	}
+	if err := wire.SetMaxTransferBits(8); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wire.SWDIO(t.Context(), make([]byte, 2), make([]byte, 2), 9); err == nil {
+		t.Fatal("SWDIO() exceeded configured transfer limit")
+	}
+	if got := (*sim.Wire)(nil).MaxTransferBits(); got != 16_384 {
+		t.Fatalf("nil Wire MaxTransferBits() = %d, want 16384", got)
+	}
+}
