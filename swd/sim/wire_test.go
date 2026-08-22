@@ -10,6 +10,22 @@ import (
 	"github.com/jon/ostiole/swd/sim"
 )
 
+type resetTarget struct {
+	resets int
+}
+
+func (*resetTarget) Read(context.Context, sim.Request) (uint32, error) {
+	return 0, nil
+}
+
+func (*resetTarget) Write(context.Context, sim.Request, uint32) error {
+	return nil
+}
+
+func (t *resetTarget) ObserveLineReset() {
+	t.resets++
+}
+
 func TestWireRecognizesProtocolEntry(t *testing.T) {
 	tests := []struct {
 		name string
@@ -31,6 +47,23 @@ func TestWireRecognizesProtocolEntry(t *testing.T) {
 				t.Fatalf("protocol entry: %v", err)
 			}
 		})
+	}
+}
+
+func TestWireReportsEveryLineResetToTheTarget(t *testing.T) {
+	target := &resetTarget{}
+	conn := swd.New(sim.New(target))
+	if err := conn.LineReset(t.Context()); err != nil {
+		t.Fatalf("LineReset(): %v", err)
+	}
+	if target.resets != 1 {
+		t.Fatalf("line-reset notifications = %d, want 1", target.resets)
+	}
+	if err := conn.JTAGToSWD(t.Context()); err != nil {
+		t.Fatalf("JTAGToSWD(): %v", err)
+	}
+	if target.resets != 3 {
+		t.Fatalf("line-reset notifications = %d, want 3", target.resets)
 	}
 }
 

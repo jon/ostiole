@@ -78,7 +78,7 @@ FAULT means that a sticky error has been recorded. It is not a transient
 response to retry. An acknowledgement other than OK, WAIT, or FAULT is a
 protocol error, not a fourth response code.
 
-Once ORUNDETECT is known to be clear, a complete FAULT response after one or
+Once the response grammar is known, a complete FAULT response after one or
 more WAITs still ends at a request boundary. Return FAULT without DAPABORT;
 the earlier WAITs do not make it a framing error.
 
@@ -87,14 +87,24 @@ detection disabled, WAIT and FAULT end after the acknowledgement and trailing
 turnaround. With it enabled, every response has a data phase, including WAIT
 and FAULT. A host cannot turn on ORUNDETECT as a register-level feature and
 keep using the simpler transfer grammar; it will lose alignment on the first
-non-OK response. A host using that grammar must therefore reject any CTRL/STAT
-write that sets ORUNDETECT.
+non-OK response. Fixed frames avoid that ambiguity by clocking the request,
+acknowledgement, data phase, turnaround, and idle clocks as one unit.
 
-A host using the simpler grammar must establish that ORUNDETECT is clear
-before it starts replaying requests which return WAIT. CTRL/STAT reads cannot
-return WAIT or FAULT, but offset `0x04` names CTRL/STAT only while
-`SELECT.DPBANKSEL` is zero. A host which inherits unknown DP state cannot
-simply read `0x04` and trust bit zero.
+In overrun mode, WAIT sets STICKYORUN and later requests can be abandoned. The
+host clears STICKYORUN through ABORT before retrying the exact request which
+returned WAIT. Leaving ORUNDETECT set while changing back to the simpler
+grammar has the same alignment problem in reverse: clear STICKYORUN first,
+write CTRL/STAT using the current grammar, and read RDBUFF before changing the
+host-side grammar. RDBUFF returns WAIT while the write remains buffered, so
+the host repeats that read using the old grammar. OK proves that the write data
+was accepted even if its unused read data has bad parity; a WDATAERR FAULT
+means the old ORUNDETECT value still applies. Cancellation or retry exhaustion
+before one of those outcomes leaves the response grammar unknown.
+
+A host must establish which grammar applies before it starts replaying
+requests which return WAIT. CTRL/STAT reads cannot return WAIT or FAULT, but
+offset `0x04` names CTRL/STAT only while `SELECT.DPBANKSEL` is zero. A host
+which inherits unknown DP state cannot simply read `0x04` and trust bit zero.
 
 One workable bootstrap is to read DPIDR, clear the supported sticky conditions
 with ABORT, write zero to SELECT once without retrying, read RDBUFF to settle
@@ -109,11 +119,11 @@ WDATAERR, the DP might have abandoned the SELECT data and kept the previous
 bank. Re-enter SWD before trying again. Only after RDBUFF returns OK is `0x04`
 known to name CTRL/STAT.
 
-A WAIT or FAULT during this bootstrap is not safe to replay with the simpler
-grammar: ORUNDETECT might be set, in which case the response has a data phase
-the host has not consumed. Checking ORUNDETECT only after retrying is too late.
-Re-enter SWD before trying again; ordinary replay would assume the response
-grammar which the bootstrap is meant to establish.
+A WAIT or FAULT during this bootstrap leaves the response grammar unknown:
+ORUNDETECT might be set, in which case the response has a data phase the host
+has not consumed. Checking ORUNDETECT only after retrying is too late. Re-enter
+SWD before trying again; ordinary replay would assume the grammar which the
+bootstrap is meant to establish.
 
 The specification says to retry read data after a parity error. That advice is
 less mechanical for an AP read because AP reads are posted: by the time parity

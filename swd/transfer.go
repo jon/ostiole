@@ -50,6 +50,9 @@ func (c *Conn) transfer(ctx context.Context, req request, value uint32) (uint32,
 	if c == nil {
 		return 0, errors.New("swd: nil connection")
 	}
+	if c.response == responseOverrun {
+		return c.transferOverrun(ctx, req, value)
+	}
 	header := &sequence{}
 	header.appendByte(true, requestByte(req))
 	header.appendN(c.turnaround+3, false, false)
@@ -65,6 +68,38 @@ func (c *Conn) transfer(ctx context.Context, req request, value uint32) (uint32,
 		return c.readData(ctx)
 	}
 	return 0, c.writeData(ctx, value)
+}
+
+func (c *Conn) transferOverrun(ctx context.Context, req request, value uint32) (uint32, error) {
+	frame := &sequence{}
+	frame.appendByte(true, requestByte(req))
+	frame.appendN(c.turnaround+3, false, false)
+	if req.isRead() {
+		frame.appendN(33+c.turnaround, false, false)
+	} else {
+		frame.appendN(c.turnaround, false, false)
+		for bit := range 32 {
+			frame.append(true, value>>uint(bit)&1 != 0)
+		}
+		frame.append(true, parity32(value))
+	}
+	frame.appendN(c.idleCycles, true, false)
+	input, err := c.exchange(ctx, frame)
+	if err != nil {
+		return 0, err
+	}
+	if err := ackError(readACK(input, 8+c.turnaround)); err != nil {
+		return 0, err
+	}
+	if !req.isRead() {
+		return 0, nil
+	}
+	offset := 8 + c.turnaround + 3
+	data := extractUint32At(input, offset)
+	if bitAt(input, offset+32) != parity32(data) {
+		return 0, ErrParity
+	}
+	return data, nil
 }
 
 func readACK(input []byte, offset int) byte {
@@ -156,9 +191,13 @@ func parity32(value uint32) bool {
 }
 
 func extractUint32(buf []byte) uint32 {
+	return extractUint32At(buf, 0)
+}
+
+func extractUint32At(buf []byte, offset int) uint32 {
 	var value uint32
 	for bit := range 32 {
-		if bitAt(buf, bit) {
+		if bitAt(buf, offset+bit) {
 			value |= 1 << uint(bit)
 		}
 	}

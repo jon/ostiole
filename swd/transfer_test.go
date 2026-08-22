@@ -16,6 +16,55 @@ type targetWire struct {
 	cleanupErr    error
 }
 
+type fixedWire struct {
+	ack           byte
+	readValue     uint32
+	corruptParity bool
+	nonOKParity   bool
+	request       request
+	written       uint32
+	calls         int
+}
+
+func (w *fixedWire) SWDIO(_ context.Context, direction, output []byte, bits int) ([]byte, error) {
+	w.calls++
+	if bits != 54 || !allTestBits(direction, 0, 8, true) || !allTestBits(direction, 8, 12, false) {
+		return nil, errors.New("invalid fixed frame")
+	}
+	header := output[0]
+	w.request = mustRequest(header&0x02 != 0, header&0x04 != 0, (header>>1)&0x0c)
+	input := make([]byte, (bits+7)/8)
+	for bit := range 3 {
+		setTestBit(input, 9+bit, w.ack>>uint(bit)&1 != 0)
+	}
+	if w.ack != 0b001 {
+		setTestBit(input, 44, w.nonOKParity)
+		return input, nil
+	}
+	if w.request.isRead() {
+		if !allTestBits(direction, 12, 46, false) || !allTestBits(direction, 46, 54, true) {
+			return nil, errors.New("invalid fixed read direction")
+		}
+		for bit := range 32 {
+			setTestBit(input, 12+bit, w.readValue>>uint(bit)&1 != 0)
+		}
+		setTestBit(input, 44, testParity32(w.readValue) != w.corruptParity)
+		return input, nil
+	}
+	if !allTestBits(direction, 12, 13, false) || !allTestBits(direction, 13, 54, true) {
+		return nil, errors.New("invalid fixed write direction")
+	}
+	for bit := range 32 {
+		if testBit(output, 13+bit) {
+			w.written |= 1 << uint(bit)
+		}
+	}
+	if testBit(output, 45) != testParity32(w.written) {
+		return nil, errors.New("invalid fixed write parity")
+	}
+	return input, nil
+}
+
 func (w *targetWire) SWDIO(_ context.Context, direction, output []byte, bits int) ([]byte, error) {
 	w.calls++
 	if w.calls == 1 {
@@ -136,6 +185,60 @@ func TestTransferReadsAndWritesOneRegister(t *testing.T) {
 	}
 	if dpWriteWire.request != mustRequest(false, false, 0x04) {
 		t.Fatalf("WriteDP() request = %#v", dpWriteWire.request)
+	}
+}
+
+func TestTransferClocksFixedOverrunFrames(t *testing.T) {
+	readWire := &fixedWire{ack: 0b001, readValue: 0x2ba01477}
+	readConn := New(readWire)
+	readConn.response = responseOverrun
+	got, err := readConn.ReadDP(t.Context(), 0x00)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != readWire.readValue || readWire.calls != 1 {
+		t.Fatalf("fixed read = %#08x after %d calls", got, readWire.calls)
+	}
+
+	writeWire := &fixedWire{ack: 0b001}
+	writeConn := New(writeWire)
+	writeConn.response = responseOverrun
+	const written = 0x12345678
+	if err := writeConn.WriteAP(t.Context(), 0x0c, written); err != nil {
+		t.Fatal(err)
+	}
+	if writeWire.written != written || writeWire.calls != 1 {
+		t.Fatalf("fixed write = %#08x after %d calls", writeWire.written, writeWire.calls)
+	}
+}
+
+func TestTransferClocksDataPhaseAfterOverrunError(t *testing.T) {
+	for _, test := range []struct {
+		ack  byte
+		want error
+	}{
+		{ack: 0b010, want: ErrWait},
+		{ack: 0b100, want: ErrFault},
+		{ack: 0b000, want: ErrProtocol},
+	} {
+		wire := &fixedWire{ack: test.ack, nonOKParity: true}
+		conn := New(wire)
+		conn.response = responseOverrun
+		if _, err := conn.ReadDP(t.Context(), 0x00); !errors.Is(err, test.want) {
+			t.Fatalf("ACK %03b error = %v, want %v", test.ack, err, test.want)
+		}
+		if wire.calls != 1 {
+			t.Fatalf("ACK %03b used %d wire calls, want 1", test.ack, wire.calls)
+		}
+	}
+}
+
+func TestTransferChecksFixedReadParityAfterOK(t *testing.T) {
+	wire := &fixedWire{ack: 0b001, readValue: 0x2ba01477, corruptParity: true}
+	conn := New(wire)
+	conn.response = responseOverrun
+	if _, err := conn.ReadDP(t.Context(), 0x00); !errors.Is(err, ErrParity) {
+		t.Fatalf("fixed read error = %v, want parity error", err)
 	}
 }
 

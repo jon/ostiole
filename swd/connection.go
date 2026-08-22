@@ -22,6 +22,13 @@ type Wire interface {
 	SWDIO(context.Context, []byte, []byte, int) ([]byte, error)
 }
 
+type responseMode uint8
+
+const (
+	responseSimple responseMode = iota
+	responseOverrun
+)
+
 type request struct {
 	ap   bool
 	read bool
@@ -47,6 +54,7 @@ type Conn struct {
 	wire       Wire
 	turnaround int
 	idleCycles int
+	response   responseMode
 }
 
 // New returns an SWD connection using wire. The caller must serialize all
