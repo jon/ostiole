@@ -42,7 +42,8 @@
 //
 // A Txn queues an ordered group of DP and AP operations. Commit validates the
 // complete queue, settles any earlier immediate DP write, then sends queued
-// traffic. ReadResult.Value reports data from a queued read; WriteResult.Err
+// traffic through the SWD batch executor. ReadResult.Value reports data from a
+// queued read; WriteResult.Err
 // reports completion of a queued write. DP writes and AP operations settle
 // through RDBUFF. If an operation fails, earlier confirmed results remain
 // available and later operations report that they were not executed. A result

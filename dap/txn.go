@@ -74,7 +74,8 @@ type txnOp struct {
 // Txn queues an ordered, single-use sequence of ADIv5 DP and AP operations.
 // Calls sharing the transaction, its DebugPort, or the underlying SWD
 // connection must be serialized. Queued operations have the same effects and
-// lifecycle requirements as the corresponding DebugPort methods.
+// lifecycle requirements as the corresponding DebugPort methods. Commit can
+// pack their physical SWD requests while preserving logical result order.
 type Txn struct {
 	dp        *DebugPort
 	ops       []txnOp
@@ -134,9 +135,11 @@ func (t *Txn) queue(op txnOp) *txnResult {
 }
 
 // Commit validates the complete queue, settles any earlier immediate DP write,
-// then executes queued operations in order until one fails. Failure while
-// settling the earlier write leaves every queued operation unexecuted. Commit
-// resolves every result before returning. A Txn can be committed only once.
+// then executes queued operations in order until one fails. The underlying SWD
+// connection can pack fixed frames without changing logical result order.
+// Failure while settling the earlier write leaves every queued operation
+// unexecuted. Commit resolves every result before returning. A Txn can be
+// committed only once.
 func (t *Txn) Commit(ctx context.Context) error {
 	if t == nil || t.committed {
 		return ErrTxnCommitted
@@ -395,18 +398,252 @@ func settlesSELECT(req transferRequest) bool {
 }
 
 func (t *Txn) execute(ctx context.Context, steps []txnStep) error {
-	for i := range steps {
-		step := &steps[i]
-		value, err := t.executeStep(ctx, *step)
-		if err != nil {
-			return t.failStep(*step, err)
+	waits := make(map[txnStep]int)
+	for cursor := 0; cursor < len(steps); {
+		end := nextBatchBoundary(steps, cursor)
+		results, batchErr := t.transferSteps(ctx, steps[cursor:end])
+		failed := firstFailedTransfer(results)
+		t.acceptBatchPrefix(steps[cursor:end], results, failed)
+		cursor += failed
+		if failed == len(results) {
+			cursor = end
+			continue
 		}
-		t.acceptStep(*step, value)
+		if err := t.handleBatchFailure(ctx, steps[cursor:end], results[failed:], batchErr, waits); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
+func nextBatchBoundary(steps []txnStep, start int) int {
+	if txnResponseBoundary(steps[start]) {
+		return start + 1
+	}
+	end := start + 1
+	for end < len(steps) && !txnResponseBoundary(steps[end]) {
+		end++
+	}
+	return end
+}
+
+func txnResponseBoundary(step txnStep) bool {
+	return step.dpReg == DPIDR || step.dpReg == CTRLSTAT || step.dpReg == ABORT
+}
+
+type txnTransferResult struct {
+	read  *swd.ReadResult
+	write *swd.WriteResult
+}
+
+func (r txnTransferResult) value() (uint32, error) {
+	if r.read != nil {
+		return r.read.Value()
+	}
+	return 0, r.write.Err()
+}
+
+func (r txnTransferResult) err() error {
+	_, err := r.value()
+	return err
+}
+
+func (t *Txn) transferSteps(ctx context.Context, steps []txnStep) ([]txnTransferResult, error) {
+	batch := t.dp.conn.NewBatch()
+	results := make([]txnTransferResult, len(steps))
+	for i := range steps {
+		step := steps[i]
+		switch {
+		case step.req.AP && step.req.Read:
+			results[i].read = batch.ReadAP(step.req.Addr)
+		case step.req.AP:
+			results[i].write = batch.WriteAP(step.req.Addr, step.data)
+		case step.req.Read:
+			results[i].read = batch.ReadDP(step.req.Addr)
+		default:
+			results[i].write = batch.WriteDP(step.req.Addr, step.data)
+		}
+	}
+	return results, batch.Commit(ctx)
+}
+
+func firstFailedTransfer(results []txnTransferResult) int {
+	for i := range results {
+		if results[i].err() != nil {
+			return i
+		}
+	}
+	return len(results)
+}
+
+func (t *Txn) acceptBatchPrefix(steps []txnStep, results []txnTransferResult, count int) {
+	for i := range count {
+		value, _ := results[i].value()
+		t.acceptStep(steps[i], value)
+	}
+}
+
+func (t *Txn) handleBatchFailure(ctx context.Context, steps []txnStep, results []txnTransferResult, batchErr error, waits map[txnStep]int) error {
+	err := results[0].err()
+	if errors.Is(err, swd.ErrIndeterminate) {
+		return t.failBatchTransport(steps, results, batchErr)
+	}
+	if errors.Is(err, swd.ErrNotExecuted) {
+		return t.failStep(steps[0], batchErr)
+	}
+	value, _ := results[0].value()
+	if errors.Is(err, swd.ErrWait) {
+		if err != swd.ErrWait {
+			return t.failBatchWAITCleanup(steps, results, err)
+		}
+		return t.retryBatchWAIT(ctx, steps, results, waits)
+	}
+	t.observeStep(steps[0], value, err)
+	if errors.Is(err, swd.ErrFault) {
+		if !batchSuffixAbandoned(results) {
+			return t.failUnexpectedBatchSuffix(steps[:clockedTransferCount(results)], err)
+		}
+		return t.failStep(steps[0], t.dp.handleFault(steps[0].req, stepMayAffectAP(steps[0])))
+	}
+	if errors.Is(err, swd.ErrParity) {
+		clocked := clockedTransferCount(results)
+		if clocked == 1 {
+			return t.failStep(steps[0], err)
+		}
+		if steps[0].settlesDPWrite || steps[0].completesWrite {
+			return t.failCompletedBatchBarrier(steps[:clocked], err)
+		}
+		return t.failClockedSuffix(steps[:clocked], err)
+	}
+	return t.failClockedSuffix(steps[:clockedTransferCount(results)], errors.Join(err, batchErr))
+}
+
+func (t *Txn) failBatchWAITCleanup(steps []txnStep, results []txnTransferResult, err error) error {
+	if !batchSuffixAbandoned(results) {
+		return t.failUnexpectedBatchSuffix(steps[:clockedTransferCount(results)], err)
+	}
+	step := steps[0]
+	err = t.executionError(step, err)
+	t.dp.state.loseFraming()
+	t.ops[step.op].result.resolve(0, err)
+	t.resolveSuffix(step.op + 1)
+	return err
+}
+
+func (t *Txn) retryBatchWAIT(ctx context.Context, steps []txnStep, results []txnTransferResult, waits map[txnStep]int) error {
+	if !batchSuffixAbandoned(results) {
+		return t.failUnexpectedBatchSuffix(steps[:clockedTransferCount(results)], swd.ErrWait)
+	}
+	step := steps[0]
+	if t.dp.state.selectPending {
+		cause := errors.Join(swd.ErrWait, ErrIndeterminate, errors.New("dap: WAIT cleanup abandoned a pending SELECT write"))
+		t.dp.state.loseFraming()
+		return t.failStep(step, cause)
+	}
+	t.observeStep(step, 0, swd.ErrWait)
+	if err := t.dp.validateWait(step.req, swd.ErrWait); err != nil {
+		return t.failStep(step, err)
+	}
+	waits[step]++
+	if err := ctx.Err(); err != nil {
+		cause := errors.Join(swd.ErrWait, err)
+		return t.failStep(step, t.dp.finishWait(cause, stepMayAffectAP(step)))
+	}
+	if waits[step] <= maxWaitRetries {
+		return nil
+	}
+	cause := fmt.Errorf("dap: WAIT retry limit exceeded: %w", swd.ErrWait)
+	return t.failStep(step, t.dp.finishWait(cause, stepMayAffectAP(step)))
+}
+
+func batchSuffixAbandoned(results []txnTransferResult) bool {
+	unsent := false
+	for i := 1; i < len(results); i++ {
+		err := results[i].err()
+		if errors.Is(err, swd.ErrNotExecuted) {
+			unsent = true
+			continue
+		}
+		if unsent || !errors.Is(err, swd.ErrFault) {
+			return false
+		}
+	}
+	return true
+}
+
+func clockedTransferCount(results []txnTransferResult) int {
+	for i := 1; i < len(results); i++ {
+		if errors.Is(results[i].err(), swd.ErrNotExecuted) {
+			return i
+		}
+	}
+	return len(results)
+}
+
+func (t *Txn) failUnexpectedBatchSuffix(steps []txnStep, ackErr error) error {
+	cause := errors.Join(ackErr, ErrIndeterminate, errors.New("dap: a request after WAIT or FAULT was not abandoned"))
+	t.dp.state.loseFraming()
+	t.resolveIndeterminateSteps(steps, cause)
+	t.resolveSuffix(steps[len(steps)-1].op + 1)
+	return cause
+}
+
+func (t *Txn) failBatchTransport(steps []txnStep, results []txnTransferResult, batchErr error) error {
+	primary := errors.Join(batchErr, ErrIndeterminate)
+	t.dp.state.loseFraming()
+	lastOp := steps[0].op
+	for i := range steps {
+		if i >= len(results) || !errors.Is(results[i].err(), swd.ErrIndeterminate) {
+			break
+		}
+		err := error(ErrIndeterminate)
+		if i == 0 {
+			err = primary
+		}
+		t.ops[steps[i].op].result.resolve(0, err)
+		lastOp = steps[i].op
+	}
+	t.resolveSuffix(lastOp + 1)
+	return primary
+}
+
+func (t *Txn) failClockedSuffix(steps []txnStep, err error) error {
+	primary := errors.Join(err, ErrIndeterminate)
+	t.dp.state.loseFraming()
+	t.resolveIndeterminateSteps(steps, primary)
+	t.resolveSuffix(steps[len(steps)-1].op + 1)
+	return primary
+}
+
+func (t *Txn) failCompletedBatchBarrier(steps []txnStep, err error) error {
+	step := steps[0]
+	err = t.executionError(step, err)
+	t.applyFailedStepEffect(step, err)
+	if len(steps) == 1 {
+		t.ops[step.op].result.resolve(0, err)
+		t.resolveSuffix(step.op + 1)
+		return err
+	}
+	primary := errors.Join(err, ErrIndeterminate)
+	t.dp.state.loseFraming()
+	if steps[1].op == step.op {
+		t.ops[step.op].result.resolve(0, primary)
+	} else {
+		t.ops[step.op].result.resolve(0, err)
+	}
+	t.resolveIndeterminateSteps(steps[1:], primary)
+	t.resolveSuffix(steps[len(steps)-1].op + 1)
+	return primary
+}
+
+func (t *Txn) resolveIndeterminateSteps(steps []txnStep, err error) {
+	for i := range steps {
+		t.ops[steps[i].op].result.resolve(0, err)
+	}
+}
+
 func (t *Txn) acceptStep(step txnStep, value uint32) {
+	t.observeStep(step, value, nil)
 	if !step.req.Read && !step.req.AP {
 		if step.invalidatesAP {
 			t.dp.recordDPWriteState(step.dpReg, step.data)
@@ -429,6 +666,19 @@ func (t *Txn) acceptStep(step txnStep, value uint32) {
 	t.ops[step.op].result.resolve(value, nil)
 }
 
+func (t *Txn) observeStep(step txnStep, value uint32, err error) {
+	t.dp.resolveSELECT(step.req, value, err)
+	if step.settlesDPWrite && (err == nil || errors.Is(err, swd.ErrParity) || faultHasValidState(err)) {
+		t.dp.state.settleDPWrite()
+	} else if !step.settlesDPWrite && responseSettlesPreviousDPWrite(step.req, err) {
+		t.dp.state.settleDPWrite()
+	}
+}
+
+func stepMayAffectAP(step txnStep) bool {
+	return step.req.AP || step.operationStarted && !step.settlesDPWrite
+}
+
 func (t *Txn) failStep(step txnStep, err error) error {
 	err = t.executionError(step, err)
 	t.applyFailedStepEffect(step, err)
@@ -444,14 +694,6 @@ func (t *Txn) applyFailedStepEffect(step txnStep, err error) {
 	if errors.Is(err, ErrIndeterminate) || step.completesWrite && errors.Is(err, swd.ErrParity) {
 		t.dp.state.invalidateAP()
 	}
-}
-
-func (t *Txn) executeStep(ctx context.Context, step txnStep) (uint32, error) {
-	if !step.settlesDPWrite {
-		return t.dp.transfer(ctx, step.req, step.data)
-	}
-	value, err := t.dp.transferDPWriteBarrier(ctx)
-	return value, err
 }
 
 func (t *Txn) resolveInvalid() {
