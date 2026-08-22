@@ -18,7 +18,7 @@ data-register write can write target memory.
 | --- | --- | --- |
 | List USB attachments understood by the FTDI driver | `usb.New`, `ftdi.SupportedDevices`, `Enumerator.List` | `ost ftdi list` |
 | Open one FTDI MPSSE SWD port | `Enumerator.Open`, `ftdi.Open` | `examples/trivial/swd-dpidr` |
-| Connect SWD or transfer one DP/AP register | `swd.New`, `Conn.Connect`, `Conn.ReadDP`, `Conn.WriteDP`, `Conn.ReadAP`, `Conn.WriteAP`, `Conn.Release` | `examples/trivial/swd-dpidr` |
+| Connect SWD or transfer DP/AP registers | `swd.New`, `Conn.Connect`, `Conn.ReadDP`, `Conn.WriteDP`, `Conn.ReadAP`, `Conn.WriteAP`, `Conn.NewBatch`, `Conn.Release` | `examples/trivial/swd-dpidr` |
 | Enter SWD, decode a DPIDR, and manage SW-DP power | `dap.NewDebugPort`, `DebugPort.Connect`, `DebugPort.Release` | `ost dap dp id` |
 | Identify one explicitly selected AP | `DebugPort.ReadAPIDR`, `DecodeAPIDR` | `examples/simple/ap-id` |
 | Access another AP register by its full ADIv5 address | `DebugPort.ReadRawAP`, `DebugPort.WriteRawAP` | Package tests |
@@ -59,6 +59,11 @@ inherited. `Release` restores only a change made by that connection and can be
 retried. A register operation returns WAIT, FAULT, parity, and protocol errors
 without replaying the requested transaction. When a fixed response returns
 WAIT, the connection clears STICKYORUN before returning it.
+Use `Conn.NewBatch` for an ordered group of raw register operations. Queue each
+operation with the direction-specific DP or AP method, call `Commit`, then read
+each direction-specific result. The batch uses the connection's established
+response grammar, sends one request at a time, stops at the first error, and
+never replays a requested operation.
 The [SWD protocol guide](protocols/swd.md) describes the wire transaction and
 the specification details which are easiest to misread.
 

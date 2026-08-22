@@ -5,7 +5,8 @@
 // and AP reads and writes. Connect keeps inherited ORUNDETECT or tries to
 // enable it, and uses overrun framing only if the bit reads back as set. Release
 // restores the inherited setting. Register operations validate the physical
-// address and make one attempt without retrying.
+// address and make one attempt without retrying. Batch validates an ordered
+// queue before sending its operations one at a time.
 package swd
 
 type sequence struct {

@@ -35,7 +35,7 @@ debugger service.
 | --- | --- |
 | `usb` | Enumerate, open, claim, transfer through, and close one host USB attachment. |
 | `ftdi` | Own one explicitly selected FTDI MPSSE port and expose direction-safe SWD bits. |
-| `swd` | Enter SWD, establish its response grammar, and encode, execute, and validate individual DP/AP register transactions. |
+| `swd` | Enter SWD, establish its response grammar, and encode, execute, and validate individual or ordered DP/AP register transactions. |
 | `swd/sim` | Model SWD protocol entry and basic register transfers without hardware. |
 | `dap` | Manage SW-DP identity and power, ordered DP/AP transactions, posted AP access, and one MEM-AP view. |
 | `dap/sim` | Model the DP, AP, and target-word state consumed by `dap`. |
@@ -113,7 +113,11 @@ simple mode. `Release` restores the value found by `Connect`. Register methods
 separate DP and AP reads from writes and reject an unsupported physical address
 before sending traffic. They send the requested transaction once. In overrun
 mode a returned WAIT also causes an ABORT write which clears STICKYORUN;
-retrying the request remains the caller's decision. See
+retrying the request remains the caller's decision.
+
+`swd.Batch` validates its complete queue before traffic, then sends each
+request in order using the response grammar established by `Connect`. It stops
+at the first error and does not replay the failed operation. See
 [Serial Wire Debug](protocols/swd.md) for the wire protocol and current bench
 notes.
 
