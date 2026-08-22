@@ -3,6 +3,7 @@ package sim_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -40,6 +41,18 @@ type acknowledgingTarget struct {
 	reads     int
 	writes    int
 	ready     bool
+}
+
+type packedCountingWire struct {
+	inner *sim.Wire
+	calls []int
+}
+
+func (w *packedCountingWire) MaxTransferBits() int { return w.inner.MaxTransferBits() }
+
+func (w *packedCountingWire) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
+	w.calls = append(w.calls, bits)
+	return w.inner.SWDIO(ctx, direction, output, bits)
 }
 
 func (t *acknowledgingTarget) Acknowledge(ctx context.Context, req sim.Request) error {
@@ -185,6 +198,102 @@ func TestWireExecutesRegisterTransfers(t *testing.T) {
 	}
 	if target.writes[write] != value {
 		t.Fatalf("write = %#08x", target.writes[write])
+	}
+}
+
+func TestWireExecutesPackedRegisterTransfers(t *testing.T) {
+	target := &registerTarget{
+		connectionTarget: connectionTarget{dpidr: 0x2ba01477},
+		values: map[sim.Request]uint32{
+			{Read: true}:           0x11111111,
+			{AP: true, Read: true}: 0x22222222,
+		},
+		writes: make(map[sim.Request]uint32),
+	}
+	inner := sim.New(target)
+	wire := &packedCountingWire{inner: inner}
+	conn := swd.New(wire)
+	if _, err := conn.Connect(t.Context()); err != nil {
+		t.Fatalf("Connect(): %v", err)
+	}
+	if err := inner.SetMaxTransferBits(108); err != nil {
+		t.Fatal(err)
+	}
+	target.ready = true
+	wire.calls = nil
+	batch := conn.NewBatch()
+	dp0 := batch.ReadDP(0x00)
+	ap0 := batch.ReadAP(0x00)
+	dp1 := batch.ReadDP(0x00)
+	write := batch.WriteAP(0x0c, 0x33333333)
+	if err := batch.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(wire.calls, []int{108, 108}) {
+		t.Fatalf("SWDIO bit counts = %v", wire.calls)
+	}
+	for _, result := range []struct {
+		read *swd.ReadResult
+		want uint32
+	}{{dp0, 0x11111111}, {ap0, 0x22222222}, {dp1, 0x11111111}} {
+		value, err := result.read.Value()
+		if value != result.want || err != nil {
+			t.Fatalf("Value() = %#08x, %v; want %#08x", value, err, result.want)
+		}
+	}
+	if err := write.Err(); err != nil {
+		t.Fatalf("queued AP write: %v", err)
+	}
+	if got := target.writes[sim.Request{AP: true, Addr: 0x0c}]; got != 0x33333333 {
+		t.Fatalf("queued AP write = %#08x", got)
+	}
+	if err := inner.SetMaxTransferBits(0); err != nil {
+		t.Fatal(err)
+	}
+	target.ready = false
+	if err := conn.Release(t.Context()); err != nil {
+		t.Fatalf("Release(): %v", err)
+	}
+}
+
+func TestWireModelsAbandonedSuffixAfterPackedWAIT(t *testing.T) {
+	target := &connectionTarget{dpidr: 0x2ba01477}
+	inner := sim.New(target)
+	wire := &packedCountingWire{inner: inner}
+	conn := swd.New(wire)
+	if _, err := conn.Connect(t.Context()); err != nil {
+		t.Fatalf("Connect(): %v", err)
+	}
+	if err := inner.SetMaxTransferBits(162); err != nil {
+		t.Fatal(err)
+	}
+	target.enforceSticky = true
+	target.waitAP = 1
+	wire.calls = nil
+	batch := conn.NewBatch()
+	results := []*swd.ReadResult{batch.ReadAP(0x00), batch.ReadAP(0x00), batch.ReadAP(0x00)}
+	if err := batch.Commit(t.Context()); !errors.Is(err, swd.ErrWait) {
+		t.Fatalf("Commit() error = %v, want WAIT", err)
+	}
+	for i, want := range []error{swd.ErrWait, swd.ErrFault, swd.ErrFault} {
+		if _, err := results[i].Value(); !errors.Is(err, want) {
+			t.Fatalf("result %d error = %v, want %v", i, err, want)
+		}
+	}
+	if !slices.Equal(wire.calls, []int{162, 54}) {
+		t.Fatalf("SWDIO bit counts = %v, want packed chunk and cleanup", wire.calls)
+	}
+	if target.ctrlStat&testStickyOverrun != 0 {
+		t.Fatalf("CTRL/STAT after WAIT cleanup = %#08x", target.ctrlStat)
+	}
+	if _, err := conn.ReadDP(t.Context(), 0x00); err != nil {
+		t.Fatalf("ReadDP() after WAIT cleanup: %v", err)
+	}
+	if err := inner.SetMaxTransferBits(0); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Release(t.Context()); err != nil {
+		t.Fatalf("Release(): %v", err)
 	}
 }
 

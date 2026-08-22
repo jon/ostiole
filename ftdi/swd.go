@@ -10,7 +10,12 @@ const (
 	cmdClockBitsInPosLSB  = 0x2a
 	cmdSendImmediate      = 0x87
 	pinDataOut            = 1 << 1
+	maxSWDTransferBits    = 16_384
 )
+
+// MaxTransferBits reports the conservative SWDIO limit used for packed
+// transfers. It does not access the adapter.
+func (c *Channel) MaxTransferBits() int { return maxSWDTransferBits }
 
 type swdRead struct {
 	offset int
@@ -51,11 +56,7 @@ func swdCommands(direction, output []byte, bits int) ([]byte, []swdRead) {
 				cmdClockBitsOutNegLSB, byte(width-1), data,
 			)
 		} else {
-			commands = append(
-				commands,
-				cmdSetDataLow, 0, pinClock,
-				cmdClockBitsInPosLSB, byte(width-1),
-			)
+			commands = append(commands, cmdSetDataLow, 0, pinClock, cmdClockBitsInPosLSB, byte(width-1))
 			reads = append(reads, swdRead{offset: offset, bits: width})
 		}
 		offset += width

@@ -16,21 +16,22 @@ const (
 )
 
 type connectionTarget struct {
-	dpidr       uint32
-	ctrlStat    uint32
-	dlcr        uint32
-	selectDP    uint32
-	pendingDP   *pendingDPWrite
-	waitRDBUFF  int
-	waitAP      int
-	waitORUN    bool
-	ignoreORUN  bool
-	abortWrites []uint32
-	ctrlReads   int
-	ctrlWrites  int
-	failCTRLAt  int
-	ctrlReadErr error
-	resetSticky bool
+	dpidr         uint32
+	ctrlStat      uint32
+	dlcr          uint32
+	selectDP      uint32
+	pendingDP     *pendingDPWrite
+	waitRDBUFF    int
+	waitAP        int
+	waitORUN      bool
+	ignoreORUN    bool
+	abortWrites   []uint32
+	ctrlReads     int
+	ctrlWrites    int
+	failCTRLAt    int
+	ctrlReadErr   error
+	resetSticky   bool
+	enforceSticky bool
 }
 
 type pendingDPWrite struct {
@@ -40,6 +41,9 @@ type pendingDPWrite struct {
 }
 
 func (t *connectionTarget) Acknowledge(_ context.Context, req sim.Request) error {
+	if t.enforceSticky && t.stickyFaults(req) {
+		return swd.ErrFault
+	}
 	if req.AP && t.waitAP > 0 {
 		t.waitAP--
 		return swd.ErrWait
@@ -53,6 +57,12 @@ func (t *connectionTarget) Acknowledge(_ context.Context, req sim.Request) error
 		return swd.ErrWait
 	}
 	return nil
+}
+
+func (t *connectionTarget) stickyFaults(req sim.Request) bool {
+	sticky := t.ctrlStat&(testStickyOverrun|testWriteDataErr) != 0
+	exempt := !req.AP && (!req.Read && req.Addr == 0x00 || req.Read && (req.Addr == 0x00 || req.Addr == 0x04 && t.selectDP&0x0f == 0))
+	return sticky && !exempt
 }
 
 func (t *connectionTarget) Read(_ context.Context, req sim.Request) (uint32, error) {

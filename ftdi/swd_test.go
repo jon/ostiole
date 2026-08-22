@@ -35,3 +35,9 @@ func TestChannelExecutesDirectionSafeSWDRuns(t *testing.T) {
 		t.Fatalf("input = %08b", input)
 	}
 }
+
+func TestChannelReportsSWDTransferLimit(t *testing.T) {
+	if got := (*Channel)(nil).MaxTransferBits(); got != 16_384 {
+		t.Fatalf("MaxTransferBits() = %d, want 16384", got)
+	}
+}

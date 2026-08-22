@@ -5,8 +5,8 @@
 // and AP reads and writes. Connect keeps inherited ORUNDETECT or tries to
 // enable it, and uses overrun framing only if the bit reads back as set. Release
 // restores the inherited setting. Register operations validate the physical
-// address and make one attempt without retrying. Batch validates an ordered
-// queue before sending its operations one at a time.
+// address and make one attempt without retrying. Batch packs fixed frames when
+// the connection and wire permit it without changing that retry rule.
 package swd
 
 type sequence struct {
@@ -34,6 +34,12 @@ func (s *sequence) appendN(bits int, driven, value bool) {
 func (s *sequence) appendByte(driven bool, value byte) {
 	for bit := range 8 {
 		s.append(driven, value>>uint(bit)&1 != 0)
+	}
+}
+
+func (s *sequence) appendSequence(other *sequence) {
+	for bit := range other.bits {
+		s.append(bitAt(other.direction, bit), bitAt(other.output, bit))
 	}
 }
 

@@ -53,6 +53,7 @@ type Wire struct {
 	active     bool
 	pending    *Request
 	pendingACK byte
+	maxBits    int
 }
 
 // New returns a fresh wire backed by target.
@@ -60,21 +61,34 @@ func New(target Target) *Wire {
 	return &Wire{target: target}
 }
 
-// SWDIO implements swd.Wire.
-func (w *Wire) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
+// SetMaxTransferBits changes the largest bit stream accepted by SWDIO. Zero
+// restores the default limit.
+func (w *Wire) SetMaxTransferBits(bits int) error {
 	if w == nil {
-		return nil, errors.New("swd/sim: nil wire")
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
+		return errors.New("swd/sim: nil wire")
 	}
 	if bits < 0 {
-		return nil, fmt.Errorf("swd/sim: negative bit count %d", bits)
+		return fmt.Errorf("swd/sim: negative transfer limit %d", bits)
+	}
+	w.maxBits = bits
+	return nil
+}
+
+// MaxTransferBits reports the configured SWDIO limit, or 16,384 bits when no
+// limit is set.
+func (w *Wire) MaxTransferBits() int {
+	if w == nil || w.maxBits == 0 {
+		return 16_384
+	}
+	return w.maxBits
+}
+
+// SWDIO implements swd.Wire.
+func (w *Wire) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
+	if err := w.validateSWDIO(ctx, direction, output, bits); err != nil {
+		return nil, err
 	}
 	need := (bits + 7) / 8
-	if len(direction) < need || len(output) < need {
-		return nil, fmt.Errorf("swd/sim: direction or output is too short for %d bits", bits)
-	}
 	if bits == 0 {
 		return nil, nil
 	}
@@ -88,12 +102,32 @@ func (w *Wire) SWDIO(ctx context.Context, direction, output []byte, bits int) ([
 		return nil, errors.New("swd/sim: protocol entry is required")
 	}
 	if w.pending == nil {
-		if bits == 54 {
-			return w.fixed(ctx, direction, output)
+		if bits >= 54 && bits%54 == 0 {
+			return w.fixed(ctx, direction, output, bits)
 		}
 		return w.request(ctx, direction, output, bits)
 	}
 	return w.data(ctx, direction, output, bits)
+}
+
+func (w *Wire) validateSWDIO(ctx context.Context, direction, output []byte, bits int) error {
+	if w == nil {
+		return errors.New("swd/sim: nil wire")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if bits < 0 {
+		return fmt.Errorf("swd/sim: negative bit count %d", bits)
+	}
+	if bits > w.MaxTransferBits() {
+		return fmt.Errorf("swd/sim: %d-bit stream exceeds %d-bit transfer limit", bits, w.MaxTransferBits())
+	}
+	need := (bits + 7) / 8
+	if len(direction) < need || len(output) < need {
+		return fmt.Errorf("swd/sim: direction or output is too short for %d bits", bits)
+	}
+	return nil
 }
 
 func protocolEntryResets(direction, output []byte, bits int) int {
@@ -148,68 +182,77 @@ func (w *Wire) data(ctx context.Context, direction, output []byte, bits int) ([]
 	return w.write(ctx, direction, output, bits, req)
 }
 
-func (w *Wire) fixed(ctx context.Context, direction, output []byte) ([]byte, error) {
-	overrun := overrunEnabled(w.target)
-	if !allBits(direction, 0, 8, true) || !allBits(direction, 8, 4, false) {
-		return nil, errors.New("swd/sim: invalid fixed request direction")
-	}
-	req, err := decodeRequest(byteAt(output, 0))
-	if err != nil {
-		return nil, err
-	}
-	if w.target == nil {
-		return nil, errors.New("swd/sim: no target is configured")
-	}
-	if err := validateFixedDirection(req, direction); err != nil {
-		return nil, err
-	}
-	ack, err := acknowledge(ctx, w.target, req)
-	if err != nil {
-		return nil, err
-	}
-	observeResponse(w.target, ack)
-	input := make([]byte, 7)
-	for bit := range 3 {
-		setBit(input, 9+bit, ack>>uint(bit)&1 != 0)
-	}
-	if ack != 0b001 {
-		if !overrun {
-			return nil, errors.New("swd/sim: fixed response frame requires ORUNDETECT")
+func (w *Wire) fixed(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
+	input := make([]byte, (bits+7)/8)
+	for offset := 0; offset < bits; offset += 54 {
+		if err := w.fixedFrame(ctx, direction, output, input, offset); err != nil {
+			return nil, err
 		}
-		return input, nil
 	}
-	if req.Read {
-		return w.fixedRead(ctx, input, req)
-	}
-	return w.fixedWrite(ctx, output, input, req)
-}
-
-func (w *Wire) fixedRead(ctx context.Context, input []byte, req Request) ([]byte, error) {
-	value, err := w.target.Read(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	setUint32At(input, 12, value)
-	setBit(input, 44, parity32(value))
 	return input, nil
 }
 
-func (w *Wire) fixedWrite(ctx context.Context, output, input []byte, req Request) ([]byte, error) {
-	value := uint32At(output, 13)
-	if bitAt(output, 45) != parity32(value) {
-		return nil, errors.New("swd/sim: invalid fixed write-data parity")
+func (w *Wire) fixedFrame(ctx context.Context, direction, output, input []byte, offset int) error {
+	overrun := overrunEnabled(w.target)
+	if !allBits(direction, offset, 8, true) || !allBits(direction, offset+8, 4, false) {
+		return errors.New("swd/sim: invalid fixed request direction")
 	}
-	return input, w.target.Write(ctx, req, value)
+	req, err := decodeRequest(byteAt(output, offset))
+	if err != nil {
+		return err
+	}
+	if w.target == nil {
+		return errors.New("swd/sim: no target is configured")
+	}
+	if err := validateFixedDirection(req, direction, offset); err != nil {
+		return err
+	}
+	ack, err := acknowledge(ctx, w.target, req)
+	if err != nil {
+		return err
+	}
+	observeResponse(w.target, ack)
+	for bit := range 3 {
+		setBit(input, offset+9+bit, ack>>uint(bit)&1 != 0)
+	}
+	if ack != 0b001 {
+		if !overrun {
+			return errors.New("swd/sim: fixed response frame requires ORUNDETECT")
+		}
+		return nil
+	}
+	if req.Read {
+		return w.fixedRead(ctx, input, req, offset)
+	}
+	return w.fixedWrite(ctx, output, req, offset)
 }
 
-func validateFixedDirection(req Request, direction []byte) error {
+func (w *Wire) fixedRead(ctx context.Context, input []byte, req Request, offset int) error {
+	value, err := w.target.Read(ctx, req)
+	if err != nil {
+		return err
+	}
+	setUint32At(input, offset+12, value)
+	setBit(input, offset+44, parity32(value))
+	return nil
+}
+
+func (w *Wire) fixedWrite(ctx context.Context, output []byte, req Request, offset int) error {
+	value := uint32At(output, offset+13)
+	if bitAt(output, offset+45) != parity32(value) {
+		return errors.New("swd/sim: invalid fixed write-data parity")
+	}
+	return w.target.Write(ctx, req, value)
+}
+
+func validateFixedDirection(req Request, direction []byte, offset int) error {
 	if req.Read {
-		if !allBits(direction, 12, 34, false) || !allBits(direction, 46, 8, true) {
+		if !allBits(direction, offset+12, 34, false) || !allBits(direction, offset+46, 8, true) {
 			return errors.New("swd/sim: invalid fixed read direction")
 		}
 		return nil
 	}
-	if !allBits(direction, 12, 1, false) || !allBits(direction, 13, 41, true) {
+	if !allBits(direction, offset+12, 1, false) || !allBits(direction, offset+13, 41, true) {
 		return errors.New("swd/sim: invalid fixed write direction")
 	}
 	return nil
