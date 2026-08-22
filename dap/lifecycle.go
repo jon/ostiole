@@ -19,11 +19,11 @@ const (
 )
 
 // Connect enters SWD, validates the SW-DP, and acquires its debug power
-// requests. Release restores the request bits acquired by this client. If
-// connection setup fails, Connect attempts bounded cleanup before returning
-// the original error. A cleanup failure is joined to that error; Release may
-// then be retried, while other DP, AP, transaction, and MEM-AP operations
-// remain blocked.
+// requests. The underlying SWD connection establishes its response grammar
+// and restores any ORUNDETECT change during Release. If connection setup
+// fails, Connect attempts bounded cleanup before returning the original error.
+// A cleanup failure is joined to that error; Release may then be retried,
+// while other DP, AP, transaction, and MEM-AP operations remain blocked.
 func (dp *DebugPort) Connect(ctx context.Context) (DPIDRInfo, error) {
 	if dp == nil || dp.conn == nil {
 		return DPIDRInfo{}, errors.New("dap: nil SWD connection")
@@ -34,11 +34,15 @@ func (dp *DebugPort) Connect(ctx context.Context) (DPIDRInfo, error) {
 	if dp.state.session == sessionRepairRequired {
 		return DPIDRInfo{}, errors.New("dap: debug-port cleanup is pending")
 	}
-	dp.beginConnect()
-	if err := dp.enterSWD(ctx); err != nil {
-		return DPIDRInfo{}, dp.failConnect(fmt.Errorf("dap: enter SWD protocol: %w", err))
+	if err := ctx.Err(); err != nil {
+		return DPIDRInfo{}, err
 	}
-	info, state, err := dp.initialize(ctx)
+	dp.beginConnect()
+	raw, err := dp.conn.Connect(ctx)
+	if err != nil {
+		return DPIDRInfo{}, dp.failSWDConnect(fmt.Errorf("dap: connect SWD transport: %w", err))
+	}
+	info, state, err := dp.initialize(ctx, raw)
 	if err != nil {
 		return DPIDRInfo{}, dp.failConnect(err)
 	}
@@ -56,55 +60,52 @@ func (dp *DebugPort) Connect(ctx context.Context) (DPIDRInfo, error) {
 	return info, nil
 }
 
-func (dp *DebugPort) initialize(ctx context.Context) (DPIDRInfo, uint32, error) {
-	info, err := dp.identify(ctx)
+func (dp *DebugPort) failSWDConnect(cause error) error {
+	// Release returns nil on an idle connection and checks ctx before repair.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := dp.conn.Release(ctx); err != nil {
+		dp.state.loseFraming()
+		return cause
+	}
+	dp.completeRelease()
+	return cause
+}
+
+func (dp *DebugPort) initialize(ctx context.Context, raw uint32) (DPIDRInfo, uint32, error) {
+	info, err := DecodeDPIDR(raw)
 	if err != nil {
 		return DPIDRInfo{}, 0, err
 	}
 	dp.reentryID = info
 	dp.reentryKnown = true
-	if err := dp.writeDP(ctx, ABORT, supportedStickyClear(info.Minimal)); err != nil {
-		return DPIDRInfo{}, 0, err
-	}
-	if err := dp.selectDPBankZero(ctx); err != nil {
-		return DPIDRInfo{}, 0, err
-	}
-	state, err := dp.readSimpleState(ctx)
+	dp.state.recordSELECT(0)
+	dp.state.confirmSELECT()
+	dp.state.settleDPWrite()
+	state, err := dp.readResponseState(ctx)
 	if err != nil {
 		return DPIDRInfo{}, 0, err
 	}
 	return info, state, nil
 }
 
-func (dp *DebugPort) identify(ctx context.Context) (DPIDRInfo, error) {
-	raw, err := dp.readDP(ctx, DPIDR)
-	if err != nil {
-		return DPIDRInfo{}, err
-	}
-	return DecodeDPIDR(raw)
-}
-
-func (dp *DebugPort) readSimpleState(ctx context.Context) (uint32, error) {
-	state, err := dp.readDP(ctx, CTRLSTAT)
-	if err != nil {
-		return 0, err
-	}
-	if state&overrunDetect != 0 {
-		return 0, errors.New("dap: CTRL/STAT.ORUNDETECT is enabled; overrun responses are not supported")
-	}
-	return state, nil
+func (dp *DebugPort) readResponseState(ctx context.Context) (uint32, error) {
+	return dp.readDP(ctx, CTRLSTAT)
 }
 
 func (dp *DebugPort) failConnect(cause error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if dp.state.response == responseLost || dp.state.response == responseOverrun || dp.state.ownedPower != 0 {
+	if dp.state.response == responseLost || dp.state.ownedPower != 0 {
 		if err := dp.reenter(ctx); err != nil {
 			return errors.Join(cause, fmt.Errorf("dap: repair SWD state after Connect failure: %w", err))
 		}
 	}
 	if err := dp.releasePower(ctx); err != nil {
 		return errors.Join(cause, fmt.Errorf("dap: roll back power requests: %w", err))
+	}
+	if err := dp.conn.Release(ctx); err != nil {
+		return errors.Join(cause, fmt.Errorf("dap: release SWD transport: %w", err))
 	}
 	dp.completeRelease()
 	return cause
@@ -123,7 +124,7 @@ func (dp *DebugPort) Release(ctx context.Context) error {
 	}
 	dp.state.beginRepair()
 	releaseCtx := ctx
-	if dp.state.response != responseSimple {
+	if !dp.state.responseKnown() {
 		var cancel context.CancelFunc
 		releaseCtx, cancel = context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -140,19 +141,24 @@ func (dp *DebugPort) Release(ctx context.Context) error {
 	if err := dp.releasePower(releaseCtx); err != nil {
 		return err
 	}
+	if err := dp.conn.Release(releaseCtx); err != nil {
+		return fmt.Errorf("dap: release SWD transport: %w", err)
+	}
 	dp.completeRelease()
 	return nil
 }
 
 func (dp *DebugPort) reenter(ctx context.Context) error {
 	dp.state.beginProtocolEntry()
-	if err := dp.enterSWD(ctx); err != nil {
-		return err
-	}
-	info, err := dp.identify(ctx)
+	raw, err := dp.conn.Connect(ctx)
 	if err != nil {
 		dp.state.loseFraming()
-		return fmt.Errorf("dap: identify SW-DP after protocol entry: %w", err)
+		return fmt.Errorf("dap: reconnect SWD transport: %w", err)
+	}
+	info, err := DecodeDPIDR(raw)
+	if err != nil {
+		dp.state.loseFraming()
+		return fmt.Errorf("dap: decode DPIDR after protocol entry: %w", err)
 	}
 	expected, known := dp.reentryIdentity()
 	if known && info.Raw != expected.Raw {
@@ -160,26 +166,11 @@ func (dp *DebugPort) reenter(ctx context.Context) error {
 		return fmt.Errorf("dap: SW-DP identity changed from %#08x to %#08x during protocol entry",
 			expected.Raw, info.Raw)
 	}
-	if err := dp.writeDP(ctx, ABORT, supportedStickyClear(info.Minimal)); err != nil {
-		dp.state.loseFraming()
-		return fmt.Errorf("dap: clear sticky state after protocol entry: %w", err)
-	}
-	if err := dp.selectDPBankZero(ctx); err != nil {
-		return err
-	}
-	state, err := dp.readDP(ctx, CTRLSTAT)
+	dp.state.recordSELECT(0)
+	dp.state.confirmSELECT()
+	dp.state.settleDPWrite()
+	_, err = dp.readDP(ctx, CTRLSTAT)
 	if err != nil {
-		dp.state.loseFraming()
-		return err
-	}
-	if state&overrunDetect != 0 {
-		return errors.New("dap: CTRL/STAT.ORUNDETECT is enabled; overrun responses are not supported")
-	}
-	return nil
-}
-
-func (dp *DebugPort) enterSWD(ctx context.Context) error {
-	if err := dp.conn.JTAGToSWD(ctx); err != nil {
 		dp.state.loseFraming()
 		return err
 	}

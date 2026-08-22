@@ -24,25 +24,12 @@ type DebugPort struct {
 	state        debugPortState
 }
 
-func (dp *DebugPort) selectDPBankZero(ctx context.Context) error {
-	err := dp.conn.WriteDP(ctx, dpRegisterOffset(SELECT), 0)
-	if err != nil {
-		dp.state.loseFraming()
-		return fmt.Errorf("dap: select DP bank zero before checking CTRL/STAT: %w", err)
-	}
-	dp.recordDPWrite(SELECT, 0)
-	if _, err := dp.readDP(ctx, RDBUFF); err != nil {
-		return fmt.Errorf("dap: confirm DP bank zero before checking CTRL/STAT: %w", err)
-	}
-	return nil
-}
-
 // NewDebugPort returns a debug-port client over conn. Connect performs SWD
 // protocol entry. The caller must give the returned client exclusive use of
 // conn's transaction stream until the client is no longer used. Do not call
-// conn.ReadDP, conn.WriteDP, conn.ReadAP, conn.WriteAP, or conn.JTAGToSWD while
-// using the DebugPort; doing so can invalidate its cached register selection
-// and response state.
+// conn.Connect, conn.Release, conn.ReadDP, conn.WriteDP, conn.ReadAP,
+// conn.WriteAP, or conn.JTAGToSWD while using the DebugPort; doing so can
+// invalidate its cached register selection and response state.
 func NewDebugPort(conn *swd.Conn) *DebugPort {
 	return &DebugPort{conn: conn}
 }
@@ -91,11 +78,12 @@ func (dp *DebugPort) readDPRegister(ctx context.Context, reg DPRegister, info dp
 	return value, nil
 }
 
-// WriteDP writes one logical ADIv5 debug-port register. Writes that would
-// enable an unsupported SWD response mode or turnaround are rejected before
-// traffic. Release does not own power-request bits changed through this method.
-// A successful DAPABORT write invalidates existing MemAP values. The debug port
-// must be connected.
+// WriteDP writes one logical ADIv5 debug-port register. The SWD connection owns
+// CTRL/STAT.ORUNDETECT, so writes must preserve that bit. Writes that require
+// unsupported turnaround framing are rejected before traffic. Release does
+// not restore power-request bits changed through this method. A successful
+// DAPABORT write invalidates existing MemAP values. The debug port must be
+// connected.
 func (dp *DebugPort) WriteDP(ctx context.Context, reg DPRegister, value uint32) error {
 	if err := dp.requireOperational(); err != nil {
 		return err
@@ -151,8 +139,11 @@ func (dp *DebugPort) validateDPWrite(reg DPRegister, value uint32) (dpRegisterIn
 	if err != nil {
 		return dpRegisterInfo{}, err
 	}
-	if reg == CTRLSTAT && value&overrunDetect != 0 {
-		return dpRegisterInfo{}, errors.New("dap: write CTRL/STAT: DebugPort cannot enable ORUNDETECT while using simple responses")
+	if reg == CTRLSTAT && !dp.state.responseKnown() {
+		return dpRegisterInfo{}, errors.New("dap: write CTRL/STAT requires a known SWD response grammar")
+	}
+	if reg == CTRLSTAT && (value&overrunDetect != 0) != (dp.state.response == responseOverrun) {
+		return dpRegisterInfo{}, errors.New("dap: write CTRL/STAT: ORUNDETECT is owned by the SWD connection")
 	}
 	if reg == DLCR && value&dlcrTurnaroundMask != 0 {
 		return dpRegisterInfo{}, errors.New("dap: write DLCR: variable turnaround requires unsupported SWD framing")
@@ -181,6 +172,18 @@ func (dp *DebugPort) writeDP(ctx context.Context, reg DPRegister, value uint32) 
 	if err != nil {
 		return err
 	}
+	if err := dp.prepareDPWrite(ctx, reg, info); err != nil {
+		return err
+	}
+	_, err = dp.transfer(ctx, dpTransferRequest(reg, false), value)
+	if err != nil {
+		return fmt.Errorf("dap: write %s: %w", info.name, err)
+	}
+	dp.recordDPWrite(reg, value)
+	return nil
+}
+
+func (dp *DebugPort) prepareDPWrite(ctx context.Context, reg DPRegister, info dpRegisterInfo) error {
 	if !info.bankIndependent && dp.state.dpBankAmbiguous() {
 		return errors.New("dap: DP register bank is ambiguous after an unconfirmed SELECT write")
 	}
@@ -189,11 +192,6 @@ func (dp *DebugPort) writeDP(ctx context.Context, reg DPRegister, value uint32) 
 			return err
 		}
 	}
-	_, err = dp.transfer(ctx, dpTransferRequest(reg, false), value)
-	if err != nil {
-		return fmt.Errorf("dap: write %s: %w", info.name, err)
-	}
-	dp.recordDPWrite(reg, value)
 	return nil
 }
 
@@ -209,9 +207,6 @@ func (dp *DebugPort) recordDPWriteState(reg DPRegister, value uint32) {
 	if reg == SELECT {
 		dp.state.recordSELECT(value)
 	}
-	if reg == CTRLSTAT && dp.state.selectDP.valid && dp.state.dpBank() == 0 {
-		dp.state.confirmResponse(value)
-	}
 }
 
 func (dp *DebugPort) recordDPRead(reg DPRegister, value uint32) {
@@ -219,8 +214,12 @@ func (dp *DebugPort) recordDPRead(reg DPRegister, value uint32) {
 		dp.state.settleDPWrite()
 	}
 	if reg == CTRLSTAT && dp.state.selectDP.valid && dp.state.dpBank() == 0 {
-		dp.state.confirmResponse(value)
+		dp.confirmResponse(value)
 	}
+}
+
+func (dp *DebugPort) confirmResponse(state uint32) {
+	dp.state.confirmResponse(state)
 }
 
 func (dp *DebugPort) requireOperational() error {

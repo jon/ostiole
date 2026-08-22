@@ -15,11 +15,32 @@ type readParityWire struct {
 	armed bool
 }
 
+type rdbuffWaitTarget struct {
+	*waitTarget
+	active bool
+	skip   int
+	seen   int
+}
+
+func (t *rdbuffWaitTarget) Acknowledge(ctx context.Context, req swdsim.Request) error {
+	if t.active && req == (dpRead(0x0c)) {
+		if t.seen >= t.skip {
+			return swd.ErrWait
+		}
+		t.seen++
+	}
+	return t.waitTarget.Acknowledge(ctx, req)
+}
+
 func (w *readParityWire) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
 	input, err := w.inner.SWDIO(ctx, direction, output, bits)
 	if err == nil && w.armed && bits == 42 && direction[0]&0x02 == 0 {
 		w.armed = false
 		input[32/8] ^= 1 << (32 % 8)
+	}
+	if err == nil && w.armed && bits == 54 && output[0]&0x04 != 0 {
+		w.armed = false
+		input[44/8] ^= 1 << (44 % 8)
 	}
 	return input, err
 }
@@ -60,6 +81,26 @@ func TestDebugPortTransactionResolvesOrderedOperations(t *testing.T) {
 	}
 	if err := txn.WriteDP(dap.ABORT, 0).Err(); !errors.Is(err, dap.ErrTxnCommitted) {
 		t.Fatalf("queue write after Commit error = %v, want committed", err)
+	}
+}
+
+func TestDebugPortTransactionSettlesSELECTBeforeAPRequest(t *testing.T) {
+	target := newWaitTarget()
+	addAP(t, target, 0, 0x24770011)
+	dp := newDebugPort(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	before := len(target.requests)
+	txn := dp.NewTxn()
+	idr := txn.ReadAPIDR(apSel(0))
+	if err := txn.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	assertTxnValue(t, idr, 0x24770011)
+	want := []swdsim.Request{dpWrite(0x08), dpRead(0x0c), apRead(0x0c), dpRead(0x0c)}
+	if got := target.requests[before:]; !equalRequests(got, want) {
+		t.Fatalf("queued AP read requests = %#v, want %#v", got, want)
 	}
 }
 
@@ -135,11 +176,11 @@ func TestDebugPortTransactionDistinguishesBankIndependentAndBankZero(t *testing.
 func TestDebugPortTransactionPreservesConfirmedSELECTAfterABORT(t *testing.T) {
 	target := newWaitTarget()
 	const dlcr = uint32(0xa5a50000)
-	if err := target.SetDPRegister(dap.DLCR, dlcr); err != nil {
-		t.Fatal(err)
-	}
 	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := target.SetDPRegister(dap.DLCR, dlcr); err != nil {
 		t.Fatal(err)
 	}
 	if err := dp.WriteDP(t.Context(), dap.SELECT, 0x120000f0); err != nil {
@@ -285,39 +326,183 @@ func TestDebugPortTransactionRejectsUnknownDPRegistersBeforeTraffic(t *testing.T
 	}
 }
 
-func TestDebugPortTransactionRejectsUnsupportedFramingBeforeTraffic(t *testing.T) {
+func TestDebugPortTransactionRejectsUnsupportedTurnaroundBeforeTraffic(t *testing.T) {
 	target := newWaitTarget()
 	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
-	for _, test := range []struct {
-		name  string
-		reg   dap.DPRegister
-		value uint32
-	}{
-		{name: "overrun detection", reg: dap.CTRLSTAT, value: overrunDetect},
-		{name: "turnaround", reg: dap.DLCR, value: 1 << 8},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			before := len(target.requests)
-			txn := dp.NewTxn()
-			read := txn.ReadDP(dap.DPIDR)
-			write := txn.WriteDP(test.reg, test.value)
-			if err := txn.Commit(t.Context()); err == nil {
-				t.Fatal("Commit() accepted unsupported response framing")
-			}
-			if got := len(target.requests); got != before {
-				t.Fatalf("requests after rejected DP write = %d, want %d", got, before)
-			}
-			if _, err := read.Value(); err != dap.ErrNotExecuted {
-				t.Fatalf("DPIDR result error = %v, want not executed", err)
-			}
-			if err := write.Err(); err == nil {
-				t.Fatal("DP write result succeeded")
-			}
-		})
+	before := len(target.requests)
+	txn := dp.NewTxn()
+	read := txn.ReadDP(dap.DPIDR)
+	write := txn.WriteDP(dap.DLCR, 1<<8)
+	if err := txn.Commit(t.Context()); err == nil {
+		t.Fatal("Commit() accepted unsupported turnaround")
+	}
+	if got := len(target.requests); got != before {
+		t.Fatalf("requests after rejected DP write = %d, want %d", got, before)
+	}
+	if _, err := read.Value(); err != dap.ErrNotExecuted {
+		t.Fatalf("DPIDR result error = %v, want not executed", err)
+	}
+	if err := write.Err(); err == nil {
+		t.Fatal("DP write result succeeded")
+	}
+}
+
+func TestDebugPortTransactionPreservesConnectionOwnedOverrunDetection(t *testing.T) {
+	target := newWaitTarget()
+	dp := newDebugPort(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	state, err := dp.ReadDP(t.Context(), dap.CTRLSTAT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	txn := dp.NewTxn()
+	write := txn.WriteDP(dap.CTRLSTAT, state)
+	if err := txn.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := write.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if !target.OverrunDetectEnabled() {
+		t.Fatal("queued CTRL/STAT write cleared ORUNDETECT")
+	}
+}
+
+func TestDebugPortTransactionRejectsOverrunChangeBeforeTraffic(t *testing.T) {
+	target := newWaitTarget()
+	dp := newDebugPort(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	state, err := dp.ReadDP(t.Context(), dap.CTRLSTAT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := len(target.requests)
+	txn := dp.NewTxn()
+	read := txn.ReadDP(dap.DPIDR)
+	write := txn.WriteDP(dap.CTRLSTAT, state&^overrunDetect)
+	if err := txn.Commit(t.Context()); err == nil || write.Err() == nil {
+		t.Fatal("Commit() accepted a connection-owned ORUNDETECT change")
+	}
+	if _, err := read.Value(); !errors.Is(err, dap.ErrNotExecuted) {
+		t.Fatalf("DPIDR result error = %v, want not executed", err)
+	}
+	if got := len(target.requests); got != before {
+		t.Fatalf("invalid transaction sent %d requests", got-before)
+	}
+}
+
+func TestDebugPortTransactionKeepsFramingAfterNonTransitionCTRLSTATBarrierWAIT(t *testing.T) {
+	testNonTransitionCTRLSTATBarrierWAIT(t, 2, 1, true)
+}
+
+func testNonTransitionCTRLSTATBarrierWAIT(t *testing.T, writeCount, skip int, wantOverrun bool) {
+	t.Helper()
+	target := &rdbuffWaitTarget{waitTarget: newWaitTarget(), skip: skip}
+	dp := newDebugPort(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	state, err := dp.ReadDP(t.Context(), dap.CTRLSTAT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wantOverrun {
+		state |= overrunDetect
+	}
+	txn := dp.NewTxn()
+	writes := make([]*dap.WriteResult, writeCount)
+	for i := range writes {
+		writes[i] = txn.WriteDP(dap.CTRLSTAT, state)
+	}
+	target.active = true
+	err = txn.Commit(t.Context())
+	if !errors.Is(err, swd.ErrWait) {
+		t.Fatalf("Commit() error = %v, want WAIT", err)
+	}
+	for i := range writes[:len(writes)-1] {
+		if err := writes[i].Err(); err != nil {
+			t.Fatalf("write %d error = %v", i, err)
+		}
+	}
+	if err := writes[len(writes)-1].Err(); !errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("last write error = %v, want indeterminate", err)
+	}
+	if _, err := dp.ReadDP(t.Context(), dap.DPIDR); err != nil {
+		t.Fatalf("ReadDP(DPIDR) after non-transition WAIT: %v", err)
+	}
+	if got := target.OverrunDetectEnabled(); got != wantOverrun {
+		t.Fatalf("ORUNDETECT = %t, want %t", got, wantOverrun)
+	}
+}
+
+func TestDebugPortTransactionRejectsCTRLSTATWriteWithoutKnownResponse(t *testing.T) {
+	target := newWaitTarget()
+	dp := newDebugPort(t, target)
+	txn := dp.NewTxn()
+	result := txn.WriteDP(dap.CTRLSTAT, 0)
+	if err := txn.Commit(t.Context()); err == nil {
+		t.Fatal("Commit() accepted CTRL/STAT write without a known response grammar")
+	}
+	if err := result.Err(); err == nil {
+		t.Fatal("CTRL/STAT result succeeded")
+	}
+	if len(target.requests) != 0 {
+		t.Fatalf("requests after rejected transaction = %d, want 0", len(target.requests))
+	}
+}
+
+func TestDebugPortTransactionRejectsOverrunChangeBeforeTargetFailure(t *testing.T) {
+	target := newWaitTarget()
+	dp := newDebugPort(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	state, err := dp.ReadDP(t.Context(), dap.CTRLSTAT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target.dropWriteFor = dpWrite(0x04)
+	target.dropWrite = true
+	target.stickyOnDrop = testWriteDataError
+	before := len(target.requests)
+	txn := dp.NewTxn()
+	result := txn.WriteDP(dap.CTRLSTAT, state&^overrunDetect)
+	if err := txn.Commit(t.Context()); err == nil || result.Err() == nil {
+		t.Fatal("Commit() accepted a connection-owned ORUNDETECT change")
+	}
+	if got := len(target.requests); got != before {
+		t.Fatalf("rejected transaction sent %d requests", got-before)
+	}
+}
+
+func TestDebugPortTransactionRejectsOverrunChangeBeforeWireTraffic(t *testing.T) {
+	target := newWaitTarget()
+	wire := &readParityWire{inner: swdsim.New(target)}
+	dp := dap.NewDebugPort(swd.New(wire))
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	state, err := dp.ReadDP(t.Context(), dap.CTRLSTAT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := len(target.requests)
+	wire.armed = true
+	txn := dp.NewTxn()
+	result := txn.WriteDP(dap.CTRLSTAT, state&^overrunDetect)
+	if err := txn.Commit(t.Context()); err == nil || result.Err() == nil {
+		t.Fatal("Commit() accepted a connection-owned ORUNDETECT change")
+	}
+	if !wire.armed || len(target.requests) != before {
+		t.Fatal("rejected ORUNDETECT change reached the wire")
 	}
 }
 
@@ -500,7 +685,7 @@ func TestDebugPortTransactionSettlesPreviousImmediateDPWriteBeforeTraffic(t *tes
 	}
 }
 
-func TestDebugPortTransactionDoesNotIssueDAPABORTForDPWriteBarrierWAIT(t *testing.T) {
+func TestDebugPortTransactionInvalidatesAPAfterDPWriteBarrierWAIT(t *testing.T) {
 	target := newWaitTarget()
 	addMEMAP(t, target, 0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
 	dp := newDebugPort(t, target)
@@ -527,12 +712,12 @@ func TestDebugPortTransactionDoesNotIssueDAPABORTForDPWriteBarrierWAIT(t *testin
 		}
 	}
 	target.armed = false
-	if _, err := mem.ReadWord(t.Context(), 0xe000ed00); err != nil {
-		t.Fatalf("ReadWord() after DP write barrier WAIT: %v", err)
+	if _, err := mem.ReadWord(t.Context(), 0xe000ed00); err == nil {
+		t.Fatal("ReadWord() succeeded after uncertain DP write barrier")
 	}
 }
 
-func TestDebugPortTransactionDoesNotIssueDAPABORTForSELECTBarrierWAIT(t *testing.T) {
+func TestDebugPortTransactionInvalidatesAPAfterSELECTBarrierWAIT(t *testing.T) {
 	target := newWaitTarget()
 	addMEMAP(t, target, 0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
 	dp := newDebugPort(t, target)
@@ -547,11 +732,11 @@ func TestDebugPortTransactionDoesNotIssueDAPABORTForSELECTBarrierWAIT(t *testing
 	target.arm(dpRead(0x0c), -1)
 	txn := dp.NewTxn()
 	read := txn.ReadDP(dap.DLCR)
-	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrWait) {
-		t.Fatalf("Commit() error = %v, want SELECT barrier WAIT", err)
+	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrWait) || !errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("Commit() error = %v, want WAIT and indeterminate SELECT barrier", err)
 	}
-	if _, err := read.Value(); !errors.Is(err, swd.ErrWait) || errors.Is(err, dap.ErrIndeterminate) {
-		t.Fatalf("banked DP result error = %v, want unexecuted read after WAIT", err)
+	if _, err := read.Value(); !errors.Is(err, swd.ErrWait) || !errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("banked DP result error = %v, want WAIT and indeterminate outcome", err)
 	}
 	for _, value := range target.abortValues {
 		if value&1 != 0 {
@@ -559,12 +744,12 @@ func TestDebugPortTransactionDoesNotIssueDAPABORTForSELECTBarrierWAIT(t *testing
 		}
 	}
 	target.armed = false
-	if _, err := mem.ReadWord(t.Context(), 0xe000ed00); err != nil {
-		t.Fatalf("ReadWord() after SELECT barrier WAIT: %v", err)
+	if _, err := mem.ReadWord(t.Context(), 0xe000ed00); err == nil {
+		t.Fatal("ReadWord() succeeded after uncertain SELECT barrier")
 	}
 }
 
-func TestDebugPortImmediateRDBUFFDoesNotIssueDAPABORTForDPWriteWAIT(t *testing.T) {
+func TestDebugPortImmediateRDBUFFInvalidatesAPAfterDPWriteWAIT(t *testing.T) {
 	target := newWaitTarget()
 	addMEMAP(t, target, 0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
 	dp := newDebugPort(t, target)
@@ -589,8 +774,8 @@ func TestDebugPortImmediateRDBUFFDoesNotIssueDAPABORTForDPWriteWAIT(t *testing.T
 		}
 	}
 	target.armed = false
-	if _, err := mem.ReadWord(t.Context(), 0xe000ed00); err != nil {
-		t.Fatalf("ReadWord() after immediate DP barrier WAIT: %v", err)
+	if _, err := mem.ReadWord(t.Context(), 0xe000ed00); err == nil {
+		t.Fatal("ReadWord() succeeded after uncertain DP write barrier")
 	}
 }
 
@@ -906,6 +1091,7 @@ func TestDebugPortTransactionAttributesRDBUFFFailure(t *testing.T) {
 
 	apRead := apRead(0x0c)
 	target.armFault(dpRead(0x0c))
+	target.waitSkip = 1
 	txn := dp.NewTxn()
 	faulted := txn.ReadAPIDR(apSel(0))
 	suffix := txn.ReadDP(dap.DPIDR)
@@ -959,7 +1145,7 @@ func TestDebugPortTransactionMarksAPWriteIndeterminateWhenBarrierFails(t *testin
 func TestDebugPortTransactionMarksAmbiguousOperation(t *testing.T) {
 	target := newWaitTarget()
 	transferErr := errors.New("injected transaction transport failure")
-	wire := &cleanupFailWire{inner: swdsim.New(target), err: transferErr, failBits: 42}
+	wire := &cleanupFailWire{inner: swdsim.New(target), err: transferErr, failBits: 54}
 	conn := swd.New(wire)
 	dp := dap.NewDebugPort(conn)
 	if _, err := dp.Connect(t.Context()); err != nil {

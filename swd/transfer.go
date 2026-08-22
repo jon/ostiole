@@ -3,28 +3,32 @@ package swd
 import (
 	"context"
 	"errors"
+	"fmt"
 )
 
-// ReadDP reads one debug-port register without retrying. addr must be 0x00,
-// 0x04, 0x08, or 0x0c.
+// ReadDP reads one debug-port register without retrying. Connect must have
+// succeeded, and addr must be 0x00, 0x04, 0x08, or 0x0c.
 func (c *Conn) ReadDP(ctx context.Context, addr uint8) (uint32, error) {
 	return c.read(ctx, false, addr)
 }
 
-// WriteDP writes one debug-port register without retrying. addr must be 0x00,
-// 0x04, 0x08, or 0x0c.
+// WriteDP writes one debug-port register without retrying. Connect must have
+// succeeded, and addr must be 0x00, 0x04, 0x08, or 0x0c. A bank-zero write at
+// 0x04 must preserve connection-owned ORUNDETECT. Release restores the
+// inherited ORUNDETECT setting but does not restore other CTRL/STAT bits changed
+// by the caller.
 func (c *Conn) WriteDP(ctx context.Context, addr uint8, value uint32) error {
 	return c.write(ctx, false, addr, value)
 }
 
-// ReadAP reads one access-port register without retrying. addr must be 0x00,
-// 0x04, 0x08, or 0x0c.
+// ReadAP reads one access-port register without retrying. Connect must have
+// succeeded, and addr must be 0x00, 0x04, 0x08, or 0x0c.
 func (c *Conn) ReadAP(ctx context.Context, addr uint8) (uint32, error) {
 	return c.read(ctx, true, addr)
 }
 
-// WriteAP writes one access-port register without retrying. addr must be 0x00,
-// 0x04, 0x08, or 0x0c.
+// WriteAP writes one access-port register without retrying. Connect must have
+// succeeded, and addr must be 0x00, 0x04, 0x08, or 0x0c.
 func (c *Conn) WriteAP(ctx context.Context, addr uint8, value uint32) error {
 	return c.write(ctx, true, addr, value)
 }
@@ -50,6 +54,44 @@ func (c *Conn) transfer(ctx context.Context, req request, value uint32) (uint32,
 	if c == nil {
 		return 0, errors.New("swd: nil connection")
 	}
+	if c.state != connectionReady {
+		return 0, errors.New("swd: connection is not ready; call Connect")
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if err := c.validateTransfer(req, value); err != nil {
+		return 0, err
+	}
+	result, err := c.execute(ctx, req, value)
+	c.observeTransfer(req, result, value, err)
+	return result, err
+}
+
+func (c *Conn) execute(ctx context.Context, req request, value uint32) (uint32, error) {
+	result, err := c.transferFrame(ctx, req, value)
+	if c.response != responseOverrun || err != ErrWait {
+		return result, err
+	}
+	if isAbortWrite(req) {
+		c.requireRepair()
+		return result, errors.Join(err, errors.New("swd: ABORT returned WAIT; STICKYORUN cleanup is unavailable"))
+	}
+	abort, requestErr := newRequest(false, false, 0x00)
+	if requestErr != nil {
+		panic(requestErr)
+	}
+	if _, cleanupErr := c.transferFrame(ctx, abort, 1<<4); cleanupErr != nil {
+		c.requireRepair()
+		return 0, errors.Join(err, fmt.Errorf("swd: clear STICKYORUN after WAIT: %w", cleanupErr))
+	}
+	if c.selectPending {
+		c.requireRepair()
+	}
+	return result, err
+}
+
+func (c *Conn) transferFrame(ctx context.Context, req request, value uint32) (uint32, error) {
 	if c.response == responseOverrun {
 		return c.transferOverrun(ctx, req, value)
 	}
@@ -68,6 +110,99 @@ func (c *Conn) transfer(ctx context.Context, req request, value uint32) (uint32,
 		return c.readData(ctx)
 	}
 	return 0, c.writeData(ctx, value)
+}
+
+func (c *Conn) validateTransfer(req request, value uint32) error {
+	if req.isAP() || req.isRead() || req.address() != 0x04 {
+		return nil
+	}
+	if c.selectPending || !c.bank.valid {
+		return errors.New("swd: DP bank is unknown before write at address 0x04")
+	}
+	if c.bank.bank == 0 {
+		enabled := value&1 != 0
+		if enabled != (c.response == responseOverrun) {
+			return errors.New("swd: CTRL/STAT.ORUNDETECT is owned by the connection")
+		}
+	}
+	if c.bank.bank == 1 && value&(3<<8) != 0 {
+		return errors.New("swd: DLCR turnaround changes are not supported")
+	}
+	return nil
+}
+
+func (c *Conn) observeTransfer(req request, result, data uint32, err error) {
+	if !completeTransfer(err) {
+		c.requireRepair()
+		return
+	}
+	if c.selectPending {
+		c.observePendingSelection(req, result, err)
+	}
+	if !req.isAP() && !req.isRead() && req.address() == 0x08 && err == nil {
+		c.priorBank = c.bank
+		c.bank = bankSelection{bank: uint8(data & 0x0f), valid: true}
+		c.selectPending = true
+	}
+}
+
+func (c *Conn) observePendingSelection(req request, result uint32, err error) {
+	switch {
+	case isAbortWrite(req):
+		if err == nil {
+			c.invalidateBank()
+		}
+	case isDPIDRRead(req):
+	case isBankZeroCTRLSTATRead(req, c.bank, c.priorBank):
+		c.resolveBankZeroCTRLSTAT(result, err)
+	case err == nil || err == ErrWait || err == ErrParity:
+		c.confirmBank()
+	}
+}
+
+func (c *Conn) resolveBankZeroCTRLSTAT(result uint32, err error) {
+	if err != nil {
+		return
+	}
+	if result&writeDataErr != 0 {
+		c.invalidateBank()
+		return
+	}
+	c.confirmBank()
+}
+
+func isAbortWrite(req request) bool {
+	return !req.isAP() && !req.isRead() && req.address() == 0x00
+}
+
+func isDPIDRRead(req request) bool {
+	return !req.isAP() && req.isRead() && req.address() == 0x00
+}
+
+func isBankZeroCTRLSTATRead(req request, bank, prior bankSelection) bool {
+	return !req.isAP() && req.isRead() && req.address() == 0x04 && bank.valid && bank.bank == 0 && prior.valid && prior.bank == 0
+}
+
+func completeTransfer(err error) bool {
+	return err == nil || err == ErrWait || err == ErrFault || err == ErrParity
+}
+
+func (c *Conn) confirmBank() {
+	c.priorBank = bankSelection{}
+	c.selectPending = false
+}
+
+func (c *Conn) invalidateBank() {
+	c.bank = bankSelection{}
+	c.confirmBank()
+}
+
+func (c *Conn) requireRepair() {
+	if c == nil || c.state == connectionIdle {
+		return
+	}
+	c.state = connectionRepair
+	c.invalidateBank()
 }
 
 func (c *Conn) transferOverrun(ctx context.Context, req request, value uint32) (uint32, error) {
@@ -127,7 +262,11 @@ func ackError(ack byte) error {
 
 func (c *Conn) finishFailed(ctx context.Context, ackErr error) error {
 	finish := &sequence{}
-	finish.appendN(c.turnaround, false, false)
+	if ackErr == ErrProtocol {
+		finish.appendN(33+c.turnaround, false, false)
+	} else {
+		finish.appendN(c.turnaround, false, false)
+	}
 	finish.appendN(c.idleCycles, true, false)
 	if _, err := c.exchange(ctx, finish); err != nil {
 		return errors.Join(ackErr, err)

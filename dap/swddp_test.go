@@ -28,7 +28,11 @@ func TestImmediateDebugPortAccess(t *testing.T) {
 	}
 
 	const requests = uint32(1<<28 | 1<<30)
-	if err := dp.WriteDP(ctx, dap.CTRLSTAT, requests); err != nil {
+	state, err := dp.ReadDP(ctx, dap.CTRLSTAT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dp.WriteDP(ctx, dap.CTRLSTAT, state|requests); err != nil {
 		t.Fatal(err)
 	}
 	value, err = dp.ReadDP(ctx, dap.CTRLSTAT)

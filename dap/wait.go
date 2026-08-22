@@ -182,9 +182,9 @@ func (dp *DebugPort) finishRetryError(req transferRequest, value uint32, err err
 
 func (dp *DebugPort) handleFault(req transferRequest, apWork bool) error {
 	fault := &FaultError{}
-	if dp.state.response != responseSimple || !dp.state.faultBankZero() {
+	if !dp.state.responseKnown() || !dp.state.faultBankZero() {
 		dp.state.loseFraming()
-		return errors.Join(fault, errors.New("dap: cannot read CTRL/STAT after FAULT without the simple response grammar and a known bank-zero selection"))
+		return errors.Join(fault, errors.New("dap: cannot read CTRL/STAT after FAULT without a known response grammar and bank-zero selection"))
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), waitRecoveryTimeout)
@@ -263,11 +263,10 @@ func (dp *DebugPort) validateWait(req transferRequest, err error) error {
 		return cause
 	}
 	if err == swd.ErrWait {
-		if dp.state.response == responseSimple {
+		if dp.state.responseKnown() {
 			return nil
 		}
-		cause := fmt.Errorf("dap: cannot retry WAIT until CTRL/STAT.ORUNDETECT is confirmed clear: %w", err)
-		return dp.invalidateWait(cause)
+		return dp.invalidateWait(fmt.Errorf("dap: cannot retry WAIT with unknown response framing: %w", err))
 	}
 	return dp.invalidateWait(fmt.Errorf("dap: complete WAIT response: %w", err))
 }
@@ -333,10 +332,7 @@ func (dp *DebugPort) restoreAfterAbort(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("dap: read sticky state after DAP abort: %w", err)
 	}
-	dp.state.confirmResponse(state)
-	if dp.state.response != responseSimple {
-		return errors.New("dap: CTRL/STAT.ORUNDETECT became enabled during DAP abort recovery")
-	}
+	dp.confirmResponse(state)
 	clear := stickyClearForState(state, dp.identity.Minimal)
 	if clear != 0 {
 		if _, err := dp.transferOnce(ctx, dpTransferRequest(ABORT, false), clear); err != nil {
@@ -347,14 +343,6 @@ func (dp *DebugPort) restoreAfterAbort(ctx context.Context) error {
 		return fmt.Errorf("dap: restore SELECT after DAP abort: %w", err)
 	}
 	return nil
-}
-
-func supportedStickyClear(minimal bool) uint32 {
-	clear := clearStickyError | clearWriteDataError | clearStickyOverrun
-	if !minimal {
-		clear |= clearStickyCompare
-	}
-	return clear
 }
 
 func supportedStickyState(minimal bool) uint32 {

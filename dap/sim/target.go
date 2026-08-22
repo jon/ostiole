@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/jon/ostiole/dap"
+	"github.com/jon/ostiole/swd"
 	swdsim "github.com/jon/ostiole/swd/sim"
 )
 
@@ -20,6 +21,7 @@ const (
 	stickyCompare  = uint32(1 << 4)
 	stickyError    = uint32(1 << 5)
 	writeDataError = uint32(1 << 7)
+	overrunDetect  = uint32(1 << 0)
 
 	debugPowerRequest  = uint32(1 << 28)
 	debugPowerAck      = uint32(1 << 29)
@@ -49,6 +51,72 @@ type accessPort struct {
 // New returns an SW-DP target with the supplied identity.
 func New(dpidr uint32) *Target {
 	return &Target{dpidr: dpidr, aps: make(map[dap.APSel]*accessPort)}
+}
+
+// SetOverrunDetect changes the simulated CTRL/STAT.ORUNDETECT bit.
+func (t *Target) SetOverrunDetect(enabled bool) {
+	if t == nil {
+		return
+	}
+	if enabled {
+		t.ctrlStat |= overrunDetect
+		return
+	}
+	t.ctrlStat &^= overrunDetect
+}
+
+// OverrunDetectEnabled reports the simulated CTRL/STAT.ORUNDETECT bit.
+func (t *Target) OverrunDetectEnabled() bool {
+	return t != nil && t.ctrlStat&overrunDetect != 0
+}
+
+// ObserveResponse records STICKYORUN after a non-OK acknowledgement while
+// overrun detection is active.
+func (t *Target) ObserveResponse(err error) {
+	if t != nil && err != nil && t.OverrunDetectEnabled() {
+		t.ctrlStat |= stickyOverrun
+	}
+}
+
+// ObserveLineReset applies the simulated DLCR and STICKYORUN effects of a line reset.
+func (t *Target) ObserveLineReset() {
+	if t == nil {
+		return
+	}
+	t.dpBanks[1] = 0
+	if t.OverrunDetectEnabled() {
+		t.ctrlStat |= stickyOverrun
+	}
+}
+
+// Acknowledge returns FAULT for ordinary requests while the simulated debug
+// port has sticky state. DPIDR, bank-zero CTRL/STAT, and ABORT remain available
+// for recovery.
+func (t *Target) Acknowledge(ctx context.Context, req swdsim.Request) error {
+	if t == nil {
+		return errors.New("dap/sim: nil target")
+	}
+	if req.Addr&3 != 0 || req.Addr > 0x0c {
+		return errors.New("dap/sim: invalid request")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	sticky := stickyOverrun | stickyCompare | stickyError | writeDataError
+	if t.ctrlStat&sticky == 0 || isStickyExempt(req, t.selectDP) {
+		return nil
+	}
+	return swd.ErrFault
+}
+
+func isStickyExempt(req swdsim.Request, selectDP uint32) bool {
+	if req.AP {
+		return false
+	}
+	if !req.Read {
+		return req.Addr == uint8(0x00)
+	}
+	return req.Addr == uint8(0x00) || req.Addr == uint8(0x04) && selectDP&0x0f == 0
 }
 
 // SetDPRegister sets one simulated banked debug-port register.
@@ -265,8 +333,9 @@ func (t *Target) clearSticky(value uint32) {
 func (t *Target) setPower(value uint32) {
 	sticky := t.ctrlStat & (stickyOverrun | stickyCompare |
 		stickyError | writeDataError)
-	requests := value & (debugPowerRequest | systemPowerRequest)
-	t.ctrlStat = sticky | requests
+	control := value & (overrunDetect | debugPowerRequest | systemPowerRequest)
+	requests := control & (debugPowerRequest | systemPowerRequest)
+	t.ctrlStat = sticky | control
 	if requests&debugPowerRequest != 0 {
 		t.ctrlStat |= debugPowerAck
 	}

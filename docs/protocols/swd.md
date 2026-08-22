@@ -76,7 +76,9 @@ has re-established SWD framing.
 
 FAULT means that a sticky error has been recorded. It is not a transient
 response to retry. An acknowledgement other than OK, WAIT, or FAULT is a
-protocol error, not a fourth response code.
+protocol error, not a fourth response code. When no valid response is detected,
+the host leaves SWDIO undriven for at least the possible data phase before it
+tries a line reset.
 
 Once the response grammar is known, a complete FAULT response after one or
 more WAITs still ends at a request boundary. Return FAULT without DAPABORT;
@@ -92,14 +94,17 @@ acknowledgement, data phase, turnaround, and idle clocks as one unit.
 
 In overrun mode, WAIT sets STICKYORUN and later requests can be abandoned. The
 host clears STICKYORUN through ABORT before retrying the exact request which
-returned WAIT. Leaving ORUNDETECT set while changing back to the simpler
-grammar has the same alignment problem in reverse: clear STICKYORUN first,
-write CTRL/STAT using the current grammar, and read RDBUFF before changing the
-host-side grammar. RDBUFF returns WAIT while the write remains buffered, so
-the host repeats that read using the old grammar. OK proves that the write data
-was accepted even if its unused read data has bad parity; a WDATAERR FAULT
-means the old ORUNDETECT value still applies. Cancellation or retry exhaustion
-before one of those outcomes leaves the response grammar unknown.
+returned WAIT. If SELECT was still buffered when that request returned WAIT,
+however, the ABORT can abandon SELECT and set WDATAERR; the requested selection
+is no longer established. Leaving ORUNDETECT set while changing back to the
+simpler grammar has the same alignment problem in reverse: clear STICKYORUN
+first, write CTRL/STAT using the current grammar, and read RDBUFF before
+changing the host-side grammar. RDBUFF returns WAIT while the write remains
+buffered, so the host repeats that read using the old grammar. OK proves that
+the write data was accepted even if its unused read data has bad parity; a
+WDATAERR FAULT means the old ORUNDETECT value still applies. Cancellation or
+retry exhaustion before one of those outcomes leaves the response grammar
+unknown.
 
 A host must establish which grammar applies before it starts replaying
 requests which return WAIT. CTRL/STAT reads cannot return WAIT or FAULT, but
@@ -136,6 +141,9 @@ IHI 0031H section B4.3.3 defines connection and line reset. A line reset is at
 least 50 clocks with SWDIO high followed by at least two idle clocks. It puts
 the SWD interface into its reset state; it is not a reset of every DP
 register. DPIDR is the ordinary transaction which leaves that state.
+
+Line reset also resets DLCR. If ORUNDETECT was already set, the reset records
+STICKYORUN, so bootstrap has sticky state to clear before ordinary traffic.
 
 There is a slightly nasty qualification in section B4.3.3: detection of the
 50-high sequence is guaranteed while the target is waiting for a packet
@@ -206,27 +214,32 @@ acknowledgements. The counter did not include the separate raw DPIDR test.
 Ordinary traffic on this target therefore did not exercise WAIT or abort
 recovery.
 
-## Induced FAULT, 2026-08-11
+## Automatic overrun responses and an induced FAULT, 2026-08-22
 
-I repeated the macOS FT232H test with one deliberate change: a wire wrapper
-inverted the parity bit of a same-value SELECT write after the request had
-received OK. The target set WDATAERR. Its next ordinary request returned
-FAULT. A following CTRL/STAT read showed that WDERRCLR cleared WDATAERR, and
-the same AP access completed normally.
+I ran the serialized macOS FT232H and Cortex-M tests with each SWD connection
+trying to enable ORUNDETECT. One wire wrapper inverted the parity bit of a
+same-value SELECT write after the request had received OK. The target set
+WDATAERR. Its next request returned FAULT using the fixed overrun-response
+frame. CTRL/STAT read `0xf00000c3`, recording WDATAERR and STICKYORUN. A
+following CTRL/STAT read showed both conditions clear after WDERRCLR and
+ORUNERRCLR, and the same AP access completed.
 
 The complete command was:
 
 ```sh
-OSTIOLE_FTDI_HIL=1 OSTIOLE_FTDI_HIL_FAULT=1 \
-  go test -count=1 -p 1 -tags=integration -v ./swd ./dap
+OSTIOLE_FT232H_DARWIN_HIL=1 OSTIOLE_FTDI_HIL=1 \
+  OSTIOLE_FTDI_HIL_FAULT=1 \
+  go test -count=1 -p 1 -tags=integration -v \
+  ./ftdi ./swd ./dap ./target/cortexm ./cmd/ost/internal/app
 ```
 
-Across the five DAP hardware tests the harness counted 82 OK responses, one
-FAULT, no WAIT, and no invalid acknowledgement. Both power-request bits were
-already set and remained set, so this count is not directly comparable with
-the earlier run where connection ownership differed. The induced case
-demonstrates the target's write-parity and sticky-FAULT path. It does not
-manufacture an ACK in the probe and it still is not a waveform capture.
+Across the seven DAP hardware tests the harness counted 194 OK responses, one
+FAULT, no WAIT, and no invalid acknowledgements. Of those requests, 131 used
+fixed overrun-response frames. The direct SWD, DAP, MEM-AP, Cortex-M, and
+command paths completed, and every release restored the connection's inherited
+ORUNDETECT setting. The induced case demonstrates this target's write-parity,
+fixed-frame FAULT, and sticky cleanup path. It does not manufacture an ACK in
+the probe and it still is not a waveform capture.
 
 Measuring turnaround requires a capture of SWCLK, SWDIO, and the FTDI
 direction pin. A real WAIT still requires a target which can be made to stall;

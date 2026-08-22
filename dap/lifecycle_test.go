@@ -89,6 +89,19 @@ func TestConnectRepairsFailedInitialProtocolEntry(t *testing.T) {
 	}
 }
 
+func TestCanceledConnectSendsNoTraffic(t *testing.T) {
+	wire := &entryFailureWire{inner: swdsim.New(sim.New(0x2ba01477))}
+	dp := dap.NewDebugPort(swd.New(wire))
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := dp.Connect(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Connect() error = %v, want context cancellation", err)
+	}
+	if wire.calls != 0 {
+		t.Fatalf("canceled Connect() sent %d wire calls", wire.calls)
+	}
+}
+
 func TestFailedInitialEntryRepairLeavesCleanupPending(t *testing.T) {
 	entryErr := errors.New("injected protocol-entry failure")
 	repairErr := errors.New("injected protocol-entry repair failure")
@@ -243,27 +256,40 @@ func TestConnectReadsIdentityBeforeConfiguration(t *testing.T) {
 	}
 }
 
-func TestConnectRejectsEnabledOverrunDetectionBeforeConfiguration(t *testing.T) {
-	target := &powerTarget{
-		dpidr:  0x2ba01477,
-		ctrl:   overrunDetect,
-		dpBank: 1,
-	}
+func TestConnectPreservesInheritedOverrunDetection(t *testing.T) {
+	target := sim.New(0x2ba01477)
+	target.SetOverrunDetect(true)
 	dp := newDebugPort(t, target)
-	if _, err := dp.Connect(t.Context()); err == nil {
-		t.Fatal("Connect() succeeded with ORUNDETECT enabled")
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
 	}
-	if len(target.selectValues) != 2 || target.selectValues[0] != 0 || target.selectValues[1] != 0 {
-		t.Fatalf("SELECT writes while rejecting and repairing ORUNDETECT = %#v, want two bank-zero writes", target.selectValues)
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatal(err)
 	}
-	if len(target.abortValues) != 2 || target.abortValues[0] != 0x1e || target.abortValues[1] != 0x1e ||
-		target.ctrl != overrunDetect {
-		t.Fatalf("state after rejecting and repairing ORUNDETECT: ABORT=%#v CTRL/STAT=%#08x", target.abortValues, target.ctrl)
+	if !target.OverrunDetectEnabled() {
+		t.Fatal("Release() cleared inherited ORUNDETECT")
 	}
 }
 
-func TestWriteDPRejectsEnablingOverrunDetection(t *testing.T) {
-	target := &powerTarget{dpidr: 0x2ba01477}
+func TestConnectAcquiresAndRestoresOverrunDetection(t *testing.T) {
+	target := sim.New(0x2ba01477)
+	dp := newDebugPort(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !target.OverrunDetectEnabled() {
+		t.Fatal("Connect() left ORUNDETECT clear")
+	}
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if target.OverrunDetectEnabled() {
+		t.Fatal("Release() left acquired ORUNDETECT set")
+	}
+}
+
+func TestDebugPortRejectsOverrunChangesBeforeTraffic(t *testing.T) {
+	target := newWaitTarget()
 	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -272,17 +298,17 @@ func TestWriteDPRejectsEnablingOverrunDetection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := dp.WriteDP(t.Context(), dap.CTRLSTAT, state|overrunDetect); err == nil {
-		t.Fatal("WriteDP() accepted unsupported ORUNDETECT")
+	before := len(target.requests)
+	if err := dp.WriteDP(t.Context(), dap.CTRLSTAT, state&^overrunDetect); err == nil {
+		t.Fatal("WriteDP(CTRLSTAT) changed connection-owned ORUNDETECT")
 	}
-	if target.ctrl&overrunDetect != 0 {
-		t.Fatalf("CTRL/STAT after rejected write = %#08x, want ORUNDETECT clear", target.ctrl)
+	txn := dp.NewTxn()
+	write := txn.WriteDP(dap.CTRLSTAT, state&^overrunDetect)
+	if err := txn.Commit(t.Context()); err == nil || write.Err() == nil {
+		t.Fatal("Txn.WriteDP(CTRLSTAT) changed connection-owned ORUNDETECT")
 	}
-	if err := dp.Release(t.Context()); err != nil {
-		t.Fatalf("Release() after rejected write: %v", err)
-	}
-	if target.ctrl&allPower != 0 {
-		t.Fatalf("power state after release = %#08x, want 0", target.ctrl)
+	if got := len(target.requests); got != before {
+		t.Fatalf("rejected ORUNDETECT writes sent %d requests", got-before)
 	}
 }
 

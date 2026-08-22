@@ -29,7 +29,7 @@ func openSWD(ctx context.Context) (*swdSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := session.connection.JTAGToSWD(ctx); err != nil {
+	if _, err := session.connection.Connect(ctx); err != nil {
 		return nil, errors.Join(err, session.close())
 	}
 	return session, nil
@@ -60,7 +60,9 @@ func (s *swdSession) close() error {
 	if s == nil || s.channel == nil {
 		return nil
 	}
-	return s.channel.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	return errors.Join(s.connection.Release(ctx), s.channel.Close())
 }
 
 func openDAP(ctx context.Context) (*dapSession, error) {
