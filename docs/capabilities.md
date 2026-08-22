@@ -62,7 +62,8 @@ wires its MPSSE port for debugging.
 | Overrun response framing | Yes | A connected target with ORUNDETECT set uses one fixed request, acknowledgement, data, turnaround, and idle frame. WAIT and FAULT include the data phase. |
 | Read parity | Yes | Invalid read parity is reported. |
 | Automatic retries | No | A raw register call does not replay the requested transaction. In overrun mode it clears STICKYORUN before returning WAIT; retry policy belongs to the caller. |
-| Batching or pipelining | No | Each call executes one complete transaction. |
+| Ordered raw queue | Yes | `swd.Batch` validates all queued DP/AP operations before traffic, sends them in order, resolves direction-specific results, and never replays the operation which first fails. |
+| Batching or pipelining | No | The ordered queue still executes one complete transaction at a time. |
 | Multidrop or dormant state | No | The public connection models one entered SWD target. |
 | Behavioral simulation | Yes | Protocol entry and line-reset effects, live overrun response grammar, DP/AP register transfers, and request-phase WAIT or FAULT injection. |
 | Physical DPIDR read | HIL | Opt-in FTDI test and trivial example on Linux and macOS. |
