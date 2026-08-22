@@ -94,6 +94,10 @@ func (s *debugPortState) confirmResponse(state uint32) {
 	s.response = responseOverrun
 }
 
+func (s *debugPortState) responseKnown() bool {
+	return s.response == responseSimple || s.response == responseOverrun
+}
+
 func (s *debugPortState) invalidateAP() {
 	s.apGeneration++
 }

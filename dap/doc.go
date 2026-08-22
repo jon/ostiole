@@ -24,7 +24,9 @@
 // invalidates existing MemAP values.
 //
 // Public DP, AP, transaction, and MEM-AP operations require a successful
-// Connect.
+// Connect. The underlying SWD connection establishes the simple or fixed
+// response grammar, tries to enable ORUNDETECT, and restores that change during
+// Release. DAP operations must preserve that bit.
 //
 // A failed Connect attempts bounded cleanup before returning. If that cleanup
 // also fails, Release remains available but other debug-port and access-port

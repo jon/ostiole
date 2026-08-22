@@ -16,6 +16,62 @@ type targetWire struct {
 	cleanupErr    error
 }
 
+type fixedWire struct {
+	ack           byte
+	readValue     uint32
+	corruptParity bool
+	nonOKParity   bool
+	request       request
+	written       uint32
+	calls         int
+}
+
+func readyConn(w Wire) *Conn {
+	c := New(w)
+	c.state = connectionReady
+	c.bank = bankSelection{valid: true}
+	return c
+}
+
+func (w *fixedWire) SWDIO(_ context.Context, direction, output []byte, bits int) ([]byte, error) {
+	w.calls++
+	if bits != 54 || !allTestBits(direction, 0, 8, true) || !allTestBits(direction, 8, 12, false) {
+		return nil, errors.New("invalid fixed frame")
+	}
+	header := output[0]
+	w.request = mustRequest(header&0x02 != 0, header&0x04 != 0, (header>>1)&0x0c)
+	input := make([]byte, (bits+7)/8)
+	for bit := range 3 {
+		setTestBit(input, 9+bit, w.ack>>uint(bit)&1 != 0)
+	}
+	if w.ack != 0b001 {
+		setTestBit(input, 44, w.nonOKParity)
+		return input, nil
+	}
+	if w.request.isRead() {
+		if !allTestBits(direction, 12, 46, false) || !allTestBits(direction, 46, 54, true) {
+			return nil, errors.New("invalid fixed read direction")
+		}
+		for bit := range 32 {
+			setTestBit(input, 12+bit, w.readValue>>uint(bit)&1 != 0)
+		}
+		setTestBit(input, 44, testParity32(w.readValue) != w.corruptParity)
+		return input, nil
+	}
+	if !allTestBits(direction, 12, 13, false) || !allTestBits(direction, 13, 54, true) {
+		return nil, errors.New("invalid fixed write direction")
+	}
+	for bit := range 32 {
+		if testBit(output, 13+bit) {
+			w.written |= 1 << uint(bit)
+		}
+	}
+	if testBit(output, 45) != testParity32(w.written) {
+		return nil, errors.New("invalid fixed write parity")
+	}
+	return input, nil
+}
+
 func (w *targetWire) SWDIO(_ context.Context, direction, output []byte, bits int) ([]byte, error) {
 	w.calls++
 	if w.calls == 1 {
@@ -50,7 +106,10 @@ func (w *targetWire) requestPhase(direction, output []byte, bits int) ([]byte, e
 
 func (w *targetWire) dataPhase(direction, output []byte, bits int) ([]byte, error) {
 	if w.ack != 0b001 {
-		if bits != 9 || !allTestBits(direction, 1, 9, true) {
+		if w.ack == 0 && (bits != 42 || !allTestBits(direction, 0, 34, false) || !allTestBits(direction, 34, 42, true)) {
+			return nil, errors.New("invalid protocol-error recovery")
+		}
+		if w.ack != 0 && (bits != 9 || !allTestBits(direction, 1, 9, true)) {
 			return nil, errors.New("invalid failed-ACK cleanup")
 		}
 		if w.cleanupErr != nil {
@@ -99,7 +158,7 @@ func (w *targetWire) writePhase(direction, output []byte, bits int) ([]byte, err
 
 func TestTransferReadsAndWritesOneRegister(t *testing.T) {
 	readWire := &targetWire{ack: 0b001, readValue: 0x2ba01477}
-	got, err := New(readWire).ReadDP(t.Context(), 0x00)
+	got, err := readyConn(readWire).ReadDP(t.Context(), 0x00)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +171,7 @@ func TestTransferReadsAndWritesOneRegister(t *testing.T) {
 
 	writeWire := &targetWire{ack: 0b001}
 	const written = 0x12345678
-	if err := New(writeWire).WriteAP(t.Context(), 0x0c, written); err != nil {
+	if err := readyConn(writeWire).WriteAP(t.Context(), 0x0c, written); err != nil {
 		t.Fatal(err)
 	}
 	if writeWire.written != written || writeWire.calls != 2 {
@@ -123,7 +182,7 @@ func TestTransferReadsAndWritesOneRegister(t *testing.T) {
 	}
 
 	apReadWire := &targetWire{ack: 0b001}
-	if _, err := New(apReadWire).ReadAP(t.Context(), 0x08); err != nil {
+	if _, err := readyConn(apReadWire).ReadAP(t.Context(), 0x08); err != nil {
 		t.Fatal(err)
 	}
 	if apReadWire.request != mustRequest(true, true, 0x08) {
@@ -131,11 +190,75 @@ func TestTransferReadsAndWritesOneRegister(t *testing.T) {
 	}
 
 	dpWriteWire := &targetWire{ack: 0b001}
-	if err := New(dpWriteWire).WriteDP(t.Context(), 0x04, written); err != nil {
+	if err := readyConn(dpWriteWire).WriteDP(t.Context(), 0x04, written); err != nil {
 		t.Fatal(err)
 	}
 	if dpWriteWire.request != mustRequest(false, false, 0x04) {
 		t.Fatalf("WriteDP() request = %#v", dpWriteWire.request)
+	}
+}
+
+func TestTransferClocksFixedOverrunFrames(t *testing.T) {
+	readWire := &fixedWire{ack: 0b001, readValue: 0x2ba01477}
+	readConn := readyConn(readWire)
+	readConn.response = responseOverrun
+	got, err := readConn.ReadDP(t.Context(), 0x00)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != readWire.readValue || readWire.calls != 1 {
+		t.Fatalf("fixed read = %#08x after %d calls", got, readWire.calls)
+	}
+
+	writeWire := &fixedWire{ack: 0b001}
+	writeConn := readyConn(writeWire)
+	writeConn.response = responseOverrun
+	const written = 0x12345678
+	if err := writeConn.WriteAP(t.Context(), 0x0c, written); err != nil {
+		t.Fatal(err)
+	}
+	if writeWire.written != written || writeWire.calls != 1 {
+		t.Fatalf("fixed write = %#08x after %d calls", writeWire.written, writeWire.calls)
+	}
+}
+
+func TestTransferClocksDataPhaseAfterOverrunError(t *testing.T) {
+	for _, test := range []struct {
+		ack  byte
+		want error
+	}{
+		{ack: 0b010, want: ErrWait},
+		{ack: 0b100, want: ErrFault},
+		{ack: 0b000, want: ErrProtocol},
+	} {
+		wire := &fixedWire{ack: test.ack, nonOKParity: true}
+		conn := readyConn(wire)
+		conn.response = responseOverrun
+		if _, err := conn.ReadDP(t.Context(), 0x00); !errors.Is(err, test.want) {
+			t.Fatalf("ACK %03b error = %v, want %v", test.ack, err, test.want)
+		}
+		wantCalls := 1
+		if test.want == ErrWait {
+			wantCalls = 2
+		}
+		if wire.calls != wantCalls {
+			t.Fatalf("ACK %03b used %d wire calls, want %d", test.ack, wire.calls, wantCalls)
+		}
+		if test.want == ErrProtocol {
+			before := wire.calls
+			if _, err := conn.ReadDP(t.Context(), 0x00); err == nil || wire.calls != before {
+				t.Fatalf("fixed ReadDP() after invalid ACK error = %v after %d new calls", err, wire.calls-before)
+			}
+		}
+	}
+}
+
+func TestTransferChecksFixedReadParityAfterOK(t *testing.T) {
+	wire := &fixedWire{ack: 0b001, readValue: 0x2ba01477, corruptParity: true}
+	conn := readyConn(wire)
+	conn.response = responseOverrun
+	if _, err := conn.ReadDP(t.Context(), 0x00); !errors.Is(err, ErrParity) {
+		t.Fatalf("fixed read error = %v, want parity error", err)
 	}
 }
 
@@ -150,9 +273,19 @@ func TestTransferClassifiesAcknowledgements(t *testing.T) {
 	}
 	for _, test := range tests {
 		w := &targetWire{ack: test.ack}
-		_, err := New(w).ReadDP(t.Context(), 0x00)
+		conn := readyConn(w)
+		_, err := conn.ReadDP(t.Context(), 0x00)
 		if !errors.Is(err, test.want) {
 			t.Fatalf("ACK %03b error = %v", test.ack, err)
+		}
+		if test.want == ErrProtocol {
+			if err != ErrProtocol {
+				t.Fatalf("invalid ACK error = %v, want protocol error without recovery failure", err)
+			}
+			before := w.calls
+			if _, err := conn.ReadDP(t.Context(), 0x00); err == nil || w.calls != before {
+				t.Fatalf("ReadDP() after invalid ACK error = %v after %d new calls", err, w.calls-before)
+			}
 		}
 	}
 }
@@ -160,7 +293,7 @@ func TestTransferClassifiesAcknowledgements(t *testing.T) {
 func TestTransferPreservesAcknowledgementWhenCleanupFails(t *testing.T) {
 	cleanupErr := errors.New("injected cleanup failure")
 	w := &targetWire{ack: 0b010, cleanupErr: cleanupErr}
-	_, err := New(w).ReadDP(t.Context(), 0x00)
+	_, err := readyConn(w).ReadDP(t.Context(), 0x00)
 	if !errors.Is(err, ErrWait) || !errors.Is(err, cleanupErr) {
 		t.Fatalf("ReadDP() error = %v, want WAIT and cleanup failure", err)
 	}
@@ -172,7 +305,7 @@ func TestTransferRejectsInvalidReadParity(t *testing.T) {
 		readValue:     0x2ba01477,
 		corruptParity: true,
 	}
-	if _, err := New(w).ReadDP(t.Context(), 0x00); !errors.Is(err, ErrParity) {
+	if _, err := readyConn(w).ReadDP(t.Context(), 0x00); !errors.Is(err, ErrParity) {
 		t.Fatalf("parity error = %v", err)
 	}
 }
@@ -188,7 +321,7 @@ func TestTransferRejectsInvalidInputs(t *testing.T) {
 	if _, err := New(w).ReadDP(t.Context(), 0x01); err == nil || w.calls != 0 {
 		t.Fatalf("invalid address error = %v after %d calls", err, w.calls)
 	}
-	if _, err := New(shortWire{}).ReadDP(t.Context(), 0x00); err == nil {
+	if _, err := readyConn(shortWire{}).ReadDP(t.Context(), 0x00); err == nil {
 		t.Fatal("short lower-layer response succeeded")
 	}
 }

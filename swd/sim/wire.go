@@ -30,6 +30,23 @@ type Acknowledger interface {
 	Acknowledge(context.Context, Request) error
 }
 
+// OverrunDetector lets Wire choose the response grammar from the target's live
+// CTRL/STAT.ORUNDETECT setting.
+type OverrunDetector interface {
+	OverrunDetectEnabled() bool
+}
+
+// ResponseObserver lets Wire report the non-OK acknowledgement selected for a
+// request.
+type ResponseObserver interface {
+	ObserveResponse(error)
+}
+
+// LineResetObserver lets Wire report each SWD line-reset sequence.
+type LineResetObserver interface {
+	ObserveLineReset()
+}
+
 // Wire validates SWD traffic without physical hardware.
 type Wire struct {
 	target     Target
@@ -61,19 +78,32 @@ func (w *Wire) SWDIO(ctx context.Context, direction, output []byte, bits int) ([
 	if bits == 0 {
 		return nil, nil
 	}
-	if lineReset(direction, output, bits) ||
-		jtagToSWD(direction, output, bits) {
+	if resets := protocolEntryResets(direction, output, bits); resets != 0 {
 		w.active = true
 		w.pending = nil
+		observeLineReset(w.target, resets)
 		return make([]byte, need), nil
 	}
 	if !w.active {
 		return nil, errors.New("swd/sim: protocol entry is required")
 	}
 	if w.pending == nil {
+		if bits == 54 {
+			return w.fixed(ctx, direction, output)
+		}
 		return w.request(ctx, direction, output, bits)
 	}
 	return w.data(ctx, direction, output, bits)
+}
+
+func protocolEntryResets(direction, output []byte, bits int) int {
+	if lineReset(direction, output, bits) {
+		return 1
+	}
+	if jtagToSWD(direction, output, bits) {
+		return 2
+	}
+	return 0
 }
 
 func (w *Wire) request(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
@@ -95,6 +125,7 @@ func (w *Wire) request(ctx context.Context, direction, output []byte, bits int) 
 	}
 	w.pending = &req
 	w.pendingACK = ack
+	observeResponse(w.target, ack)
 	input := make([]byte, 2)
 	for bit := range 3 {
 		setBit(input, 9+bit, ack>>uint(bit)&1 != 0)
@@ -106,12 +137,112 @@ func (w *Wire) data(ctx context.Context, direction, output []byte, bits int) ([]
 	req := *w.pending
 	w.pending = nil
 	if w.pendingACK != 0b001 {
+		if overrunEnabled(w.target) {
+			return nil, errors.New("swd/sim: overrun response requires a data phase")
+		}
 		return failedACK(direction, output, bits)
 	}
 	if req.Read {
 		return w.read(ctx, direction, bits, req)
 	}
 	return w.write(ctx, direction, output, bits, req)
+}
+
+func (w *Wire) fixed(ctx context.Context, direction, output []byte) ([]byte, error) {
+	overrun := overrunEnabled(w.target)
+	if !allBits(direction, 0, 8, true) || !allBits(direction, 8, 4, false) {
+		return nil, errors.New("swd/sim: invalid fixed request direction")
+	}
+	req, err := decodeRequest(byteAt(output, 0))
+	if err != nil {
+		return nil, err
+	}
+	if w.target == nil {
+		return nil, errors.New("swd/sim: no target is configured")
+	}
+	if err := validateFixedDirection(req, direction); err != nil {
+		return nil, err
+	}
+	ack, err := acknowledge(ctx, w.target, req)
+	if err != nil {
+		return nil, err
+	}
+	observeResponse(w.target, ack)
+	input := make([]byte, 7)
+	for bit := range 3 {
+		setBit(input, 9+bit, ack>>uint(bit)&1 != 0)
+	}
+	if ack != 0b001 {
+		if !overrun {
+			return nil, errors.New("swd/sim: fixed response frame requires ORUNDETECT")
+		}
+		return input, nil
+	}
+	if req.Read {
+		return w.fixedRead(ctx, input, req)
+	}
+	return w.fixedWrite(ctx, output, input, req)
+}
+
+func (w *Wire) fixedRead(ctx context.Context, input []byte, req Request) ([]byte, error) {
+	value, err := w.target.Read(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	setUint32At(input, 12, value)
+	setBit(input, 44, parity32(value))
+	return input, nil
+}
+
+func (w *Wire) fixedWrite(ctx context.Context, output, input []byte, req Request) ([]byte, error) {
+	value := uint32At(output, 13)
+	if bitAt(output, 45) != parity32(value) {
+		return nil, errors.New("swd/sim: invalid fixed write-data parity")
+	}
+	return input, w.target.Write(ctx, req, value)
+}
+
+func validateFixedDirection(req Request, direction []byte) error {
+	if req.Read {
+		if !allBits(direction, 12, 34, false) || !allBits(direction, 46, 8, true) {
+			return errors.New("swd/sim: invalid fixed read direction")
+		}
+		return nil
+	}
+	if !allBits(direction, 12, 1, false) || !allBits(direction, 13, 41, true) {
+		return errors.New("swd/sim: invalid fixed write direction")
+	}
+	return nil
+}
+
+func overrunEnabled(target Target) bool {
+	detector, ok := target.(OverrunDetector)
+	return ok && detector.OverrunDetectEnabled()
+}
+
+func observeResponse(target Target, ack byte) {
+	observer, ok := target.(ResponseObserver)
+	if !ok || ack == 0b001 {
+		return
+	}
+	switch ack {
+	case 0b010:
+		observer.ObserveResponse(swd.ErrWait)
+	case 0b100:
+		observer.ObserveResponse(swd.ErrFault)
+	default:
+		observer.ObserveResponse(swd.ErrProtocol)
+	}
+}
+
+func observeLineReset(target Target, resets int) {
+	observer, ok := target.(LineResetObserver)
+	if !ok {
+		return
+	}
+	for range resets {
+		observer.ObserveLineReset()
+	}
 }
 
 func acknowledge(ctx context.Context, target Target, req Request) (byte, error) {
@@ -229,8 +360,12 @@ func setBit(buf []byte, bit int, value bool) {
 }
 
 func setUint32(buf []byte, value uint32) {
+	setUint32At(buf, 0, value)
+}
+
+func setUint32At(buf []byte, offset int, value uint32) {
 	for bit := range 32 {
-		setBit(buf, bit, value>>uint(bit)&1 != 0)
+		setBit(buf, offset+bit, value>>uint(bit)&1 != 0)
 	}
 }
 

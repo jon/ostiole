@@ -22,6 +22,26 @@ type Wire interface {
 	SWDIO(context.Context, []byte, []byte, int) ([]byte, error)
 }
 
+type responseMode uint8
+
+const (
+	responseSimple responseMode = iota
+	responseOverrun
+)
+
+type connectionState uint8
+
+const (
+	connectionIdle connectionState = iota
+	connectionReady
+	connectionRepair
+)
+
+type bankSelection struct {
+	bank  uint8
+	valid bool
+}
+
 type request struct {
 	ap   bool
 	read bool
@@ -41,17 +61,29 @@ func (r request) isRead() bool { return r.read }
 
 func (r request) address() uint8 { return r.addr }
 
-// Conn performs one serialized stream of SWD transactions over a wire. Its
-// methods are not safe for concurrent use.
+// Conn owns one serialized SWD transaction stream over a wire. Connect must
+// succeed before register access. Release restores connection-owned
+// ORUNDETECT state and may be retried after failure. Conn methods are not safe
+// for concurrent use.
 type Conn struct {
-	wire       Wire
-	turnaround int
-	idleCycles int
+	wire            Wire
+	turnaround      int
+	idleCycles      int
+	response        responseMode
+	state           connectionState
+	identity        uint32
+	identityKnown   bool
+	originalOverrun bool
+	originalKnown   bool
+	bank            bankSelection
+	priorBank       bankSelection
+	selectPending   bool
 }
 
-// New returns an SWD connection using wire. The caller must serialize all
-// calls. A higher-level client that caches protocol state requires exclusive
-// use of the connection.
+// New returns an idle SWD connection using wire. It sends no traffic. The
+// caller must call Connect before register access and Release before closing
+// the wire. A higher-level client that caches protocol state requires
+// exclusive use of the connection.
 func New(w Wire) *Conn {
 	return &Conn{wire: w, turnaround: 1, idleCycles: 8}
 }

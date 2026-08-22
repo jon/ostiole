@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/jon/ostiole/dap"
 	"github.com/jon/ostiole/ftdi"
@@ -18,6 +19,7 @@ type ackCountingWire struct {
 	inner   swd.Wire
 	counts  [8]int
 	entries int
+	fixed   int
 }
 
 type parityFaultWire struct {
@@ -26,10 +28,14 @@ type parityFaultWire struct {
 }
 
 func (w *parityFaultWire) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
-	if w.armed && bits == 42 {
+	if w.armed && (bits == 42 || bits == 54) {
 		w.armed = false
 		corrupt := append([]byte(nil), output...)
-		corrupt[33/8] ^= 1 << (33 % 8)
+		parityBit := 33
+		if bits == 54 {
+			parityBit = 45
+		}
+		corrupt[parityBit/8] ^= 1 << (parityBit % 8)
 		output = corrupt
 	}
 	return w.inner.SWDIO(ctx, direction, output, bits)
@@ -40,7 +46,10 @@ func (w *ackCountingWire) SWDIO(ctx context.Context, direction, output []byte, b
 	if err == nil && bits == 136 {
 		w.entries++
 	}
-	if err == nil && bits == 12 && len(input) >= 2 {
+	if err == nil && (bits == 12 || bits == 54) && len(input) >= 2 {
+		if bits == 54 {
+			w.fixed++
+		}
 		var ack byte
 		for bit := range 3 {
 			if input[(9+bit)/8]>>(uint(9+bit)%8)&1 != 0 {
@@ -55,6 +64,22 @@ func (w *ackCountingWire) SWDIO(ctx context.Context, direction, output []byte, b
 func openHardwareDebugPort(t *testing.T, ctx context.Context) *dap.DebugPort {
 	dp, _ := openHardwareDebugPortWithFaultWire(t, ctx)
 	return dp
+}
+
+func releaseHardwareDebugPort(t *testing.T, dp *dap.DebugPort) {
+	t.Helper()
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Second)
+	defer cleanupCancel()
+	for {
+		err := dp.Release(cleanupCtx)
+		if err == nil {
+			return
+		}
+		if cleanupCtx.Err() != nil {
+			t.Errorf("release SW-DP within cleanup deadline: %v", errors.Join(err, cleanupCtx.Err()))
+			return
+		}
+	}
 }
 
 func openHardwareDebugPortWithFaultWire(t *testing.T, ctx context.Context) (*dap.DebugPort, *parityFaultWire) {
@@ -95,8 +120,8 @@ func openHardwareDebugPortWithFaultWire(t *testing.T, ctx context.Context) (*dap
 				invalid += count
 			}
 		}
-		t.Logf("SWD entries=%d physical ACKs: OK=%d WAIT=%d FAULT=%d invalid=%d", wire.entries,
-			wire.counts[0b001], wire.counts[0b010], wire.counts[0b100], invalid)
+		t.Logf("SWD entries=%d physical ACKs: OK=%d WAIT=%d FAULT=%d invalid=%d fixed_frames=%d", wire.entries,
+			wire.counts[0b001], wire.counts[0b010], wire.counts[0b100], invalid, wire.fixed)
 	})
 	return dap.NewDebugPort(conn), faultWire
 }

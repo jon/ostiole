@@ -1,7 +1,9 @@
 package sim_test
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	dapsim "github.com/jon/ostiole/dap/sim"
 	"github.com/jon/ostiole/swd"
@@ -50,9 +52,16 @@ func TestSelectedAccessPortsRemainIndependent(t *testing.T) {
 func enteredConn(t *testing.T, target swdsim.Target) *swd.Conn {
 	t.Helper()
 	conn := swd.New(swdsim.New(target))
-	if err := conn.JTAGToSWD(t.Context()); err != nil {
+	if _, err := conn.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := conn.Release(ctx); err != nil {
+			t.Errorf("Release(): %v", err)
+		}
+	})
 	return conn
 }
 

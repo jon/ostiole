@@ -35,7 +35,7 @@ debugger service.
 | --- | --- |
 | `usb` | Enumerate, open, claim, transfer through, and close one host USB attachment. |
 | `ftdi` | Own one explicitly selected FTDI MPSSE port and expose direction-safe SWD bits. |
-| `swd` | Enter SWD mode and encode, execute, and validate individual DP/AP register transactions. |
+| `swd` | Enter SWD, establish its response grammar, and encode, execute, and validate individual DP/AP register transactions. |
 | `swd/sim` | Model SWD protocol entry and basic register transfers without hardware. |
 | `dap` | Manage SW-DP identity and power, ordered DP/AP transactions, posted AP access, and one MEM-AP view. |
 | `dap/sim` | Model the DP, AP, and target-word state consumed by `dap`. |
@@ -79,15 +79,15 @@ up and released in reverse order.
 | `*usb.Enumerator` | Holds inventory configuration, not an open attachment. |
 | `*usb.Device` | Owns one open attachment. `ClaimInterface` returns the sole owner of one interface; that value selects alternates and releases the claim. A failed release can be retried, and `Device.Close` does not close the attachment while release remains pending. |
 | `*ftdi.Channel` | Takes ownership of the USB device after `ftdi.Open` succeeds. `Close` resets bit mode, sets the latency timer to 16 ms, purges the receive and transmit paths, releases the interface, and closes the device. A failed interface release leaves the channel and device open for another `Close`. It does not preserve prior FTDI settings. |
-| `*swd.Conn` | Represents one logical SWD transaction stream over its wire. It does not own a separate host resource. Calls on a connection must be serialized. |
-| `*dap.DebugPort` | Requires exclusive use of its SWD transaction stream. `Connect` enters SWD and owns only the debug and system power requests it added. It records newly requested power bits before writing them so bounded cleanup can attempt to clear them even when the write's result is ambiguous. `Release` settles its final SELECT write through RDBUFF before reporting success. |
+| `*swd.Conn` | Owns one logical SWD transaction stream and the ORUNDETECT bit it adds. `Connect` establishes the target's response grammar and `Release` restores the inherited setting. It does not own a separate host resource. Calls must be serialized. |
+| `*dap.DebugPort` | Requires exclusive use of its SWD connection and owns only the debug and system power requests it adds. It records newly requested power bits before writing them so bounded cleanup can attempt to clear them even when the write's result is ambiguous. `Release` settles its final SELECT write through RDBUFF, releases power, then releases the SWD connection. |
 | `*dap.MemAP` | `OpenMemAP` validates the selected AP and saves its CSW and TAR. `Release` retries failed restoration; if DAPABORT interrupts cleanup, the next `Release` retries both saved values. Calls sharing the MEM-AP or its debug port must be serialized. |
 
 An application that reaches the MEM-AP layer releases the MEM-AP before the
 debug port, then closes the FTDI channel. Cleanup errors remain meaningful and
 should be joined with the operation error rather than discarded.
 
-`dap.DebugPort` caches response and register-selection state. Direct transfers
+`dap.DebugPort` caches register-selection and AP state. Direct transfers
 on its `swd.Conn` can make that cached state stale, so do not share the
 connection with another transaction owner while the debug port remains in
 use. No layer adds a mutex; serialization belongs to the composition.
@@ -101,28 +101,35 @@ already completed cleanup and retries it otherwise.
 
 The FTDI channel clocks direction-explicit bit streams. It does not interpret
 SWD requests. `swd.Conn` owns request framing, turnaround, acknowledgements,
-data parity, line reset, and the JTAG-to-SWD selection sequence.
+data parity, line reset, the JTAG-to-SWD selection sequence, and the
+CTRL/STAT.ORUNDETECT setting which selects the response grammar.
 
-`swd.Conn` separates DP and AP reads from writes and rejects an unsupported
-physical register address before sending traffic. Each call performs one
-physical transaction. A WAIT or FAULT acknowledgement is returned to its
-caller without retrying. See
+`swd.Conn.Connect` reads and validates DPIDR before configuration, clears
+supported sticky state, writes zero to SELECT, settles it through RDBUFF, then
+reads CTRL/STAT. This establishes which response grammar applies before
+ordinary register access. It keeps an inherited ORUNDETECT setting or tries to
+enable it; if the bit does not read back as set, the connection remains in
+simple mode. `Release` restores the value found by `Connect`. Register methods
+separate DP and AP reads from writes and reject an unsupported physical address
+before sending traffic. They send the requested transaction once. In overrun
+mode a returned WAIT also causes an ABORT write which clears STICKYORUN;
+retrying the request remains the caller's decision. See
 [Serial Wire Debug](protocols/swd.md) for the wire protocol and current bench
 notes.
 
-`dap.DebugPort.Connect` enters SWD before applying ADIv5 policy. Public DP, AP,
-transaction, and MEM-AP operations remain blocked until that connection is
-active. The debug port validates DPIDR, gives each
-logical DP register its architectural direction and bank, preserves the AP
-fields while changing DPBANKSEL, clears supported sticky conditions with ABORT,
-writes zero to SELECT once without retrying, confirms the write through RDBUFF,
-and rejects ORUNDETECT or a non-default DLCR turnaround because `DebugPort`
-does not yet switch response modes or turnaround lengths. It then requests
-acknowledged debug and system power, retries the exact physical request which
-returned WAIT, and completes posted AP transactions through RDBUFF. `NewAPSel`
-constructs an AP selector whose zero value is invalid. `APSel.Address` combines
-it with a complete eight-bit register address; the resulting `APAddress` also
-has an invalid zero value. `ReadAPIDR` reads and decodes the common read-only AP
+`dap.DebugPort.Connect` asks the SWD connection to enter and establish framing
+before applying ADIv5 policy. Public DP, AP, transaction, and MEM-AP operations
+remain blocked until that connection is active. The debug port validates
+DPIDR, gives each logical DP register its architectural direction and bank,
+preserves the AP fields while changing DPBANKSEL, and requests acknowledged
+debug and system power. CTRL/STAT writes preserve connection-owned ORUNDETECT,
+and a non-default DLCR turnaround remains unsupported. The debug port retries
+the exact physical request which returned WAIT and completes posted AP
+transactions through RDBUFF.
+`NewAPSel` constructs an AP selector whose zero value is invalid.
+`APSel.Address` combines it with a
+complete eight-bit register address; the resulting `APAddress` also has an
+invalid zero value. `ReadAPIDR` reads and decodes the common read-only AP
 identity. Raw AP access rejects invalid or unaligned addresses before traffic.
 Register names and effects remain specific to the selected AP class. A write
 to a MEM-AP data register can write target memory. A raw AP read or write which

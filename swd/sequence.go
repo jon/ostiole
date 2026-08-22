@@ -1,8 +1,11 @@
 // Package swd implements Serial Wire Debug framing over direction-explicit
 // wire access.
 //
-// Conn exposes separate DP and AP reads and writes. Each call validates the
-// physical register address and makes one attempt without retrying.
+// Conn enters SWD, establishes the response grammar, and exposes separate DP
+// and AP reads and writes. Connect keeps inherited ORUNDETECT or tries to
+// enable it, and uses overrun framing only if the bit reads back as set. Release
+// restores the inherited setting. Register operations validate the physical
+// address and make one attempt without retrying.
 package swd
 
 type sequence struct {

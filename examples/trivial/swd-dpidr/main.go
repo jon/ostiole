@@ -56,10 +56,12 @@ func readDPIDR(ctx context.Context) (value uint32, err error) {
 		err = errors.Join(err, ch.Close())
 	}()
 	conn := swd.New(ch)
-	if err := conn.JTAGToSWD(ctx); err != nil {
-		return 0, err
-	}
-	value, err = conn.ReadDP(ctx, 0x00)
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		err = errors.Join(err, conn.Release(cleanupCtx))
+	}()
+	value, err = conn.Connect(ctx)
 	if err != nil {
 		return 0, err
 	}

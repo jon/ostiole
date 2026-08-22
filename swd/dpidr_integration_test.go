@@ -44,10 +44,14 @@ func TestReadDPIDROverFTDI(t *testing.T) {
 	})
 
 	conn := swd.New(ch)
-	if err := conn.JTAGToSWD(ctx); err != nil {
-		t.Fatal(err)
-	}
-	dpidr, err := conn.ReadDP(ctx, 0x00)
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := conn.Release(cleanupCtx); err != nil {
+			t.Errorf("release SWD connection: %v", err)
+		}
+	})
+	dpidr, err := conn.Connect(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

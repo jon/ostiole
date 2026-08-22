@@ -93,9 +93,10 @@ func (t *Txn) ReadDP(reg DPRegister) *ReadResult {
 }
 
 // WriteDP queues one logical debug-port write. Commit settles the write through
-// RDBUFF before its WriteResult reports success. Release does not own
-// power-request bits changed this way. Rejection does not invalidate existing
-// MemAP values by itself; a completed or indeterminate DAPABORT does.
+// RDBUFF before its WriteResult reports success. CTRL/STAT writes must preserve
+// the connection-owned ORUNDETECT bit. Release does not restore power-request
+// bits changed this way. Rejection does not invalidate existing MemAP values by
+// itself; a completed or indeterminate DAPABORT does.
 func (t *Txn) WriteDP(reg DPRegister, value uint32) *WriteResult {
 	return &WriteResult{result: t.queue(txnOp{kind: txnWriteDP, dpReg: reg, data: value})}
 }
@@ -330,6 +331,7 @@ func (p *txnPlanner) lowerAP(index int, op txnOp) {
 	selection, _ := op.apSel.Value()
 	value := uint32(selection)<<24 | uint32(addr&0xf0)
 	p.selectValue(index, value)
+	p.settleSELECT(index)
 	read := op.kind == txnReadAPIDR || op.kind == txnReadRawAP
 	invalidatesAP := op.kind == txnReadRawAP || op.kind == txnWriteRawAP
 	req := apTransferRequest(addr&0x0c, read)
@@ -339,7 +341,6 @@ func (p *txnPlanner) lowerAP(index int, op txnOp) {
 		op:            index,
 		invalidatesAP: invalidatesAP,
 	})
-	p.selectPending = false
 	p.steps = append(p.steps, txnStep{
 		req:              dpTransferRequest(RDBUFF, true),
 		dpReg:            RDBUFF,
@@ -449,7 +450,8 @@ func (t *Txn) executeStep(ctx context.Context, step txnStep) (uint32, error) {
 	if !step.settlesDPWrite {
 		return t.dp.transfer(ctx, step.req, step.data)
 	}
-	return t.dp.transferDPWriteBarrier(ctx)
+	value, err := t.dp.transferDPWriteBarrier(ctx)
+	return value, err
 }
 
 func (t *Txn) resolveInvalid() {

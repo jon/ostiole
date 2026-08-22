@@ -18,7 +18,7 @@ data-register write can write target memory.
 | --- | --- | --- |
 | List USB attachments understood by the FTDI driver | `usb.New`, `ftdi.SupportedDevices`, `Enumerator.List` | `ost ftdi list` |
 | Open one FTDI MPSSE SWD port | `Enumerator.Open`, `ftdi.Open` | `examples/trivial/swd-dpidr` |
-| Enter SWD mode or transfer one DP/AP register | `swd.New`, `Conn.JTAGToSWD`, `Conn.ReadDP`, `Conn.WriteDP`, `Conn.ReadAP`, `Conn.WriteAP` | `examples/trivial/swd-dpidr` |
+| Connect SWD or transfer one DP/AP register | `swd.New`, `Conn.Connect`, `Conn.ReadDP`, `Conn.WriteDP`, `Conn.ReadAP`, `Conn.WriteAP`, `Conn.Release` | `examples/trivial/swd-dpidr` |
 | Enter SWD, decode a DPIDR, and manage SW-DP power | `dap.NewDebugPort`, `DebugPort.Connect`, `DebugPort.Release` | `ost dap dp id` |
 | Identify one explicitly selected AP | `DebugPort.ReadAPIDR`, `DecodeAPIDR` | `examples/simple/ap-id` |
 | Access another AP register by its full ADIv5 address | `DebugPort.ReadRawAP`, `DebugPort.WriteRawAP` | Package tests |
@@ -52,17 +52,24 @@ finishes cleanup or harmlessly repeats it.
 ## Choose between raw SWD and DAP
 
 Use `swd.Conn` when the application needs one explicit wire-protocol
-transaction or is bringing up an SWD path. It returns WAIT, FAULT, parity, and
-protocol errors directly and does not retry them.
+transaction or is bringing up an SWD path. Call `Connect` before register
+access and `Release` before closing the wire. `Connect` returns DPIDR, keeps
+inherited ORUNDETECT or tries to enable it, and records whether the setting was
+inherited. `Release` restores only a change made by that connection and can be
+retried. A register operation returns WAIT, FAULT, parity, and protocol errors
+without replaying the requested transaction. When a fixed response returns
+WAIT, the connection clears STICKYORUN before returning it.
 The [SWD protocol guide](protocols/swd.md) describes the wire transaction and
 the specification details which are easiest to misread.
 
 Use `dap.DebugPort` when the application needs debug-port identity, power
 ownership, bank selection, or AP access. Call `Connect` before AP operations
-and `Release` afterward. `Connect` performs the SWD entry sequence; do not enter
-the connection separately. Give the debug port exclusive, serialized use of
-its `swd.Conn`; direct transfers on that connection can invalidate cached DAP
-state. DP, AP, transaction, and MEM-AP operations require an active connection.
+and `Release` afterward. `DebugPort.Connect` also connects its underlying SWD
+stream, and `DebugPort.Release` releases it after restoring DAP state; do not
+connect or release that stream separately. Give the debug port exclusive,
+serialized use of its `swd.Conn`; direct transfers on that connection can
+invalidate cached DAP state. DP, AP, transaction, and MEM-AP operations require
+an active connection.
 `ReadDP` and `WriteDP` take logical ADIv5 register names and manage DPBANKSEL
 without exposing a current-bank API. `NewAPSel` constructs an AP selector whose
 zero value is invalid. `APSel.Address` combines it with a complete eight-bit
@@ -76,20 +83,21 @@ that returned WAIT. A raw AP read or write which completes, or might have
 completed, invalidates existing `MemAP` values. After an extended AP stall,
 `dap.DebugPort` issues DAPABORT; existing
 `dap.MemAP` values reject further reads, though `dap.MemAP.Release` still
-attempts to restore their saved state. `Connect` reads DPIDR, clears supported
-sticky conditions with ABORT,
-and writes zero to SELECT once without retrying. It confirms the write through
-RDBUFF, then reads CTRL/STAT and rejects ORUNDETECT because the current SWD
-transfer does not implement the overrun-detection response grammar. If WAIT
-cleanup or a later retry fails, `dap.DebugPort` treats SWD framing as unknown and
-invalidates those values. Later DP and AP calls stop before sending traffic.
+attempts to restore their saved state. The SWD connection reads DPIDR, clears
+supported sticky conditions with ABORT, establishes bank zero through RDBUFF,
+and establishes its response grammar before DAP requests power. Debug-port
+CTRL/STAT writes must preserve ORUNDETECT. DAP settles a new SELECT through
+RDBUFF before sending AP traffic. If WAIT cleanup or a later retry leaves
+framing unknown, `dap.DebugPort` invalidates those values and later DP and AP
+calls stop before sending traffic.
 `Connect` performs bounded cleanup after failed setup. When cleanup succeeds,
 the debug port can connect again immediately. If cleanup also fails, or if
 `Release` fails, ordinary DP, AP, and MEM-AP operations remain blocked. Call
 `MemAP.Release` before retrying `DebugPort.Release`; cleanup re-enters SWD when
 necessary and verifies that DPIDR still identifies the connection being
 cleaned up before restoring state. `DebugPort.Release` settles its final
-bank-zero SELECT through RDBUFF before returning success.
+bank-zero SELECT through RDBUFF, releases power, and restores connection-owned
+ORUNDETECT before returning success.
 The [DAP guide](ports/dap.md) describes the ADIv5 register protocol behind
 that lifecycle.
 

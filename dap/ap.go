@@ -173,10 +173,12 @@ func (dp *DebugPort) selectAP(ctx context.Context, sel APSel, addr uint8) error 
 		return err
 	}
 	value := uint32(selection)<<24 | uint32(addr&0xf0)
-	if dp.state.selectDP.valid && dp.state.selectDP.value == value {
-		return nil
+	if !dp.state.selectDP.valid || dp.state.selectDP.value != value {
+		if err := dp.writeDP(ctx, SELECT, value); err != nil {
+			return err
+		}
 	}
-	return dp.writeDP(ctx, SELECT, value)
+	return dp.confirmPendingSELECT(ctx)
 }
 
 func validateAPSel(sel APSel) (uint8, error) {
