@@ -60,6 +60,23 @@ func TestAccessSelectedAPRegisters(t *testing.T) {
 	}
 }
 
+func TestAPAccessSettlesSELECTBeforeAPRequest(t *testing.T) {
+	target := newWaitTarget()
+	addAP(t, target, 0, 0x04770031)
+	dp := newDebugPort(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	before := len(target.requests)
+	if _, err := dp.ReadAPIDR(t.Context(), apSel(0)); err != nil {
+		t.Fatal(err)
+	}
+	want := []swdsim.Request{dpWrite(0x08), dpRead(0x0c), apRead(0x0c), dpRead(0x0c)}
+	if got := target.requests[before:]; !equalRequests(got, want) {
+		t.Fatalf("AP read requests = %#v, want %#v", got, want)
+	}
+}
+
 func TestAPAccessRequiresConnectedDebugPort(t *testing.T) {
 	dp := newDebugPort(t, sim.New(0x2ba01477))
 	if _, err := dp.ReadAPIDR(t.Context(), apSel(0)); err == nil {

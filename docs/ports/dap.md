@@ -75,19 +75,18 @@ rollback can attempt to re-enter SWD and clear only the bits which were absent
 before acquisition.
 
 Read CTRL/STAT before the first request which can stall. If ORUNDETECT is
-already set, WAIT and FAULT have the overrun-detection data phase; the simpler
-response grammar is no longer safe. Do not set ORUNDETECT unless the SWD
-transport implements that response grammar. There is an annoying bootstrap
+already set, WAIT and FAULT have the overrun-detection data phase; use that
+response grammar until the bit is cleared. There is an annoying bootstrap
 problem: CTRL/STAT shares offset `0x04` with other DP banks, and a line reset
 does not reset every DP register. After inheriting unknown DP state, read
 DPIDR, clear the supported sticky conditions with ABORT, write zero to SELECT
 once without retrying, read RDBUFF, then read CTRL/STAT at `0x04`. ABORT and
 RDBUFF are bank-independent. ABORT first keeps inherited sticky state from
 faulting SELECT; RDBUFF then shows whether the SELECT data took effect. If
-either SELECT or RDBUFF returns WAIT or FAULT, the simpler grammar cannot
-safely replay it because ORUNDETECT is not known yet. Re-enter SWD before
-trying the bootstrap again. Once another DP bank is selected, a read at
-`0x04` is no longer CTRL/STAT and may legitimately return WAIT.
+either SELECT or RDBUFF returns WAIT or FAULT, the host cannot know which
+response grammar it just received. Re-enter SWD before trying the bootstrap
+again. Once another DP bank is selected, a read at `0x04` is no longer
+CTRL/STAT and may legitimately return WAIT.
 
 The SELECT write's OK acknowledgement comes before its data. There is no
 second acknowledgement after the parity bit, so the host cannot trust the new
@@ -138,6 +137,22 @@ Once the AP request returns OK, however, it has been accepted. If the following
 RDBUFF read returns WAIT, repeat RDBUFF; repeating the AP request would start
 the access twice. The same distinction matters for writes even when writing
 the same value twice happens to look harmless.
+
+With ORUNDETECT set, the WAIT response also sets STICKYORUN. Clear that sticky
+condition through ABORT before retrying the WAITed request. A later FAULT in a
+fixed response frame can mean that the DP abandoned a request after the
+overrun; it is not permission to guess that the request ran. If SELECT was still
+buffered when the WAIT arrived, the ABORT used to clear STICKYORUN can abandon
+that write. Settle SELECT through RDBUFF before sending an AP or banked-DP
+request, rather than guessing which selection survived after cleanup.
+
+Changing ORUNDETECT has the same write-data boundary as SELECT. Keep using the
+old response grammar through a following RDBUFF read. An OK acknowledgement
+proves the CTRL/STAT write took effect even if the unused RDBUFF data has bad
+parity; WDATAERR means it did not. RDBUFF can return WAIT while the write
+remains buffered, in which case the host repeats RDBUFF under the old grammar.
+Only a completed barrier lets the host choose the new grammar without guessing
+which framing the target expects.
 
 That replay rule assumes that each WAIT response finished cleanly. If the wire
 fails during the following turnaround, the host no longer knows whether the DP
@@ -236,14 +251,16 @@ gave this target ample time to finish ordinary AP work. The absence of WAIT
 here is a bench observation, not evidence that replay and abort recovery are
 correct.
 
-On 2026-08-11 I inverted the data-parity bit of a same-value SELECT write. The
-target set WDATAERR and returned FAULT to the next ordinary request. A
-following CTRL/STAT read showed that WDERRCLR cleared WDATAERR, and the AP
-access then completed normally. The five DAP hardware tests in that run
-counted 82 OK acknowledgements, one FAULT, no WAIT, and no invalid response.
-Both power-request bits were already set and remained set. This exercises a
-target-generated sticky fault; it does not exercise an AP-originated
-STICKYERR or a naturally occurring WAIT.
+On 2026-08-22 I let each SWD connection enable ORUNDETECT, then inverted the
+data-parity bit of a same-value SELECT write in one test. The target set
+WDATAERR and STICKYORUN, then returned FAULT on the next fixed-frame request.
+A following CTRL/STAT read showed that WDERRCLR and ORUNERRCLR cleared both
+sticky conditions, and the AP access completed. The seven DAP hardware tests
+counted 194 OK acknowledgements, one FAULT, no WAIT, and no invalid
+acknowledgements. Of those requests, 131 used fixed overrun-response frames.
+Every debug-port release completed, including restoration of the inherited
+ORUNDETECT setting. This exercises a target-generated sticky fault; it does
+not exercise an AP-originated STICKYERR or a naturally occurring WAIT.
 
 That is enough to identify one working DP/AP/MEM-AP path and one physical
 WDATAERR recovery path. It says nothing yet about sparse APs, delayed power

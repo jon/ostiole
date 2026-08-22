@@ -6,6 +6,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/jon/ostiole/dap"
 )
 
 func TestReadDPIDROverFTDI(t *testing.T) {
@@ -58,4 +60,30 @@ func TestConnectAndReleaseOverFTDI(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("DPIDR=%#08x after reconnect", second.Raw)
+}
+
+func TestOverrunResponsesOverFTDI(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	dp, wire := openHardwareDebugPortWithFaultWire(t, ctx)
+	t.Cleanup(func() { releaseHardwareDebugPort(t, dp) })
+	if _, err := dp.Connect(ctx); err != nil {
+		t.Fatal(err)
+	}
+	state, err := dp.ReadDP(ctx, dap.CTRLSTAT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state&1 == 0 {
+		t.Fatal("SWD connection did not enable ORUNDETECT")
+	}
+	if _, err := dp.ReadAPIDR(ctx, hardwareAP); err != nil {
+		t.Fatal(err)
+	}
+	counter := wire.inner.(*ackCountingWire)
+	if counter.fixed == 0 {
+		t.Fatal("connected ORUNDETECT did not use fixed response frames")
+	}
+	t.Logf("automatic ORUNDETECT fixed response frames=%d", counter.fixed)
 }

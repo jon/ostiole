@@ -146,7 +146,7 @@ func (m *MemAP) prepareRelease(ctx context.Context) (context.Context, context.Ca
 	if m.dp.state.session == sessionIdle {
 		return nil, nil, errors.New("dap: SW-DP is not connected")
 	}
-	if m.dp.state.response == responseSimple {
+	if m.dp.state.responseKnown() {
 		return ctx, func() {}, nil
 	}
 	releaseCtx, cancel := context.WithTimeout(context.Background(), waitRecoveryTimeout)

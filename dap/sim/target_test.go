@@ -2,9 +2,11 @@ package sim
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/jon/ostiole/dap"
+	"github.com/jon/ostiole/swd"
 	swdsim "github.com/jon/ostiole/swd/sim"
 )
 
@@ -150,6 +152,73 @@ func TestAbortClearsStickyState(t *testing.T) {
 	}
 	if target.ctrlStat != 0 {
 		t.Fatalf("CTRL/STAT = %#08x, want 0", target.ctrlStat)
+	}
+}
+
+func TestTargetModelsOverrunDetectionState(t *testing.T) {
+	target := New(0x2ba01477)
+	target.SetOverrunDetect(true)
+	if !target.OverrunDetectEnabled() {
+		t.Fatal("ORUNDETECT was not enabled")
+	}
+	target.ObserveResponse(swd.ErrWait)
+	state, err := target.Read(t.Context(), readDPRequest(0x04))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state&(overrunDetect|stickyOverrun) != overrunDetect|stickyOverrun {
+		t.Fatalf("CTRL/STAT = %#08x, want ORUNDETECT and STICKYORUN", state)
+	}
+	if err := target.Write(t.Context(), writeDPRequest(0x00), clearStickyOverrun); err != nil {
+		t.Fatal(err)
+	}
+	if !target.OverrunDetectEnabled() {
+		t.Fatal("ORUNERRCLR changed ORUNDETECT")
+	}
+}
+
+func TestTargetModelsLineResetStateDuringConnection(t *testing.T) {
+	target := New(0x2ba01477)
+	if err := target.SetDPRegister(dap.DLCR, 0xa5a50000); err != nil {
+		t.Fatal(err)
+	}
+	target.SetOverrunDetect(true)
+	conn := swd.New(swdsim.New(target))
+	if _, err := conn.Connect(t.Context()); err != nil {
+		t.Fatalf("Connect(): %v", err)
+	}
+	state, err := conn.ReadDP(t.Context(), 0x04)
+	if err != nil {
+		t.Fatalf("ReadDP(CTRL/STAT): %v", err)
+	}
+	if state&stickyOverrun != 0 {
+		t.Fatalf("CTRL/STAT after Connect = %#08x, want reset STICKYORUN cleared", state)
+	}
+	if err := conn.WriteDP(t.Context(), 0x08, 1); err != nil {
+		t.Fatalf("WriteDP(SELECT): %v", err)
+	}
+	if _, err := conn.ReadDP(t.Context(), 0x0c); err != nil {
+		t.Fatalf("ReadDP(RDBUFF): %v", err)
+	}
+	if value, err := conn.ReadDP(t.Context(), 0x04); err != nil || value != 0 {
+		t.Fatalf("ReadDP(DLCR) = %#08x, %v; want reset value", value, err)
+	}
+	if err := conn.Release(t.Context()); err != nil {
+		t.Fatalf("Release(): %v", err)
+	}
+}
+
+func TestTargetFaultsOrdinaryRequestsWhileStickyStateIsSet(t *testing.T) {
+	target := New(0x2ba01477)
+	target.SetOverrunDetect(true)
+	target.ObserveResponse(swd.ErrWait)
+	if err := target.Acknowledge(t.Context(), readAPRequest(0x00)); !errors.Is(err, swd.ErrFault) {
+		t.Fatalf("AP acknowledgement = %v, want FAULT", err)
+	}
+	for _, req := range []swdsim.Request{readDPRequest(0x00), readDPRequest(0x04), writeDPRequest(0x00)} {
+		if err := target.Acknowledge(t.Context(), req); err != nil {
+			t.Fatalf("exempt request %v acknowledgement: %v", req, err)
+		}
 	}
 }
 

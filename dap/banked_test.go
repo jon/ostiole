@@ -11,11 +11,11 @@ func TestBankedDPAccessPreservesSELECTFields(t *testing.T) {
 	target := newWaitTarget()
 	addAP(t, target, 0x12, 0x24770011)
 	const dlcr = uint32(0xa5a50000)
-	if err := target.SetDPRegister(dap.DLCR, dlcr); err != nil {
-		t.Fatal(err)
-	}
 	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := target.SetDPRegister(dap.DLCR, dlcr); err != nil {
 		t.Fatal(err)
 	}
 	if err := dp.WriteDP(t.Context(), dap.SELECT, 0x120000f0); err != nil {
@@ -97,11 +97,11 @@ func TestBankedDPAccessAllowsMinimalDebugPort(t *testing.T) {
 	target := newWaitTarget()
 	target.dpidrOverride = 0x2ba11477
 	const dlcr = uint32(0xa5a50000)
-	if err := target.SetDPRegister(dap.DLCR, dlcr); err != nil {
-		t.Fatal(err)
-	}
 	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := target.SetDPRegister(dap.DLCR, dlcr); err != nil {
 		t.Fatal(err)
 	}
 	value, err := dp.ReadDP(t.Context(), dap.DLCR)
@@ -132,7 +132,7 @@ func TestLogicalDPAccessRejectsReadOnlyWriteWithoutTraffic(t *testing.T) {
 	}
 }
 
-func TestLogicalDPAccessRejectsUnsupportedFramingBeforeTraffic(t *testing.T) {
+func TestLogicalDPAccessRejectsUnsupportedTurnaroundBeforeTraffic(t *testing.T) {
 	target := newWaitTarget()
 	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
@@ -143,13 +143,6 @@ func TestLogicalDPAccessRejectsUnsupportedFramingBeforeTraffic(t *testing.T) {
 	}
 
 	before := len(target.requests)
-	if err := dp.WriteDP(t.Context(), dap.CTRLSTAT, overrunDetect); err == nil {
-		t.Fatal("WriteDP(CTRLSTAT) accepted unsupported ORUNDETECT")
-	}
-	if got := len(target.requests); got != before {
-		t.Fatalf("requests after rejected CTRL/STAT write = %d, want %d", got, before)
-	}
-
 	if err := dp.WriteDP(t.Context(), dap.DLCR, 1<<8); err == nil {
 		t.Fatal("WriteDP(DLCR) accepted unsupported turnaround")
 	}
