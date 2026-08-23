@@ -137,7 +137,8 @@ cleanup becomes uncertain, repair is required. A FAULT returns the contiguous
 prefix read before the fault; cancellation and transport or protocol failures
 can also interrupt the read. The rest of the destination remains unchanged. No
 auto-incrementing word run crosses a 1 KiB TAR boundary; unaligned edges still
-require the MEM-AP to accept byte or halfword CSW sizes.
+require the MEM-AP to accept byte or halfword CSW sizes. If the MEM-AP does not
+accept single address increment, `ReadBlock` writes TAR before each word.
 
 `MemAP.WriteScalar` changes target memory at the selected address. The library
 rejects a value which does not fit the selected size and validates alignment

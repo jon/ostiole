@@ -75,7 +75,9 @@ func validateBlockRange(addr uint64, length int, largeAddress bool) error {
 // becomes uncertain, it returns an error and the debug port requires repair. A
 // FAULT returns the contiguous byte prefix definitely obtained before the
 // fault. Cancellation and transport or protocol failures can also interrupt
-// the read; bytes beyond the returned prefix are left unchanged.
+// the read; bytes beyond the returned prefix are left unchanged. If the MEM-AP
+// does not accept single address increment, ReadBlock writes TAR before each
+// word instead.
 func (m *MemAP) ReadBlock(ctx context.Context, addr uint64, buf []byte) (int, error) {
 	if len(buf) == 0 {
 		return 0, nil
@@ -161,6 +163,9 @@ func (m *MemAP) readWordSegment(ctx context.Context, buf []byte, segment blockSe
 
 func (m *MemAP) readWordChunk(ctx context.Context, addr uint64, count int) ([]*ReadResult, error) {
 	if err := m.selectCSWUntilContext(ctx, Size32, cswIncSingle); err != nil {
+		if errors.Is(err, errAddressIncrementUnsupported) {
+			return m.readWordsWithoutIncrement(ctx, addr, count)
+		}
 		return nil, err
 	}
 	txn := m.dp.newTxnUntilContext()
@@ -175,6 +180,21 @@ func (m *MemAP) readWordChunk(ctx context.Context, addr uint64, count int) ([]*R
 		results[i] = txn.readAPSequential(m.sel, memAPDRW)
 	}
 	return results, txn.Commit(ctx)
+}
+
+func (m *MemAP) readWordsWithoutIncrement(ctx context.Context, addr uint64, count int) ([]*ReadResult, error) {
+	if err := m.selectCSWUntilContext(ctx, Size32, 0); err != nil {
+		return nil, err
+	}
+	results := make([]*ReadResult, count)
+	for i := range results {
+		txn := m.scalarTxnUntilContext(addr + uint64(i*4))
+		results[i] = txn.readAP(m.sel, memAPDRW)
+		if err := txn.Commit(ctx); err != nil {
+			return results[:i+1], err
+		}
+	}
+	return results, nil
 }
 
 func (m *MemAP) putBlockValue(dst []byte, size TransferSize, value uint64) {

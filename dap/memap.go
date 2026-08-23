@@ -26,6 +26,8 @@ const (
 	cfgLargeData = uint32(1 << 2)
 )
 
+var errAddressIncrementUnsupported = errors.New("dap: MEM-AP did not accept the requested address increment")
+
 // TransferSize names the width of one MEM-AP scalar transfer. Its zero value
 // is invalid.
 type TransferSize uint8
@@ -267,7 +269,7 @@ func (m *MemAP) selectCSWTxn(ctx context.Context, size TransferSize, addrInc uin
 		return fmt.Errorf("dap: MEM-AP does not support %d-bit transfers", width*8)
 	}
 	if value&cswAddrInc != addrInc {
-		return errors.New("dap: MEM-AP did not accept the requested address increment")
+		return errAddressIncrementUnsupported
 	}
 	return nil
 }

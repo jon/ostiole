@@ -58,7 +58,9 @@ perform aligned scalar reads and writes, then restore the CSW, TAR, and optional
 TARHI values changed by that access. Cleanup terminates an incomplete 64-bit
 transfer through CSW before restoring the target address registers. A block
 read retries the same request after WAIT while selection and framing remain
-known, WAIT cleanup succeeds, and its context remains active.
+known, WAIT cleanup succeeds, and its context remains active. If the MEM-AP
+does not accept single address increment, the reader writes TAR before each
+word instead.
 
 The [examples](examples) begin with a raw SWD debug-port identity read, then
 add posted access-port reads and a Cortex-M identity read through a MEM-AP.
