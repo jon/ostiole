@@ -138,6 +138,8 @@ mixed capabilities, and changes to review-policy files. Codex and the
 maintainer assess correctness, ownership, cleanup, hardware safety,
 architecture, behavioral coverage, and documentation claims. A completed
 standard Codex review must match the current pull-request head. Codex must
+reject a nontrivial commit whose message does not explain why the commit is
+needed and what behavior it establishes at that boundary. Codex must also
 reject a pull request which adds an API without representative calls in “What
 this does,” or changes an API without representative calls before and after
 the change. It must also reject examples which hide ownership, cleanup, safety,
@@ -223,10 +225,27 @@ Examples:
 - `Decode structural USB descriptors.`
 - `Release debug-port power ownership.`
 
-After the summary, leave a blank line. Truly trivial commits may stop there;
-otherwise, use a short body to explain why the change was needed, what was
-true before and after, important design or safety decisions, and how the
-behavior was tested. Do not merely enumerate files or restate the summary.
+After the summary, leave a blank line. Truly trivial commits may stop there.
+Otherwise, use a short body which lets someone reviewing that commit
+understand why it belongs in the history. Name the previous limitation or
+failure, say what a caller or maintainer can rely on afterward, and explain
+any important design or safety choice which is not evident from the diff.
+Include evidence when it supports a claim; a list of tests does not substitute
+for the reason for the change.
+
+Write about the state before and after that commit, not the eventual pull
+request or the process used to produce it. Do not merely enumerate files,
+restate the summary, narrate implementation steps, or recount review and
+construction history.
+
+“Add logical registers, tests, and documentation” makes the reader infer the
+problem. A useful body says what the change buys:
+
+```text
+DP register pairs share physical SWD addresses, so a raw address does
+not tell callers which register they will access. Give each register a
+logical identity and keep direction and bank selection inside DebugPort.
+```
 
 Wrap prose in stored commit bodies at 72 columns. Leave URLs, command lines,
 code blocks, and other text that cannot be broken safely intact. Keep messages

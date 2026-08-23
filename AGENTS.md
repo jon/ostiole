@@ -112,8 +112,15 @@ traffic or cleanup, or bad input reaches hardware before it is rejected.
 - Keep routine checks which GitHub reports independently out of pull-request
   prose. They remain required publication guards, not evidence to advertise.
 - Require physical HIL claims to identify the exercised path and bench.
-- When commit context is available, flag unrelated changes, non-bisectable
-  commits, weak messages, missing same-commit tests or documentation, and
-  artificial splits made only to influence line counts.
+- When commit context is available, reject a nontrivial commit whose message
+  leaves the reviewer to reconstruct its purpose from the diff. The subject
+  must describe the resulting change. The body must say what was wrong or
+  missing beforehand, what the commit changes, and any important design or
+  safety choice which is not evident from the code.
+- Judge each message against that commit, not the pull request as a whole. A
+  file inventory, list of implementation steps or tests, or review history
+  does not explain why a commit belongs in the history.
+- Flag unrelated changes, non-bisectable commits, missing same-commit tests or
+  documentation, and artificial splits made only to influence line counts.
 - Treat changes to contribution rules, agent review guidance, CODEOWNERS,
   policy tooling, or workflows as security-sensitive review-policy changes.
