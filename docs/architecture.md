@@ -146,10 +146,13 @@ identity. Raw AP access rejects invalid or unaligned addresses before traffic.
 Register names and effects remain specific to the selected AP class. A write
 to a MEM-AP data register can write target memory. A raw AP read or write which
 completes, or whose completion is uncertain, invalidates existing `MemAP`
-values. After an extended AP stall, `dap.DebugPort` issues DAPABORT and
-invalidates AP-derived state. RDBUFF also settles DP writes, but a stall or
-FAULT at that barrier does not trigger AP-only recovery. A FAULT is not
-retried: the debug port captures
+values. `dap.DebugPort` retries the same physical request after a clean WAIT
+until its response-count limit is reached or the operation context ends. The
+one-argument constructor uses only the context; `WithMaxWaits` sets a limit,
+and `SetMaxWaits` changes it while the port is idle. If either boundary ends AP
+waiting, the debug port issues DAPABORT and invalidates AP-derived state.
+RDBUFF also settles DP writes, but a stall or FAULT at that barrier does not
+trigger AP-only recovery. A FAULT is not retried: the debug port captures
 bank-zero CTRL/STAT, clears the sticky conditions reported there, verifies the
 clear through CTRL/STAT, and returns a typed error. AP-derived state is
 invalidated when the failed sequence might have changed it, but not when a
@@ -176,11 +179,11 @@ cleanup terminates an incomplete transfer through CSW before restoring TAR or
 TARHI. Arbitrary-range reads and writes use sub-word edges and bounded word
 runs. No auto-incrementing word run crosses a 1 KiB TAR boundary. If CSW does
 not retain single address increment, block access writes TAR before each word.
-`ReadBlock` and `WriteBlock` retry a clean WAIT on the same request until their
-context ends. An accepted write is not replayed; if its RDBUFF completion
-request returns WAIT, `WriteBlock` retries only that request. If selection,
-framing, or cleanup becomes uncertain, the existing repair behavior applies. A
-FAULT returns the confirmed prefix instead of retrying the failed request.
+Scalar and block memory access use the same WAIT rule. An accepted write is not
+replayed; if its RDBUFF completion request returns WAIT, only that request is
+retried. If selection, framing, or cleanup becomes uncertain, the existing
+repair behavior applies. A FAULT returns the confirmed prefix instead of
+retrying the failed request.
 
 ADIv5 access-port enumeration scans all 256 APSEL values in bounded
 transactions. IDR zero means absent. The scan does not assume contiguous AP

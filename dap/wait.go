@@ -10,7 +10,6 @@ import (
 )
 
 const (
-	maxWaitRetries      = 100
 	waitRecoveryTimeout = time.Second
 
 	dapAbort = uint32(1 << 0)
@@ -104,9 +103,8 @@ func (dp *DebugPort) transferWithAPRecovery(ctx context.Context, req transferReq
 			return 0, err
 		}
 		waits++
-		if waits > maxWaitRetries {
-			cause := fmt.Errorf("dap: WAIT retry limit exceeded: %w", swd.ErrWait)
-			return 0, dp.finishWait(cause, apWork)
+		if err := dp.stopAfterWAIT(ctx, waits, apWork); err != nil {
+			return 0, err
 		}
 	}
 }
@@ -158,7 +156,17 @@ func (dp *DebugPort) stopWaiting(waits int, cause error, apWork bool) error {
 	if waits == 0 {
 		return &requestNotSentError{cause: cause}
 	}
-	return dp.finishWait(errors.Join(swd.ErrWait, cause), apWork)
+	return dp.finishWait(cause, apWork)
+}
+
+func (dp *DebugPort) stopAfterWAIT(ctx context.Context, waits int, apWork bool) error {
+	if err := ctx.Err(); err != nil {
+		return dp.stopWaiting(waits, err, apWork)
+	}
+	if dp.maxWaits != 0 && uint(waits) >= dp.maxWaits {
+		return dp.finishWait(swd.ErrWait, apWork)
+	}
+	return nil
 }
 
 func requestWasNotSent(err error) bool {
@@ -176,8 +184,11 @@ func (dp *DebugPort) finishRetryError(req transferRequest, value uint32, err err
 	if waits == 0 {
 		return 0, dp.invalidateTransfer(err)
 	}
-	cause := errors.Join(swd.ErrWait, fmt.Errorf("dap: WAIT retry failed: %w", err))
-	return 0, dp.invalidateWait(cause)
+	cause := fmt.Errorf("dap: WAIT retry failed: %w", err)
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return 0, dp.invalidateWait(cause)
+	}
+	return 0, dp.invalidateWait(errors.Join(swd.ErrWait, cause))
 }
 
 func (dp *DebugPort) handleFault(req transferRequest, apWork bool) error {
@@ -318,7 +329,7 @@ func (dp *DebugPort) abortWait(cause error) error {
 	_, err := dp.transferOnce(ctx, dpTransferRequest(ABORT, false), dapAbort)
 	if err != nil {
 		dp.state.loseFraming()
-		return errors.Join(cause, fmt.Errorf("dap: DAPABORT after extended WAIT: %w", err))
+		return errors.Join(cause, fmt.Errorf("dap: DAPABORT after WAIT: %w", err))
 	}
 	if err := dp.restoreAfterAbort(ctx); err != nil {
 		dp.state.loseFraming()

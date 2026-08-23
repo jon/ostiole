@@ -78,14 +78,14 @@ type txnOp struct {
 
 // Txn queues an ordered, single-use sequence of ADIv5 DP and AP operations.
 // Calls sharing the transaction, its DebugPort, or the underlying SWD
-// connection must be serialized. Queued operations have the same effects and
-// lifecycle requirements as the corresponding DebugPort methods. Commit can
-// pack their physical SWD requests while preserving logical result order.
+// connection must be serialized. Queued operations have the same effects,
+// WAIT behavior, and lifecycle requirements as the corresponding DebugPort
+// methods. Commit can pack their physical SWD requests while preserving
+// logical result order.
 type Txn struct {
-	dp               *DebugPort
-	ops              []txnOp
-	committed        bool
-	waitUntilContext bool
+	dp        *DebugPort
+	ops       []txnOp
+	committed bool
 }
 
 // NewTxn returns an empty transaction for dp. Commit requires an active
@@ -95,7 +95,7 @@ func (dp *DebugPort) NewTxn() *Txn {
 }
 
 func (dp *DebugPort) newTxnUntilContext() *Txn {
-	return &Txn{dp: dp, waitUntilContext: true}
+	return dp.NewTxn()
 }
 
 // ReadDP queues one logical debug-port read.
@@ -165,8 +165,12 @@ func (t *Txn) queue(op txnOp) *txnResult {
 // then executes queued operations in order until one fails. The underlying SWD
 // connection can pack fixed frames without changing logical result order.
 // Failure while settling the earlier write leaves every queued operation
-// unexecuted. Commit resolves every result before returning. A Txn can be
-// committed only once.
+// unexecuted. Commit retries the same physical request after a clean WAIT until
+// the DebugPort's configured limit is reached or the operation context ends; it
+// does not retry a FAULT. If the context ends, errors.Is reports the context
+// error for Commit and the affected result. The original WAIT is not retained
+// as swd.ErrWait; independently joined cleanup failures remain visible. Commit
+// resolves every result before returning and can be called only once.
 func (t *Txn) Commit(ctx context.Context) error {
 	if t == nil || t.committed {
 		return ErrTxnCommitted
@@ -495,7 +499,7 @@ func settlesSELECT(req transferRequest) bool {
 }
 
 func (t *Txn) execute(ctx context.Context, steps []txnStep) error {
-	waits := make(map[txnStep]int)
+	waits := make([]int, len(steps))
 	for cursor := 0; cursor < len(steps); {
 		end := nextBatchBoundary(steps, cursor)
 		results, batchErr := t.transferSteps(ctx, steps[cursor:end])
@@ -506,7 +510,7 @@ func (t *Txn) execute(ctx context.Context, steps []txnStep) error {
 			cursor = end
 			continue
 		}
-		if err := t.handleBatchFailure(ctx, steps[cursor:end], results[failed:], batchErr, waits); err != nil {
+		if err := t.handleBatchFailure(ctx, steps[cursor:end], results[failed:], batchErr, &waits[cursor]); err != nil {
 			return err
 		}
 	}
@@ -580,13 +584,13 @@ func (t *Txn) acceptBatchPrefix(steps []txnStep, results []txnTransferResult, co
 	}
 }
 
-func (t *Txn) handleBatchFailure(ctx context.Context, steps []txnStep, results []txnTransferResult, batchErr error, waits map[txnStep]int) error {
+func (t *Txn) handleBatchFailure(ctx context.Context, steps []txnStep, results []txnTransferResult, batchErr error, waits *int) error {
 	err := results[0].err()
 	if errors.Is(err, swd.ErrIndeterminate) {
 		return t.failBatchTransport(steps, results, batchErr)
 	}
 	if errors.Is(err, swd.ErrNotExecuted) {
-		return t.handleBatchNotExecuted(steps[0], batchErr, waits)
+		return t.handleBatchNotExecuted(steps[0], batchErr, *waits)
 	}
 	value, _ := results[0].value()
 	if errors.Is(err, swd.ErrWait) {
@@ -615,8 +619,8 @@ func (t *Txn) handleBatchFailure(ctx context.Context, steps []txnStep, results [
 	return t.failClockedSuffix(steps[:clockedTransferCount(results)], errors.Join(err, batchErr))
 }
 
-func (t *Txn) handleBatchNotExecuted(step txnStep, batchErr error, waits map[txnStep]int) error {
-	if t.waitUntilContext && waits[step] > 0 {
+func (t *Txn) handleBatchNotExecuted(step txnStep, batchErr error, waits int) error {
+	if waits > 0 {
 		return t.failStep(step, t.dp.finishWait(batchErr, stepMayAffectAP(step)))
 	}
 	return t.failStep(step, batchErr)
@@ -634,7 +638,7 @@ func (t *Txn) failBatchWAITCleanup(steps []txnStep, results []txnTransferResult,
 	return err
 }
 
-func (t *Txn) retryBatchWAIT(ctx context.Context, steps []txnStep, results []txnTransferResult, waits map[txnStep]int) error {
+func (t *Txn) retryBatchWAIT(ctx context.Context, steps []txnStep, results []txnTransferResult, waits *int) error {
 	if !batchSuffixAbandoned(results) {
 		return t.failUnexpectedBatchSuffix(steps[:clockedTransferCount(results)], swd.ErrWait)
 	}
@@ -648,22 +652,11 @@ func (t *Txn) retryBatchWAIT(ctx context.Context, steps []txnStep, results []txn
 	if err := t.dp.validateWait(step.req, swd.ErrWait); err != nil {
 		return t.failStep(step, err)
 	}
-	waits[step]++
-	if err := ctx.Err(); err != nil {
-		cause := error(err)
-		if !t.waitUntilContext {
-			cause = errors.Join(swd.ErrWait, err)
-		}
-		return t.failStep(step, t.dp.finishWait(cause, stepMayAffectAP(step)))
+	(*waits)++
+	if err := t.dp.stopAfterWAIT(ctx, *waits, stepMayAffectAP(step)); err != nil {
+		return t.failStep(step, err)
 	}
-	if t.waitUntilContext {
-		return nil
-	}
-	if waits[step] <= maxWaitRetries {
-		return nil
-	}
-	cause := fmt.Errorf("dap: WAIT retry limit exceeded: %w", swd.ErrWait)
-	return t.failStep(step, t.dp.finishWait(cause, stepMayAffectAP(step)))
+	return nil
 }
 
 func batchSuffixAbandoned(results []txnTransferResult) bool {

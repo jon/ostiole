@@ -483,16 +483,6 @@ func TestMEMAPReadBlockRejectsWAITWithPendingSELECT(t *testing.T) {
 	}
 }
 
-func assertBlockReadDAPABORT(t *testing.T, target *waitTarget) {
-	t.Helper()
-	for _, value := range target.abortValues {
-		if value&1 != 0 {
-			return
-		}
-	}
-	t.Fatalf("ABORT writes = %#v, want DAPABORT", target.abortValues)
-}
-
 func TestMEMAPReadBlockStopsWaitingWhenContextEnds(t *testing.T) {
 	target := &cancelingBlockWAITTarget{waitTarget: newWaitTarget(), after: 101}
 	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 0x03020100})
@@ -541,9 +531,41 @@ func TestMEMAPReadBlockCleansUpWhenCancellationPreventsRetry(t *testing.T) {
 	if !slices.Equal(buf, []byte{0xee, 0xee, 0xee, 0xee}) {
 		t.Fatalf("ReadBlock() changed the destination after cancellation: % x", buf)
 	}
-	assertBlockReadDAPABORT(t, target.waitTarget)
+	assertDAPABORT(t, target.waitTarget)
 	if err := mem.Release(t.Context()); err != nil {
 		t.Fatalf("Release() after canceled retry: %v", err)
+	}
+}
+
+func TestMEMAPReadBlockStopsAtConfiguredWAITLimit(t *testing.T) {
+	target := newWaitTarget()
+	addMEMAP(t, target, 0, 0x00010001, nil)
+	wire := &packedTxnWire{inner: swdsim.New(target), limit: 54}
+	dp := dap.NewDebugPort(swd.New(wire), dap.WithMaxWaits(3))
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := dap.OpenMemAP(t.Context(), dp, apSel(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	target.arm(apRead(0x0c), -1)
+	buf := []byte{0xee, 0xee, 0xee, 0xee}
+	n, err := mem.ReadBlock(t.Context(), 0, buf)
+	if !errors.Is(err, swd.ErrWait) || n != 0 {
+		t.Fatalf("ReadBlock() at WAIT limit = %d, %v, want 0 and WAIT", n, err)
+	}
+	if !slices.Equal(buf, []byte{0xee, 0xee, 0xee, 0xee}) {
+		t.Fatalf("ReadBlock() changed unread bytes: % x", buf)
+	}
+	if target.attempts != 3 {
+		t.Fatalf("DRW read attempts = %d, want 3", target.attempts)
+	}
+	assertDAPABORT(t, target)
+	assertBlockedMEMAPUsesNoWire(t, mem, wire)
+	if err := mem.Release(t.Context()); err != nil {
+		t.Fatalf("Release() after WAIT limit: %v", err)
 	}
 }
 

@@ -71,6 +71,17 @@ func TestConnectEntersSWDBeforeDebugPortTraffic(t *testing.T) {
 	}
 }
 
+func TestNewDebugPortIgnoresZeroOption(t *testing.T) {
+	var option dap.Option
+	dp := dap.NewDebugPort(swd.New(swdsim.New(sim.New(0x2ba01477))), option)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestConnectRepairsFailedInitialProtocolEntry(t *testing.T) {
 	entryErr := errors.New("injected protocol-entry failure")
 	wire := &entryFailureWire{inner: swdsim.New(sim.New(0x2ba01477)), entryErrors: []error{entryErr}}
@@ -215,8 +226,14 @@ func TestReleaseCanRetryAfterWriteFailure(t *testing.T) {
 	if err := dp.Release(t.Context()); err == nil {
 		t.Fatal("Release() succeeded despite the injected write failure")
 	}
+	if err := dp.SetMaxWaits(1); err == nil {
+		t.Fatal("SetMaxWaits() succeeded while release was pending")
+	}
 	if err := dp.Release(t.Context()); err != nil {
 		t.Fatalf("retried Release() failed: %v", err)
+	}
+	if err := dp.SetMaxWaits(1); err != nil {
+		t.Fatalf("SetMaxWaits() after retried Release: %v", err)
 	}
 	if target.ctrl&allPower != 0 {
 		t.Fatalf("power state after retry = %#08x, want 0", target.ctrl)

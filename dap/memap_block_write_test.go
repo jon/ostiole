@@ -1,6 +1,7 @@
 package dap_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"slices"
@@ -37,6 +38,13 @@ type stagedCancelBlockWriteTarget struct {
 	*simpleObservedBlockWriteTarget
 	ctx   *stagedCancelContext
 	after int
+}
+
+type waitOncePerDRWWriteTarget struct {
+	*waitTarget
+	waitNext bool
+	waits    int
+	writes   int
 }
 
 type blockWriteWAITStage struct {
@@ -101,6 +109,26 @@ func (t *stagedCancelBlockWriteTarget) Acknowledge(ctx context.Context, req swds
 		t.ctx.armed = true
 	}
 	return err
+}
+
+func (t *waitOncePerDRWWriteTarget) Acknowledge(ctx context.Context, req swdsim.Request) error {
+	if req == apWrite(0x0c) && t.waitNext {
+		t.waitNext = false
+		t.waits++
+		return swd.ErrWait
+	}
+	return t.waitTarget.Acknowledge(ctx, req)
+}
+
+func (t *waitOncePerDRWWriteTarget) Write(ctx context.Context, req swdsim.Request, value uint32) error {
+	if err := t.waitTarget.Write(ctx, req, value); err != nil {
+		return err
+	}
+	if req == apWrite(0x0c) {
+		t.writes++
+		t.waitNext = true
+	}
+	return nil
 }
 
 func TestMEMAPWritesArbitraryBlocksInBothByteOrders(t *testing.T) {
@@ -381,10 +409,66 @@ func TestMEMAPWriteBlockStopsRetryingCompletionWhenContextEnds(t *testing.T) {
 	if target.writes != 4 {
 		t.Fatalf("DRW writes = %d, want 4 without replay", target.writes)
 	}
-	assertBlockReadDAPABORT(t, target.waitTarget)
+	assertDAPABORT(t, target.waitTarget)
 	assertBlockedMEMAPUsesNoWire(t, mem, wire)
 	if err := mem.Release(t.Context()); err != nil {
 		t.Fatalf("Release() after canceled block-write completion: %v", err)
+	}
+}
+
+func TestMEMAPWriteBlockStopsAtConfiguredWAITLimit(t *testing.T) {
+	target := &observedBlockWriteTarget{waitTarget: newWaitTarget(), waitAfter: 4, waitCount: -1}
+	addMEMAP(t, target, 0, 0x00010001, nil)
+	wire := &packedTxnWire{inner: swdsim.New(target), limit: 54}
+	dp := dap.NewDebugPort(swd.New(wire), dap.WithMaxWaits(3))
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := dap.OpenMemAP(t.Context(), dp, apSel(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data := blockWriteTestData(16)
+	n, err := mem.WriteBlock(t.Context(), 0, data)
+	if !errors.Is(err, swd.ErrWait) || !errors.Is(err, dap.ErrIndeterminate) || n != 0 {
+		t.Fatalf("WriteBlock() at WAIT limit = %d, %v, want 0, WAIT, and ErrIndeterminate", n, err)
+	}
+	if target.writes != 4 {
+		t.Fatalf("DRW writes = %d, want 4 without replay", target.writes)
+	}
+	if target.attempts != 3 {
+		t.Fatalf("RDBUFF attempts = %d, want 3", target.attempts)
+	}
+	assertDAPABORT(t, target.waitTarget)
+	assertBlockedMEMAPUsesNoWire(t, mem, wire)
+	if err := mem.Release(t.Context()); err != nil {
+		t.Fatalf("Release() after WAIT limit: %v", err)
+	}
+}
+
+func TestMEMAPWriteBlockCountsWAITsPerPhysicalWrite(t *testing.T) {
+	target := &waitOncePerDRWWriteTarget{waitTarget: newWaitTarget(), waitNext: true}
+	addMEMAP(t, target, 0, 0x00010001, nil)
+	wire := &packedTxnWire{inner: swdsim.New(target), limit: 54}
+	dp := dap.NewDebugPort(swd.New(wire), dap.WithMaxWaits(2))
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := dap.OpenMemAP(t.Context(), dp, apSel(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data := bytes.Repeat([]byte{0x44, 0x33, 0x22, 0x11}, 3)
+	if n, err := mem.WriteBlock(t.Context(), 0, data); err != nil || n != len(data) {
+		t.Fatalf("WriteBlock() = %d, %v, want %d, nil", n, err, len(data))
+	}
+	if target.waits != 3 || target.writes != 3 {
+		t.Fatalf("DRW WAIT responses = %d and accepted writes = %d, want 3 each", target.waits, target.writes)
+	}
+	if err := mem.Release(t.Context()); err != nil {
+		t.Fatalf("Release() after block write: %v", err)
 	}
 }
 

@@ -4,17 +4,24 @@
 // OpenMemAP validates one access port and snapshots the register values it will
 // change. Release them in reverse order: the MemAP first, then the DebugPort.
 //
+// DP, AP, transaction, and MEM-AP operations retry a clean WAIT on the same
+// physical request until their configured limit is reached or their context
+// ends. NewDebugPort uses only the context unless WithMaxWaits supplies a
+// response-count limit. SetMaxWaits can change that limit while the port is
+// idle. If the context ends, errors.Is reports the context error and the
+// original WAIT is not retained as swd.ErrWait; an independently joined
+// cleanup failure remains visible. A FAULT ends the operation. An accepted
+// write is not replayed; if its RDBUFF completion request returns WAIT, only
+// that request is retried.
+//
 // MemAP.ReadScalar and MemAP.WriteScalar perform aligned scalar target-memory
 // accesses; MemAP.ReadBlock and MemAP.WriteBlock accept arbitrary byte ranges.
-// ReadBlock and WriteBlock retry a clean WAIT on the same request until their
-// context ends. An accepted write is not replayed; if its RDBUFF completion
-// request returns WAIT, WriteBlock retries only that request. If single address
-// increment is unavailable, block access writes TAR before each word. Writes
-// change target memory at the addresses selected by their callers. The package
-// checks scalar value width, alignment, and advertised MEM-AP extensions, not
-// whether an address is safe to modify. If a failed Size64 transfer might have
-// started its first DRW access, release the MemAP and DebugPort before
-// reconnecting.
+// If single address increment is unavailable, block access writes TAR before
+// each word. Writes change target memory at the addresses selected by their
+// callers. The package checks scalar value width, alignment, and advertised
+// MEM-AP extensions, not whether an address is safe to modify. If a failed
+// Size64 transfer might have started its first DRW access, release the MemAP
+// and DebugPort before reconnecting.
 //
 // DebugPort and MemAP values are not safe for concurrent use. Serialize calls
 // that share either value or the underlying swd.Conn. A DebugPort requires

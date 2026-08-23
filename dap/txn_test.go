@@ -106,12 +106,17 @@ type rdbuffWaitTarget struct {
 	active bool
 	skip   int
 	seen   int
+	waits  int
 }
 
 func (t *rdbuffWaitTarget) Acknowledge(ctx context.Context, req swdsim.Request) error {
 	if t.active && req == (dpRead(0x0c)) {
 		if t.seen >= t.skip {
-			return swd.ErrWait
+			if t.waits > 0 {
+				t.waits--
+				return swd.ErrWait
+			}
+			return t.waitTarget.Acknowledge(ctx, req)
 		}
 		t.seen++
 	}
@@ -290,6 +295,71 @@ func TestDebugPortTransactionRetriesPackedWAITAndAbandonedSuffix(t *testing.T) {
 	if !slices.Equal(wire.calls, []int{216, 54, 108}) {
 		t.Fatalf("packed WAIT SWDIO bit counts = %v, want [216 54 108]", wire.calls)
 	}
+}
+
+func TestDebugPortTransactionRetriesWAITedRequestUntilTargetResponds(t *testing.T) {
+	for _, grammar := range []struct {
+		name   string
+		simple bool
+	}{{name: "overrun"}, {name: "simple", simple: true}} {
+		t.Run(grammar.name, func(t *testing.T) {
+			target := newWaitTarget()
+			addAP(t, target, 0, 0x24770011)
+			var wireTarget swdsim.Target = target
+			if grammar.simple {
+				wireTarget = &simpleBlockTarget{waitTarget: target}
+			}
+			dp := newDebugPort(t, wireTarget)
+			if _, err := dp.Connect(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+
+			target.arm(apRead(0x0c), 101)
+			txn := dp.NewTxn()
+			idr := txn.ReadAPIDR(apSel(0))
+			if err := txn.Commit(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			assertTxnValue(t, idr, 0x24770011)
+			for _, value := range target.abortValues {
+				if value&1 != 0 {
+					t.Fatalf("ABORT writes = %#v, want no DAPABORT before target response", target.abortValues)
+				}
+			}
+		})
+	}
+}
+
+func TestDebugPortTransactionStopsAtConfiguredWAITLimit(t *testing.T) {
+	target := newWaitTarget()
+	addAP(t, target, 0, 0x24770011)
+	dp := dap.NewDebugPort(swd.New(swdsim.New(target)), dap.WithMaxWaits(3))
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := dp.Release(context.Background()); err != nil {
+			t.Errorf("release SW-DP: %v", err)
+		}
+	})
+
+	target.arm(apRead(0x0c), -1)
+	txn := dp.NewTxn()
+	idr := txn.ReadAPIDR(apSel(0))
+	suffix := txn.ReadDP(dap.DPIDR)
+	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrWait) {
+		t.Fatalf("Commit() error = %v, want WAIT", err)
+	}
+	if _, err := idr.Value(); !errors.Is(err, swd.ErrWait) {
+		t.Fatalf("ReadAPIDR result error = %v, want WAIT", err)
+	}
+	if _, err := suffix.Value(); !errors.Is(err, dap.ErrNotExecuted) {
+		t.Fatalf("suffix result error = %v, want not executed", err)
+	}
+	if target.attempts != 3 {
+		t.Fatalf("AP read attempts = %d, want 3", target.attempts)
+	}
+	assertDAPABORT(t, target)
 }
 
 func TestDebugPortTransactionLosesFramingWhenPackedWAITCleanupFails(t *testing.T) {
@@ -772,13 +842,13 @@ func TestDebugPortTransactionRejectsOverrunChangeBeforeTraffic(t *testing.T) {
 	}
 }
 
-func TestDebugPortTransactionKeepsFramingAfterNonTransitionCTRLSTATBarrierWAIT(t *testing.T) {
+func TestDebugPortTransactionRetriesNonTransitionCTRLSTATBarrierWAIT(t *testing.T) {
 	testNonTransitionCTRLSTATBarrierWAIT(t, 2, 1, true)
 }
 
 func testNonTransitionCTRLSTATBarrierWAIT(t *testing.T, writeCount, skip int, wantOverrun bool) {
 	t.Helper()
-	target := &rdbuffWaitTarget{waitTarget: newWaitTarget(), skip: skip}
+	target := &rdbuffWaitTarget{waitTarget: newWaitTarget(), skip: skip, waits: 101}
 	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -797,16 +867,16 @@ func testNonTransitionCTRLSTATBarrierWAIT(t *testing.T, writeCount, skip int, wa
 	}
 	target.active = true
 	err = txn.Commit(t.Context())
-	if !errors.Is(err, swd.ErrWait) {
-		t.Fatalf("Commit() error = %v, want WAIT", err)
+	if err != nil {
+		t.Fatal(err)
 	}
 	for i := range writes[:len(writes)-1] {
 		if err := writes[i].Err(); err != nil {
 			t.Fatalf("write %d error = %v", i, err)
 		}
 	}
-	if err := writes[len(writes)-1].Err(); !errors.Is(err, dap.ErrIndeterminate) {
-		t.Fatalf("last write error = %v, want indeterminate", err)
+	if err := writes[len(writes)-1].Err(); err != nil {
+		t.Fatalf("last write error = %v, want nil", err)
 	}
 	if _, err := dp.ReadDP(t.Context(), dap.DPIDR); err != nil {
 		t.Fatalf("ReadDP(DPIDR) after non-transition WAIT: %v", err)
@@ -1002,25 +1072,28 @@ func TestDebugPortTransactionKeepsFaultDeterminateWhenCleanupLosesFraming(t *tes
 	}
 }
 
-func TestDebugPortTransactionKeepsWAITDeterminateWhenDAPABORTFails(t *testing.T) {
-	target := newWaitTarget()
+func TestDebugPortTransactionJoinsContextCancellationAndDAPABORTFailure(t *testing.T) {
+	base := newWaitTarget()
+	target := &cancelAfterOverrunClearTarget{waitTarget: base}
 	addAP(t, target, 0, 0x24770011)
-	dp := newDebugPort(t, target)
+	dp := dap.NewDebugPort(swd.New(swdsim.New(target)), dap.WithMaxWaits(3))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
 	abortErr := errors.New("injected DAPABORT failure")
-	target.abortErr = abortErr
+	base.abortErr = abortErr
+	ctx, cancel := context.WithCancel(t.Context())
+	target.cancel = cancel
 	target.arm(apRead(0x0c), -1)
 	txn := dp.NewTxn()
 	waited := txn.ReadAPIDR(apSel(0))
 	suffix := txn.ReadDP(dap.DPIDR)
-	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrWait) || !errors.Is(err, abortErr) {
-		t.Fatalf("Commit() error = %v, want WAIT and DAPABORT failure", err)
+	if err := txn.Commit(ctx); !errors.Is(err, context.Canceled) || !errors.Is(err, abortErr) || errors.Is(err, swd.ErrWait) {
+		t.Fatalf("Commit() error = %v, want context cancellation and DAPABORT failure without ErrWait", err)
 	}
-	if _, err := waited.Value(); !errors.Is(err, swd.ErrWait) || !errors.Is(err, abortErr) {
-		t.Fatalf("AP result error = %v, want WAIT and DAPABORT failure", err)
+	if _, err := waited.Value(); !errors.Is(err, context.Canceled) || !errors.Is(err, abortErr) || errors.Is(err, swd.ErrWait) {
+		t.Fatalf("AP result error = %v, want context cancellation and DAPABORT failure without ErrWait", err)
 	}
 	if _, err := waited.Value(); errors.Is(err, dap.ErrIndeterminate) {
 		t.Fatalf("AP result error = %v, want rejected request", err)
@@ -1247,7 +1320,8 @@ func TestDebugPortTransactionDoesNotInvalidateAPForRejectedDAPABORT(t *testing.T
 }
 
 func TestDebugPortTransactionInvalidatesAPForIndeterminateDAPABORT(t *testing.T) {
-	target := newWaitTarget()
+	base := newWaitTarget()
+	target := &cancelAfterOverrunClearTarget{waitTarget: base}
 	addMEMAP(t, target, 0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
 	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
@@ -1259,13 +1333,15 @@ func TestDebugPortTransactionInvalidatesAPForIndeterminateDAPABORT(t *testing.T)
 	}
 
 	target.waitAfterAbort = true
+	ctx, cancel := context.WithCancel(t.Context())
+	target.cancel = cancel
 	txn := dp.NewTxn()
 	abort := txn.WriteDP(dap.ABORT, 1)
-	if err := txn.Commit(t.Context()); !errors.Is(err, swd.ErrWait) || !errors.Is(err, dap.ErrIndeterminate) {
-		t.Fatalf("Commit() error = %v, want WAIT and indeterminate DAPABORT", err)
+	if err := txn.Commit(ctx); !errors.Is(err, context.Canceled) || !errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("Commit() error = %v, want context cancellation and indeterminate DAPABORT", err)
 	}
-	if err := abort.Err(); !errors.Is(err, swd.ErrWait) || !errors.Is(err, dap.ErrIndeterminate) {
-		t.Fatalf("DAPABORT result error = %v, want indeterminate write", err)
+	if err := abort.Err(); !errors.Is(err, context.Canceled) || !errors.Is(err, dap.ErrIndeterminate) {
+		t.Fatalf("DAPABORT result error = %v, want context cancellation and indeterminate write", err)
 	}
 	target.waitAfterAbort = false
 	assertMEMAPInvalidated(t, mem)
