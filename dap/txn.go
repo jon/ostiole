@@ -79,15 +79,20 @@ type txnOp struct {
 // lifecycle requirements as the corresponding DebugPort methods. Commit can
 // pack their physical SWD requests while preserving logical result order.
 type Txn struct {
-	dp        *DebugPort
-	ops       []txnOp
-	committed bool
+	dp               *DebugPort
+	ops              []txnOp
+	committed        bool
+	waitUntilContext bool
 }
 
 // NewTxn returns an empty transaction for dp. Commit requires an active
 // connection.
 func (dp *DebugPort) NewTxn() *Txn {
 	return &Txn{dp: dp}
+}
+
+func (dp *DebugPort) newTxnUntilContext() *Txn {
+	return &Txn{dp: dp, waitUntilContext: true}
 }
 
 // ReadDP queues one logical debug-port read.
@@ -541,7 +546,7 @@ func (t *Txn) handleBatchFailure(ctx context.Context, steps []txnStep, results [
 		return t.failBatchTransport(steps, results, batchErr)
 	}
 	if errors.Is(err, swd.ErrNotExecuted) {
-		return t.failStep(steps[0], batchErr)
+		return t.handleBatchNotExecuted(steps[0], batchErr, waits)
 	}
 	value, _ := results[0].value()
 	if errors.Is(err, swd.ErrWait) {
@@ -568,6 +573,13 @@ func (t *Txn) handleBatchFailure(ctx context.Context, steps []txnStep, results [
 		return t.failClockedSuffix(steps[:clocked], err)
 	}
 	return t.failClockedSuffix(steps[:clockedTransferCount(results)], errors.Join(err, batchErr))
+}
+
+func (t *Txn) handleBatchNotExecuted(step txnStep, batchErr error, waits map[txnStep]int) error {
+	if t.waitUntilContext && waits[step] > 0 {
+		return t.failStep(step, t.dp.finishWait(batchErr, stepMayAffectAP(step)))
+	}
+	return t.failStep(step, batchErr)
 }
 
 func (t *Txn) failBatchWAITCleanup(steps []txnStep, results []txnTransferResult, err error) error {
@@ -598,8 +610,14 @@ func (t *Txn) retryBatchWAIT(ctx context.Context, steps []txnStep, results []txn
 	}
 	waits[step]++
 	if err := ctx.Err(); err != nil {
-		cause := errors.Join(swd.ErrWait, err)
+		cause := error(err)
+		if !t.waitUntilContext {
+			cause = errors.Join(swd.ErrWait, err)
+		}
 		return t.failStep(step, t.dp.finishWait(cause, stepMayAffectAP(step)))
+	}
+	if t.waitUntilContext {
+		return nil
 	}
 	if waits[step] <= maxWaitRetries {
 		return nil

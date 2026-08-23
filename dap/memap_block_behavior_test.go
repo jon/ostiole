@@ -18,6 +18,36 @@ type failingBlockReadTarget struct {
 	err       error
 }
 
+type cancelingBlockWAITTarget struct {
+	*waitTarget
+	cancel context.CancelFunc
+	after  int
+}
+
+type simpleBlockTarget struct {
+	*waitTarget
+}
+
+type stagedCancelContext struct {
+	context.Context
+	done     chan struct{}
+	armed    bool
+	checks   int
+	canceled bool
+}
+
+type stagedCancelBlockWAITTarget struct {
+	*simpleBlockTarget
+	ctx *stagedCancelContext
+}
+
+type blockWAITStage struct {
+	name    string
+	waitFor swdsim.Request
+	addr    uint64
+	length  int
+}
+
 func (t *failingBlockReadTarget) Read(ctx context.Context, req swdsim.Request) (uint32, error) {
 	if t.err != nil && req == apRead(0x0c) {
 		if t.remaining == 0 {
@@ -26,6 +56,49 @@ func (t *failingBlockReadTarget) Read(ctx context.Context, req swdsim.Request) (
 		t.remaining--
 	}
 	return t.waitTarget.Read(ctx, req)
+}
+
+func (t *cancelingBlockWAITTarget) Acknowledge(ctx context.Context, req swdsim.Request) error {
+	err := t.waitTarget.Acknowledge(ctx, req)
+	if errors.Is(err, swd.ErrWait) && t.cancel != nil && t.attempts == t.after {
+		t.cancel()
+		t.cancel = nil
+	}
+	return err
+}
+
+func (t *simpleBlockTarget) Write(ctx context.Context, req swdsim.Request, value uint32) error {
+	if req == dpWrite(0x04) {
+		value &^= overrunDetect
+	}
+	return t.waitTarget.Write(ctx, req, value)
+}
+
+func (c *stagedCancelContext) Done() <-chan struct{} {
+	return c.done
+}
+
+func (c *stagedCancelContext) Err() error {
+	if !c.armed {
+		return c.Context.Err()
+	}
+	c.checks++
+	if c.checks == 1 {
+		return nil
+	}
+	if !c.canceled {
+		close(c.done)
+		c.canceled = true
+	}
+	return context.Canceled
+}
+
+func (t *stagedCancelBlockWAITTarget) Acknowledge(ctx context.Context, req swdsim.Request) error {
+	err := t.waitTarget.Acknowledge(ctx, req)
+	if errors.Is(err, swd.ErrWait) && !t.ctx.armed {
+		t.ctx.armed = true
+	}
+	return err
 }
 
 type blockReadParityWire struct {
@@ -101,7 +174,9 @@ func TestMEMAPReadBlockReturnsOnlyConfirmedPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target.armFaultAfter(apRead(0x0c), 3)
+	target.arm(apRead(0x0c), 101)
+	target.fault = true
+	target.faultAfter = 3
 	buf := make([]byte, len(data))
 	for i := range buf {
 		buf[i] = 0xee
@@ -229,9 +304,81 @@ func assertBlockedMEMAPUsesNoWire(t *testing.T, mem *dap.MemAP, wire *packedTxnW
 	}
 }
 
-func TestMEMAPReadBlockRetriesTheWAITedPipelineRequest(t *testing.T) {
+func testMEMAPReadBlockWAIT(t *testing.T, simple bool, stage blockWAITStage) {
 	target := newWaitTarget()
-	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 0x03020100, 4: 0x07060504, 8: 0x0b0a0908, 12: 0x0f0e0d0c})
+	var wireTarget swdsim.Target = target
+	if simple {
+		wireTarget = &simpleBlockTarget{waitTarget: target}
+	}
+	addMEMAP(t, target, 0, 0x00010001, nil)
+	data := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
+	if err := target.SetMEMAPBytes(apSel(0), 0, data); err != nil {
+		t.Fatal(err)
+	}
+	dp := newDebugPort(t, wireTarget)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if target.OverrunDetectEnabled() == simple {
+		t.Fatalf("ORUNDETECT = %t, want %t", target.OverrunDetectEnabled(), !simple)
+	}
+	mem, err := dap.OpenMemAP(t.Context(), dp, apSel(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeCSWWrites := target.executed[apWrite(0x00)]
+	target.arm(stage.waitFor, 101)
+	buf := make([]byte, stage.length)
+	n, err := mem.ReadBlock(t.Context(), stage.addr, buf)
+	if err != nil || n != len(buf) {
+		t.Fatalf("ReadBlock() after 101 WAITs = %d, %v; want %d, nil", n, err, len(buf))
+	}
+	want := data[stage.addr : stage.addr+uint64(stage.length)]
+	if !slices.Equal(buf, want) {
+		t.Fatalf("ReadBlock() = % x, want % x", buf, want)
+	}
+	if stage.waitFor == (dpRead(0x0c)) {
+		if got := target.executed[apWrite(0x00)] - beforeCSWWrites; got != 2 {
+			t.Fatalf("CSW writes after barrier WAIT = %d, want 2", got)
+		}
+	}
+	for _, value := range target.abortValues {
+		if value&1 != 0 {
+			t.Fatalf("ABORT writes = %#v, want no DAPABORT while retrying the request", target.abortValues)
+		}
+	}
+}
+
+func TestMEMAPReadBlockWaitsUntilTargetResponds(t *testing.T) {
+	stages := []blockWAITStage{
+		{name: "CSW write", waitFor: apWrite(0x00), length: 4},
+		{name: "CSW read", waitFor: apRead(0x00), length: 4},
+		{name: "TAR write", waitFor: apWrite(0x04), length: 4},
+		{name: "AP write barrier", waitFor: dpRead(0x0c), length: 4},
+		{name: "word pipeline", waitFor: apRead(0x0c), length: 16},
+		{name: "byte edge", waitFor: apRead(0x0c), addr: 1, length: 1},
+	}
+	grammars := []struct {
+		name   string
+		simple bool
+	}{
+		{name: "overrun"},
+		{name: "simple", simple: true},
+	}
+	for _, grammar := range grammars {
+		t.Run(grammar.name, func(t *testing.T) {
+			for _, stage := range stages {
+				t.Run(stage.name, func(t *testing.T) {
+					testMEMAPReadBlockWAIT(t, grammar.simple, stage)
+				})
+			}
+		})
+	}
+}
+
+func TestMEMAPReadBlockRejectsWAITWithPendingSELECT(t *testing.T) {
+	target := newWaitTarget()
+	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 0x03020100})
 	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -240,16 +387,93 @@ func TestMEMAPReadBlockRetriesTheWAITedPipelineRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target.arm(apRead(0x0c), 1)
-	buf := make([]byte, 16)
-	n, err := mem.ReadBlock(t.Context(), 0, buf)
-	if err != nil || n != len(buf) {
-		t.Fatalf("ReadBlock() after WAIT = %d, %v", n, err)
+	if _, err := dp.ReadDP(t.Context(), dap.DLCR); err != nil {
+		t.Fatal(err)
 	}
-	for i, value := range buf {
-		if value != byte(i) {
-			t.Fatalf("ReadBlock() byte %d = %#x", i, value)
+	target.deferWriteFor = dpWrite(0x08)
+	target.deferWrite = true
+	target.arm(dpRead(0x0c), 1)
+	buf := []byte{0xee, 0xee, 0xee, 0xee}
+	n, err := mem.ReadBlock(t.Context(), 0, buf)
+	if !errors.Is(err, swd.ErrWait) || !errors.Is(err, dap.ErrIndeterminate) || n != 0 {
+		t.Fatalf("ReadBlock() with ambiguous SELECT = %d, %v; want 0, WAIT, and ErrIndeterminate", n, err)
+	}
+	if !slices.Equal(buf, []byte{0xee, 0xee, 0xee, 0xee}) {
+		t.Fatalf("ReadBlock() changed the destination after ambiguous SELECT: % x", buf)
+	}
+	traffic := len(target.requests)
+	if _, err := mem.ReadWord(t.Context(), 0); err == nil {
+		t.Fatal("ReadWord() succeeded after ambiguous SELECT")
+	}
+	if len(target.requests) != traffic {
+		t.Fatalf("blocked MEM-AP read sent %d requests", len(target.requests)-traffic)
+	}
+	if err := mem.Release(t.Context()); err != nil {
+		t.Fatalf("Release() after ambiguous SELECT: %v", err)
+	}
+}
+
+func assertBlockReadDAPABORT(t *testing.T, target *waitTarget) {
+	t.Helper()
+	for _, value := range target.abortValues {
+		if value&1 != 0 {
+			return
 		}
+	}
+	t.Fatalf("ABORT writes = %#v, want DAPABORT", target.abortValues)
+}
+
+func TestMEMAPReadBlockStopsWaitingWhenContextEnds(t *testing.T) {
+	target := &cancelingBlockWAITTarget{waitTarget: newWaitTarget(), after: 101}
+	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 0x03020100})
+	dp := newDebugPort(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := dap.OpenMemAP(t.Context(), dp, apSel(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	target.cancel = cancel
+	target.arm(apRead(0x0c), -1)
+	buf := []byte{0xee, 0xee, 0xee, 0xee}
+	n, err := mem.ReadBlock(ctx, 0, buf)
+	if !errors.Is(err, context.Canceled) || errors.Is(err, swd.ErrWait) || n != 0 {
+		t.Fatalf("ReadBlock() after cancellation = %d, %v; want 0, context cancellation, and no ErrWait", n, err)
+	}
+	if !slices.Equal(buf, []byte{0xee, 0xee, 0xee, 0xee}) {
+		t.Fatalf("ReadBlock() changed the destination after cancellation: % x", buf)
+	}
+	if err := mem.Release(t.Context()); err != nil {
+		t.Fatalf("Release() after canceled block read: %v", err)
+	}
+}
+
+func TestMEMAPReadBlockCleansUpWhenCancellationPreventsRetry(t *testing.T) {
+	ctx := &stagedCancelContext{Context: t.Context(), done: make(chan struct{})}
+	target := &stagedCancelBlockWAITTarget{simpleBlockTarget: &simpleBlockTarget{waitTarget: newWaitTarget()}, ctx: ctx}
+	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 0x03020100})
+	dp := newDebugPort(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := dap.OpenMemAP(t.Context(), dp, apSel(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	target.arm(apRead(0x0c), -1)
+	buf := []byte{0xee, 0xee, 0xee, 0xee}
+	n, err := mem.ReadBlock(ctx, 0, buf)
+	if !errors.Is(err, context.Canceled) || errors.Is(err, swd.ErrWait) || n != 0 {
+		t.Fatalf("ReadBlock() when cancellation prevents retry = %d, %v; want 0, context cancellation, and no ErrWait", n, err)
+	}
+	if !slices.Equal(buf, []byte{0xee, 0xee, 0xee, 0xee}) {
+		t.Fatalf("ReadBlock() changed the destination after cancellation: % x", buf)
+	}
+	assertBlockReadDAPABORT(t, target.waitTarget)
+	if err := mem.Release(t.Context()); err != nil {
+		t.Fatalf("Release() after canceled retry: %v", err)
 	}
 }
 
@@ -270,10 +494,10 @@ func TestMEMAPReadBlockValidatesBeforeMemoryTraffic(t *testing.T) {
 	buf := []byte{0xaa, 0xaa, 0xaa, 0xaa}
 	beforeDRW := countRequests(target.requests, apRead(0x0c))
 	if n, err := mem.ReadBlock(t.Context(), 1, buf); err == nil || n != 0 {
-		t.Fatalf("ReadBlock() = %d, %v on a word-only MEM-AP", n, err)
+		t.Fatalf("ReadBlock() on a word-only MEM-AP = %d, %v; want 0, error", n, err)
 	}
 	if n, err := mem.ReadBlock(t.Context(), ^uint64(0), make([]byte, 2)); err == nil || n != 0 {
-		t.Fatalf("overflowing ReadBlock() = %d, %v", n, err)
+		t.Fatalf("overflowing ReadBlock() = %d, %v; want 0, error", n, err)
 	}
 	afterDRW := countRequests(target.requests, apRead(0x0c))
 	if afterDRW != beforeDRW || !slices.Equal(buf, []byte{0xaa, 0xaa, 0xaa, 0xaa}) {
@@ -284,6 +508,6 @@ func TestMEMAPReadBlockValidatesBeforeMemoryTraffic(t *testing.T) {
 func TestEmptyMEMAPReadBlockUsesNoPort(t *testing.T) {
 	var mem *dap.MemAP
 	if n, err := mem.ReadBlock(t.Context(), 0, nil); err != nil || n != 0 {
-		t.Fatalf("ReadBlock(nil) = %d, %v", n, err)
+		t.Fatalf("ReadBlock(nil) = %d, %v; want 0, nil", n, err)
 	}
 }

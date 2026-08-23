@@ -69,9 +69,13 @@ func validateBlockRange(addr uint64, length int, largeAddress bool) error {
 	return nil
 }
 
-// ReadBlock reads an arbitrary target-memory range into buf. It returns the
-// contiguous byte prefix definitely obtained before an error. Bytes beyond
-// that prefix are left unchanged.
+// ReadBlock reads an arbitrary target-memory range into buf. It retries the
+// same request after WAIT while selection and framing remain known, WAIT
+// cleanup succeeds, and ctx remains active. If selection, framing, or cleanup
+// becomes uncertain, it returns an error and the debug port requires repair. A
+// FAULT returns the contiguous byte prefix definitely obtained before the
+// fault. Cancellation and transport or protocol failures can also interrupt
+// the read; bytes beyond the returned prefix are left unchanged.
 func (m *MemAP) ReadBlock(ctx context.Context, addr uint64, buf []byte) (int, error) {
 	if len(buf) == 0 {
 		return 0, nil
@@ -115,7 +119,7 @@ func (m *MemAP) checkBlockSizes(ctx context.Context, segments []blockSegment) er
 			continue
 		}
 		checked |= bit
-		if err := m.selectSize(ctx, segment.size); err != nil {
+		if err := m.selectCSWUntilContext(ctx, segment.size, 0); err != nil {
 			return fmt.Errorf("dap: read target memory: %w", err)
 		}
 	}
@@ -123,7 +127,7 @@ func (m *MemAP) checkBlockSizes(ctx context.Context, segments []blockSegment) er
 }
 
 func (m *MemAP) readBlockEdge(ctx context.Context, buf []byte, segment blockSegment, n int) (int, error) {
-	value, err := m.ReadScalar(ctx, segment.address, segment.size)
+	value, err := m.readScalar(ctx, segment.address, segment.size, true)
 	if err != nil {
 		return n, err
 	}
@@ -156,10 +160,10 @@ func (m *MemAP) readWordSegment(ctx context.Context, buf []byte, segment blockSe
 }
 
 func (m *MemAP) readWordChunk(ctx context.Context, addr uint64, count int) ([]*ReadResult, error) {
-	if err := m.selectCSW(ctx, Size32, cswIncSingle); err != nil {
+	if err := m.selectCSWUntilContext(ctx, Size32, cswIncSingle); err != nil {
 		return nil, err
 	}
-	txn := m.dp.NewTxn()
+	txn := m.dp.newTxnUntilContext()
 	if m.largeAddress {
 		m.restoreTARHI = true
 		txn.writeAP(m.sel, memAPTARHI, uint32(addr>>32))

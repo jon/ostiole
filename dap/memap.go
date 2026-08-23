@@ -126,13 +126,26 @@ func (m *MemAP) ReadWord(ctx context.Context, addr uint32) (uint32, error) {
 // ReadScalar performs one aligned, sized target-memory read. The returned
 // value is right-justified regardless of target byte order or address lane.
 func (m *MemAP) ReadScalar(ctx context.Context, addr uint64, size TransferSize) (uint64, error) {
+	return m.readScalar(ctx, addr, size, false)
+}
+
+func (m *MemAP) readScalar(ctx context.Context, addr uint64, size TransferSize, waitUntilContext bool) (uint64, error) {
 	if err := m.checkScalar(addr, size, "read"); err != nil {
 		return 0, err
 	}
-	if err := m.selectSize(ctx, size); err != nil {
+	var err error
+	if waitUntilContext {
+		err = m.selectCSWUntilContext(ctx, size, 0)
+	} else {
+		err = m.selectSize(ctx, size)
+	}
+	if err != nil {
 		return 0, err
 	}
 	txn := m.scalarTxn(addr)
+	if waitUntilContext {
+		txn = m.scalarTxnUntilContext(addr)
+	}
 	low := txn.readAP(m.sel, memAPDRW)
 	var high *ReadResult
 	if size == Size64 {
@@ -225,11 +238,18 @@ func (m *MemAP) selectSize(ctx context.Context, size TransferSize) error {
 }
 
 func (m *MemAP) selectCSW(ctx context.Context, size TransferSize, addrInc uint32) error {
+	return m.selectCSWTxn(ctx, size, addrInc, m.dp.NewTxn())
+}
+
+func (m *MemAP) selectCSWUntilContext(ctx context.Context, size TransferSize, addrInc uint32) error {
+	return m.selectCSWTxn(ctx, size, addrInc, m.dp.newTxnUntilContext())
+}
+
+func (m *MemAP) selectCSWTxn(ctx context.Context, size TransferSize, addrInc uint32, txn *Txn) error {
 	encoding, err := transferSizeEncoding(size)
 	if err != nil {
 		return err
 	}
-	txn := m.dp.NewTxn()
 	m.restoreCSW = true
 	desired := m.csw&^(cswSize|cswAddrInc) | encoding | addrInc
 	txn.writeAP(m.sel, memAPCSW, desired)
@@ -268,7 +288,14 @@ func transferSizeEncoding(size TransferSize) (uint32, error) {
 }
 
 func (m *MemAP) scalarTxn(addr uint64) *Txn {
-	txn := m.dp.NewTxn()
+	return m.prepareScalarTxn(addr, m.dp.NewTxn())
+}
+
+func (m *MemAP) scalarTxnUntilContext(addr uint64) *Txn {
+	return m.prepareScalarTxn(addr, m.dp.newTxnUntilContext())
+}
+
+func (m *MemAP) prepareScalarTxn(addr uint64, txn *Txn) *Txn {
 	if m.largeAddress {
 		m.restoreTARHI = true
 		txn.writeAP(m.sel, memAPTARHI, uint32(addr>>32))
