@@ -239,7 +239,9 @@ Automatic address increment is guaranteed only across TAR bits `[9:0]`.
 Whether it crosses a 1 KiB boundary is implementation-defined in ADIv5. A
 portable block reader therefore stops the incrementing run and reprograms TAR
 at each boundary. It cannot assume TAR advances linearly across the boundary
-because it worked for the first kilobyte.
+because it worked for the first kilobyte. The host also has to read CSW back
+after requesting single address increment. If the setting does not stick, it
+can disable increment and write TAR before every word.
 
 Posted reads expose no result until a later AP read or RDBUFF. A failed
 completion therefore leaves the last read undelivered even if its memory

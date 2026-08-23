@@ -28,6 +28,10 @@ type simpleBlockTarget struct {
 	*waitTarget
 }
 
+type noAddressIncrementTarget struct {
+	*waitTarget
+}
+
 type stagedCancelContext struct {
 	context.Context
 	done     chan struct{}
@@ -70,6 +74,13 @@ func (t *cancelingBlockWAITTarget) Acknowledge(ctx context.Context, req swdsim.R
 func (t *simpleBlockTarget) Write(ctx context.Context, req swdsim.Request, value uint32) error {
 	if req == dpWrite(0x04) {
 		value &^= overrunDetect
+	}
+	return t.waitTarget.Write(ctx, req, value)
+}
+
+func (t *noAddressIncrementTarget) Write(ctx context.Context, req swdsim.Request, value uint32) error {
+	if req == apWrite(0x00) {
+		value &^= 0x30
 	}
 	return t.waitTarget.Write(ctx, req, value)
 }
@@ -192,6 +203,65 @@ func TestMEMAPReadBlockReturnsOnlyConfirmedPrefix(t *testing.T) {
 		if value != 0xee {
 			t.Fatalf("ReadBlock() changed unread byte %d to %#x", n+i, value)
 		}
+	}
+}
+
+func TestMEMAPReadBlockFallsBackWithoutSingleAddressIncrement(t *testing.T) {
+	target := &noAddressIncrementTarget{waitTarget: newWaitTarget()}
+	addMEMAP(t, target, 0, 0x00010001, nil)
+	data := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
+	if err := target.SetMEMAPBytes(apSel(0), 0, data); err != nil {
+		t.Fatal(err)
+	}
+	dp := newDebugPort(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := dap.OpenMemAP(t.Context(), dp, apSel(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, len(data))
+	n, err := mem.ReadBlock(t.Context(), 0, buf)
+	if err != nil || n != len(buf) {
+		t.Fatalf("ReadBlock() without address increment = %d, %v; want %d, nil", n, err, len(buf))
+	}
+	if !slices.Equal(buf, data) {
+		t.Fatalf("ReadBlock() = % x, want % x", buf, data)
+	}
+	if got := target.executed[apWrite(0x04)]; got != len(data)/4 {
+		t.Fatalf("TAR writes = %d, want %d", got, len(data)/4)
+	}
+}
+
+func TestMEMAPReadBlockFallbackReturnsConfirmedPrefix(t *testing.T) {
+	target := &noAddressIncrementTarget{waitTarget: newWaitTarget()}
+	addMEMAP(t, target, 0, 0x00010001, nil)
+	data := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
+	if err := target.SetMEMAPBytes(apSel(0), 0, data); err != nil {
+		t.Fatal(err)
+	}
+	dp := newDebugPort(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := dap.OpenMemAP(t.Context(), dp, apSel(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	target.arm(apRead(0x0c), 0)
+	target.fault = true
+	target.faultAfter = 2
+	buf := []byte{0xee, 0xee, 0xee, 0xee, 0xee, 0xee, 0xee, 0xee, 0xee, 0xee, 0xee, 0xee}
+	n, err := mem.ReadBlock(t.Context(), 0, buf)
+	if !errors.Is(err, swd.ErrFault) || n != 8 {
+		t.Fatalf("ReadBlock() fallback = %d, %v; want 8, FAULT", n, err)
+	}
+	if !slices.Equal(buf[:n], data[:n]) {
+		t.Fatalf("ReadBlock() prefix = % x, want % x", buf[:n], data[:n])
+	}
+	if !slices.Equal(buf[n:], []byte{0xee, 0xee, 0xee, 0xee}) {
+		t.Fatalf("ReadBlock() unread suffix = % x, want ee ee ee ee", buf[n:])
 	}
 }
 
