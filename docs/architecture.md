@@ -174,7 +174,11 @@ fails after its first DRW access might have started, ordinary debug-port
 traffic remains blocked until the MEM-AP and debug port are released. MEM-AP
 cleanup terminates an incomplete transfer through CSW before restoring TAR or
 TARHI. Arbitrary-range reads use sub-word edges and bounded word runs. No
-auto-incrementing word run crosses a 1 KiB TAR boundary.
+auto-incrementing word run crosses a 1 KiB TAR boundary. A block read retries
+the same request after WAIT while selection and framing remain known, WAIT
+cleanup succeeds, and its context remains active. If selection, framing, or
+cleanup becomes uncertain, the existing repair behavior applies. A FAULT
+returns the confirmed prefix instead of retrying the failed request.
 
 ADIv5 access-port enumeration scans all 256 APSEL values in bounded
 transactions. IDR zero means absent. The scan does not assume contiguous AP

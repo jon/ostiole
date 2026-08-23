@@ -49,7 +49,7 @@ func TestReadMEMAPBlockOverFTDI(t *testing.T) {
 	got := make([]byte, hardwareScratchSize)
 	n, err := mem.ReadBlock(ctx, addr, got)
 	if err != nil || n != len(got) {
-		t.Fatalf("ReadBlock() = %d, %v", n, err)
+		t.Fatalf("ReadBlock() = %d, %v; want %d, nil", n, err, len(got))
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("block bytes = % x, scalar bytes = % x", got, want)
