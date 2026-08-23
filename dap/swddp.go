@@ -10,13 +10,38 @@ import (
 
 const dlcrTurnaroundMask = uint32(3 << 8)
 
+// Option configures a DebugPort during construction. NewDebugPort applies
+// options in order and ignores zero Option values.
+type Option struct {
+	apply func(*debugPortOptions)
+}
+
+type debugPortOptions struct {
+	maxWaits uint
+}
+
+// WithMaxWaits limits clean WAIT responses for one physical request without
+// sending traffic. Reaching a nonzero limit returns swd.ErrWait. One disables
+// WAIT retries; zero leaves retrying bounded only by the operation context. The
+// limit counts responses, not time, and does not bound a blocked host call.
+func WithMaxWaits(maxWaits uint) Option {
+	return Option{apply: func(options *debugPortOptions) {
+		options.maxWaits = maxWaits
+	}}
+}
+
 // DebugPort enters and accesses one SW-DP through an SWD connection.
 //
 // Calls to a DebugPort and its underlying connection must be serialized.
 // DebugPort caches protocol state, so do not use the connection directly while
-// the debug port remains in use.
+// the debug port remains in use. A DebugPort retries the same physical request
+// after a clean WAIT until its configured limit is reached or the operation
+// context ends. It does not retry a FAULT. If the context ends, errors.Is
+// reports the context error and the original WAIT is not retained as
+// swd.ErrWait. Independently joined cleanup failures remain visible.
 type DebugPort struct {
 	conn         *swd.Conn
+	maxWaits     uint
 	identity     DPIDRInfo
 	identified   bool
 	reentryID    DPIDRInfo
@@ -24,14 +49,37 @@ type DebugPort struct {
 	state        debugPortState
 }
 
-// NewDebugPort returns a debug-port client over conn. Connect performs SWD
-// protocol entry. The caller must give the returned client exclusive use of
-// conn's transaction stream until the client is no longer used. Do not call
-// conn.Connect, conn.Release, conn.ReadDP, conn.WriteDP, conn.ReadAP,
-// conn.WriteAP, or conn.JTAGToSWD while using the DebugPort; doing so can
-// invalidate its cached register selection and response state.
-func NewDebugPort(conn *swd.Conn) *DebugPort {
-	return &DebugPort{conn: conn}
+// NewDebugPort returns a debug-port client over conn. The one-argument form
+// retries a clean WAIT while the operation context remains active. Built-in
+// options send no traffic. Connect performs SWD protocol entry. The caller must
+// give the returned client exclusive use of conn's transaction stream until
+// the client is no longer used. Do not call conn.Connect, conn.Release,
+// conn.ReadDP, conn.WriteDP, conn.ReadAP, conn.WriteAP, or conn.JTAGToSWD while
+// using the DebugPort; doing so can invalidate its cached register selection
+// and response state.
+func NewDebugPort(conn *swd.Conn, options ...Option) *DebugPort {
+	config := debugPortOptions{}
+	for _, option := range options {
+		if option.apply != nil {
+			option.apply(&config)
+		}
+	}
+	return &DebugPort{conn: conn, maxWaits: config.maxWaits}
+}
+
+// SetMaxWaits changes the clean WAIT response limit while the debug port is
+// idle. It sends no traffic. Zero uses only the operation context; one disables
+// WAIT retries. SetMaxWaits returns an error while the port is connected or
+// cleanup is pending. It can be called again after a successful Release.
+func (dp *DebugPort) SetMaxWaits(maxWaits uint) error {
+	if dp == nil {
+		return errors.New("dap: cannot set maximum WAIT responses on nil debug port")
+	}
+	if dp.state.session != sessionIdle {
+		return errors.New("dap: cannot set maximum WAIT responses unless debug port is idle")
+	}
+	dp.maxWaits = maxWaits
+	return nil
 }
 
 // ReadDP reads one logical ADIv5 debug-port register. Bank-independent and

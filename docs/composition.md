@@ -89,17 +89,23 @@ access rejects an invalid or unaligned address before traffic. Use it only when
 the caller understands the selected AP class and will restore any state the
 access changes. A raw MEM-AP data-register write can write target memory. This
 layer owns posted AP read and write completion and retries only the physical
-request that returned WAIT. A raw AP read or write which completes, or might
-have completed, invalidates existing `MemAP` values. After an extended AP stall,
-`dap.DebugPort` issues DAPABORT; existing
-`dap.MemAP` values reject further reads, though `dap.MemAP.Release` still
-attempts to restore their saved state. The SWD connection reads DPIDR, clears
-supported sticky conditions with ABORT, establishes bank zero through RDBUFF,
-and establishes its response grammar before DAP requests power. Debug-port
-CTRL/STAT writes must preserve ORUNDETECT. DAP settles a new SELECT through
-RDBUFF before sending AP traffic. If WAIT cleanup or a later retry leaves
-framing unknown, `dap.DebugPort` invalidates those values and later DP and AP
-calls stop before sending traffic.
+request that returned WAIT. `dap.NewDebugPort(conn)` uses the operation context
+as the retry bound. `dap.NewDebugPort(conn, dap.WithMaxWaits(1))` returns the
+first clean WAIT as `swd.ErrWait`. `SetMaxWaits` changes the limit before
+`Connect` or after a successful `Release`; it rejects the change while the port
+is connected or cleanup is pending. The count is per physical request and does
+not bound host I/O. A raw AP read or write which completes, or might have
+completed, invalidates existing `MemAP` values. If the limit or context ends
+after an AP WAIT, `dap.DebugPort` issues DAPABORT; existing `dap.MemAP` values
+reject further reads, though `dap.MemAP.Release` still attempts to restore their
+saved state.
+The SWD connection reads DPIDR, clears supported sticky conditions with ABORT,
+establishes bank zero through RDBUFF, and establishes its response grammar
+before DAP requests power.
+Debug-port CTRL/STAT writes must preserve ORUNDETECT. DAP settles a new SELECT
+through RDBUFF before sending AP traffic. If WAIT cleanup or a later retry
+leaves framing unknown, `dap.DebugPort` invalidates those values and later DP
+and AP calls stop before sending traffic.
 `Connect` performs bounded cleanup after failed setup. When cleanup succeeds,
 the debug port can connect again immediately. If cleanup also fails, or if
 `Release` fails, ordinary DP, AP, and MEM-AP operations remain blocked. Call
@@ -131,24 +137,23 @@ implementation-defined, so each access verifies that CSW accepted its size
 before touching memory. CFG.LD makes 64-bit access possible; CFG.LA permits
 addresses above 32 bits. `target/cortexm` uses `ReadWord` for its 32-bit reads.
 
-`MemAP.ReadBlock` accepts empty, unaligned, and mixed-width ranges. It retries
-the same request after WAIT while selection and framing remain known, WAIT
-cleanup succeeds, and its context remains active. If selection, framing, or
-cleanup becomes uncertain, repair is required. A FAULT returns the contiguous
-prefix read before the fault; cancellation and transport or protocol failures
-can also interrupt the read. The rest of the destination remains unchanged. No
-auto-incrementing word run crosses a 1 KiB TAR boundary; unaligned edges still
-require the MEM-AP to accept byte or halfword CSW sizes. If the MEM-AP does not
-accept single address increment, `ReadBlock` and `WriteBlock` write TAR before
-each word.
+`MemAP.ReadBlock` accepts empty, unaligned, and mixed-width ranges. It uses the
+same configured WAIT policy as the scalar and raw DAP operations. If selection,
+framing, or cleanup becomes uncertain, repair is required. A FAULT returns the
+contiguous prefix read before the fault; a configured WAIT limit, cancellation,
+and transport or protocol failures can also interrupt the read. The rest of the
+destination remains unchanged. No auto-incrementing word run crosses a 1 KiB
+TAR boundary; unaligned edges still require the MEM-AP to accept byte or
+halfword CSW sizes.
+If the MEM-AP does not accept single address increment, `ReadBlock` and
+`WriteBlock` write TAR before each word.
 
 `MemAP.WriteBlock` accepts the same ranges and uses the same geometry. Its
 returned prefix includes only chunks whose RDBUFF completion requests were
 accepted. If a failed chunk might already have changed memory, the error
 includes `dap.ErrIndeterminate`; the method does not retry that chunk
 automatically. An indeterminate chunk invalidates the `MemAP`, but `Release`
-remains available to restore its saved state. `WriteBlock` retries a clean WAIT
-on the same request until its context ends. An accepted write is not replayed;
+remains available to restore its saved state. An accepted write is not replayed;
 if its RDBUFF completion request returns WAIT, only that request is retried.
 
 `MemAP.WriteScalar` and `MemAP.WriteBlock` change target memory at the selected

@@ -51,16 +51,20 @@ and writes complete through `RDBUFF`. The simulator models the same DP and AP
 state changes. Raw access has the effects defined by the selected AP class;
 writing a MEM-AP data register can write target memory. Any raw access which
 completes or might have completed invalidates existing `MemAP` values.
-`dap.DebugPort` retries only the physical request that returned WAIT.
-After an extended AP stall, it issues DAPABORT rather than replaying the whole
-logical access. A MEM-AP client and its model can perform arbitrary-range and
-aligned-scalar reads and writes, then restore the CSW, TAR, and optional TARHI
-values changed by that access. Cleanup terminates an incomplete 64-bit transfer
-through CSW before restoring the target address registers. `ReadBlock` and
-`WriteBlock` retry a clean WAIT on the same request until their context ends. An
-accepted write is not replayed; if its RDBUFF completion request returns WAIT,
-`WriteBlock` retries only that request. If the MEM-AP does not accept single
-address increment, block access writes TAR before each word instead.
+`dap.DebugPort` retries only the physical request that returned WAIT. The
+one-argument `NewDebugPort` keeps retrying while the operation context remains
+active; `WithMaxWaits(1)` instead returns the first clean WAIT as `swd.ErrWait`.
+`SetMaxWaits` can change the limit while the port is idle. The count does not
+bound host I/O, so callers which need that bound still use a context deadline.
+A FAULT ends the operation. If a limit or context ends AP waiting, the debug
+port issues DAPABORT rather than replaying the whole logical access.
+A MEM-AP client and its model can perform arbitrary-range and aligned-scalar
+reads and writes, then restore the CSW, TAR, and optional TARHI values changed
+by that access. Cleanup terminates an incomplete 64-bit transfer through CSW
+before restoring the target address registers. An accepted write is not
+replayed; if its RDBUFF completion request returns WAIT, only that request is
+retried. If the MEM-AP does not accept single address increment, block access
+writes TAR before each word instead.
 
 The [examples](examples) begin with a raw SWD debug-port identity read, then
 add posted access-port reads and a Cortex-M identity read through a MEM-AP.

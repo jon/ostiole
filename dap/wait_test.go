@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/jon/ostiole/dap"
 	dapsim "github.com/jon/ostiole/dap/sim"
@@ -80,6 +79,34 @@ type cleanupFailWire struct {
 	reentries            int
 	trafficBeforeReentry int
 	onReentry            func()
+}
+
+type cancelAfterOverrunClearTarget struct {
+	*waitTarget
+	cancel context.CancelFunc
+}
+
+type cancelInFlightRetryTarget struct {
+	*waitTarget
+	cancel context.CancelFunc
+}
+
+func (t *cancelAfterOverrunClearTarget) Write(ctx context.Context, req swdsim.Request, value uint32) error {
+	err := t.waitTarget.Write(ctx, req, value)
+	if err == nil && t.cancel != nil && req == (dpWrite(0x00)) && value == 1<<4 {
+		t.cancel()
+		t.cancel = nil
+	}
+	return err
+}
+
+func (t *cancelInFlightRetryTarget) Acknowledge(ctx context.Context, req swdsim.Request) error {
+	if t.armed && req == t.waitFor && t.attempts == 1 && t.cancel != nil {
+		t.cancel()
+		t.cancel = nil
+		return ctx.Err()
+	}
+	return t.waitTarget.Acknowledge(ctx, req)
 }
 
 type reentryFailWire struct {
@@ -329,6 +356,16 @@ func (t *waitTarget) writeAbort(value uint32) error {
 	return nil
 }
 
+func assertDAPABORT(t *testing.T, target *waitTarget) {
+	t.Helper()
+	for _, value := range target.abortValues {
+		if value&1 != 0 {
+			return
+		}
+	}
+	t.Fatalf("ABORT writes = %#v, want DAPABORT", target.abortValues)
+}
+
 func (t *waitTarget) finishAccepted(req swdsim.Request) {
 	if t.armed && t.accepted && req == t.waitFor {
 		t.armed = false
@@ -377,24 +414,210 @@ func TestDebugPortRetriesOnlyTheWAITedTransfer(t *testing.T) {
 	}
 }
 
-func TestDebugPortDoesNotDelayWAITRetries(t *testing.T) {
+func TestDebugPortRetriesWAITedRequestUntilTargetResponds(t *testing.T) {
+	for _, grammar := range []struct {
+		name   string
+		simple bool
+	}{{name: "overrun"}, {name: "simple", simple: true}} {
+		t.Run(grammar.name, func(t *testing.T) {
+			target := newWaitTarget()
+			addAP(t, target, 0, 0x24770011)
+			var wireTarget swdsim.Target = target
+			if grammar.simple {
+				wireTarget = &simpleBlockTarget{waitTarget: target}
+			}
+			dp := newDebugPort(t, wireTarget)
+			if _, err := dp.Connect(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+
+			req := apRead(0x0c)
+			target.arm(req, 101)
+			value, err := dp.ReadAPIDR(t.Context(), apSel(0))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if value.Raw != 0x24770011 {
+				t.Fatalf("AP IDR = %#08x, want %#08x", value.Raw, uint32(0x24770011))
+			}
+			for _, value := range target.abortValues {
+				if value&1 != 0 {
+					t.Fatalf("ABORT writes = %#v, want no DAPABORT before target response", target.abortValues)
+				}
+			}
+		})
+	}
+}
+
+func TestDebugPortStopsAtConfiguredWAITLimit(t *testing.T) {
+	for _, grammar := range []struct {
+		name   string
+		simple bool
+	}{{name: "overrun"}, {name: "simple", simple: true}} {
+		t.Run(grammar.name, func(t *testing.T) {
+			target := newWaitTarget()
+			addAP(t, target, 0, 0x24770011)
+			var wireTarget swdsim.Target = target
+			if grammar.simple {
+				wireTarget = &simpleBlockTarget{waitTarget: target}
+			}
+			dp := dap.NewDebugPort(swd.New(swdsim.New(wireTarget)), dap.WithMaxWaits(3))
+			if _, err := dp.Connect(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := dp.Release(context.Background()); err != nil {
+					t.Errorf("release SW-DP: %v", err)
+				}
+			})
+
+			target.arm(apRead(0x0c), -1)
+			if _, err := dp.ReadAPIDR(t.Context(), apSel(0)); !errors.Is(err, swd.ErrWait) {
+				t.Fatalf("ReadAPIDR() error = %v, want WAIT", err)
+			}
+			if target.attempts != 3 {
+				t.Fatalf("AP read attempts = %d, want 3", target.attempts)
+			}
+			assertDAPABORT(t, target)
+		})
+	}
+}
+
+func TestDebugPortConfiguredWAITLimitDoesNotAbortDPWork(t *testing.T) {
+	target := newWaitTarget()
+	dp := dap.NewDebugPort(swd.New(swdsim.New(target)), dap.WithMaxWaits(1))
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dp.ReadDP(t.Context(), dap.DLCR); err != nil {
+		t.Fatal(err)
+	}
+
+	target.arm(dpRead(0x04), -1)
+	if _, err := dp.ReadDP(t.Context(), dap.DLCR); !errors.Is(err, swd.ErrWait) {
+		t.Fatalf("ReadDP(DLCR) error = %v, want WAIT", err)
+	}
+	if target.attempts != 1 {
+		t.Fatalf("DLCR read attempts = %d, want 1", target.attempts)
+	}
+	for _, value := range target.abortValues {
+		if value&1 != 0 {
+			t.Fatalf("ABORT writes = %#v, want no DAPABORT for DP work", target.abortValues)
+		}
+	}
+	if _, err := dp.ReadDP(t.Context(), dap.DPIDR); err != nil {
+		t.Fatalf("ReadDP(DPIDR) after WAIT limit: %v", err)
+	}
+}
+
+func TestDebugPortOptionsApplyInOrder(t *testing.T) {
+	target := newWaitTarget()
+	dp := dap.NewDebugPort(swd.New(swdsim.New(target)), dap.WithMaxWaits(3), dap.WithMaxWaits(1))
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	target.arm(dpRead(0x04), -1)
+	if _, err := dp.ReadDP(t.Context(), dap.CTRLSTAT); !errors.Is(err, swd.ErrWait) {
+		t.Fatalf("ReadDP() error = %v, want WAIT", err)
+	}
+	if target.attempts != 1 {
+		t.Fatalf("DP read attempts = %d, want 1", target.attempts)
+	}
+	target.armed = false
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDebugPortMaxWaitsCanChangeOnlyWhileIdle(t *testing.T) {
 	target := newWaitTarget()
 	addAP(t, target, 0, 0x24770011)
-	dp := newDebugPort(t, target)
+	dp := dap.NewDebugPort(swd.New(swdsim.New(target)), dap.WithMaxWaits(1))
+	if err := dp.SetMaxWaits(3); err != nil {
+		t.Fatalf("SetMaxWaits() before Connect: %v", err)
+	}
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
-	req := apRead(0x0c)
-	target.arm(req, 100)
-	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
-	defer cancel()
-	value, err := dp.ReadAPIDR(ctx, apSel(0))
+	requests := len(target.requests)
+	if err := dp.SetMaxWaits(1); err == nil {
+		t.Fatal("SetMaxWaits() succeeded while connected")
+	}
+	if len(target.requests) != requests {
+		t.Fatalf("SetMaxWaits() sent %d requests, want 0", len(target.requests)-requests)
+	}
+	target.arm(apRead(0x0c), 2)
+	if _, err := dp.ReadAPIDR(t.Context(), apSel(0)); err != nil {
+		t.Fatalf("ReadAPIDR() with pre-connect limit: %v", err)
+	}
+	if target.attempts != 3 {
+		t.Fatalf("AP read attempts = %d, want 3", target.attempts)
+	}
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := dp.SetMaxWaits(1); err != nil {
+		t.Fatalf("SetMaxWaits() after Release: %v", err)
+	}
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	target.arm(apRead(0x0c), -1)
+	if _, err := dp.ReadAPIDR(t.Context(), apSel(0)); !errors.Is(err, swd.ErrWait) {
+		t.Fatalf("ReadAPIDR() error = %v, want WAIT", err)
+	}
+	if target.attempts != 1 {
+		t.Fatalf("AP read attempts = %d, want 1", target.attempts)
+	}
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNilDebugPortRejectsMaxWaitsChange(t *testing.T) {
+	var dp *dap.DebugPort
+	if err := dp.SetMaxWaits(1); err == nil {
+		t.Fatal("SetMaxWaits() on nil DebugPort succeeded")
+	}
+}
+
+func TestMEMAPScalarAccessRetriesWAITedRequestsUntilTargetResponds(t *testing.T) {
+	target := newWaitTarget()
+	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 0x03020100})
+	dp := newDebugPort(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := dap.OpenMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if value.Raw != 0x24770011 {
-		t.Fatalf("AP IDR = %#08x", value.Raw)
+	t.Cleanup(func() {
+		if err := mem.Release(context.Background()); err != nil {
+			t.Errorf("release MEM-AP: %v", err)
+		}
+		if err := dp.Release(context.Background()); err != nil {
+			t.Errorf("release SW-DP: %v", err)
+		}
+	})
+
+	target.arm(apRead(0x0c), 101)
+	value, err := mem.ReadScalar(t.Context(), 0, dap.Size32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value != 0x03020100 || target.executed[apRead(0x0c)] != 1 {
+		t.Fatalf("ReadScalar() = %#08x after %d DRW executions, want %#08x after 1", value, target.executed[apRead(0x0c)], uint64(0x03020100))
+	}
+
+	target.arm(apWrite(0x0c), 101)
+	if err := mem.WriteScalar(t.Context(), 0, dap.Size32, 0x07060504); err != nil {
+		t.Fatal(err)
+	}
+	if target.executed[apWrite(0x0c)] != 1 {
+		t.Fatalf("DRW write executions = %d, want 1", target.executed[apWrite(0x0c)])
 	}
 }
 
@@ -759,10 +982,11 @@ func TestDebugPortReusesFullSELECTValue(t *testing.T) {
 	}
 }
 
-func TestDebugPortAbortsExtendedWAITAndClearsAbandonedWrite(t *testing.T) {
-	target := newWaitTarget()
+func TestDebugPortAbortsWAITWhenContextEndsAndClearsAbandonedWrite(t *testing.T) {
+	base := newWaitTarget()
+	target := &cancelAfterOverrunClearTarget{waitTarget: base}
 	addAP(t, target, 0, 0x24770011)
-	dp := newDebugPort(t, target)
+	dp := dap.NewDebugPort(swd.New(swdsim.New(target)), dap.WithMaxWaits(3))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -774,11 +998,13 @@ func TestDebugPortAbortsExtendedWAITAndClearsAbandonedWrite(t *testing.T) {
 
 	apWriteReq := apWrite(0x00)
 	rdbuffReq := dpRead(0x0c)
-	target.stickyAfterAbort = testWriteDataError
+	base.stickyAfterAbort = testWriteDataError
+	ctx, cancel := context.WithCancel(t.Context())
+	target.cancel = cancel
 	target.arm(rdbuffReq, -1)
-	err := dp.WriteRawAP(t.Context(), apSel(0).Address(0x00), 0x23000040)
-	if !errors.Is(err, swd.ErrWait) {
-		t.Fatalf("WriteRawAP() error = %v, want %v", err, swd.ErrWait)
+	err := dp.WriteRawAP(ctx, apSel(0).Address(0x00), 0x23000040)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("WriteRawAP() error = %v, want context cancellation", err)
 	}
 	if target.executed[apWriteReq] != 1 {
 		t.Fatalf("AP write executions = %d, want 1", target.executed[apWriteReq])
@@ -796,23 +1022,53 @@ func TestDebugPortAbortsExtendedWAITAndClearsAbandonedWrite(t *testing.T) {
 	}
 }
 
-func TestDebugPortDoesNotAbortExtendedDPWAIT(t *testing.T) {
-	target := newWaitTarget()
+func TestDebugPortDoesNotAbortDPWAITWhenContextEnds(t *testing.T) {
+	base := newWaitTarget()
+	target := &cancelAfterOverrunClearTarget{waitTarget: base}
 	addAP(t, target, 0, 0x24770011)
-	dp := newDebugPort(t, target)
+	dp := dap.NewDebugPort(swd.New(swdsim.New(target)), dap.WithMaxWaits(3))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
+	ctx, cancel := context.WithCancel(t.Context())
+	target.cancel = cancel
 	target.arm(dpWrite(0x08), -1)
-	_, err := dp.ReadAPIDR(t.Context(), apSel(0))
-	if !errors.Is(err, swd.ErrWait) {
-		t.Fatalf("ReadAPIDR() error = %v, want %v", err, swd.ErrWait)
+	_, err := dp.ReadAPIDR(ctx, apSel(0))
+	if !errors.Is(err, context.Canceled) || errors.Is(err, swd.ErrWait) {
+		t.Fatalf("ReadAPIDR() error = %v, want context cancellation without ErrWait", err)
 	}
 	for _, value := range target.abortValues {
 		if value&1 != 0 {
 			t.Fatalf("ABORT writes = %#v, DAPABORT is reserved for an AP transaction", target.abortValues)
 		}
+	}
+}
+
+func TestDebugPortDropsOriginalWAITWhenRetryIsCanceledInFlight(t *testing.T) {
+	base := newWaitTarget()
+	target := &cancelInFlightRetryTarget{waitTarget: base}
+	addAP(t, target, 0, 0x24770011)
+	dp := dap.NewDebugPort(swd.New(swdsim.New(target)))
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	target.cancel = cancel
+	target.arm(apRead(0x0c), -1)
+	if _, err := dp.ReadAPIDR(ctx, apSel(0)); !errors.Is(err, context.Canceled) || errors.Is(err, swd.ErrWait) {
+		t.Fatalf("ReadAPIDR() error = %v, want in-flight context cancellation without ErrWait", err)
+	}
+	requests := len(base.requests)
+	if _, err := dp.ReadDP(t.Context(), dap.DPIDR); err == nil {
+		t.Fatal("ReadDP(DPIDR) succeeded while repair is required")
+	}
+	if len(base.requests) != requests {
+		t.Fatalf("blocked ReadDP(DPIDR) sent %d requests", len(base.requests)-requests)
+	}
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatalf("Release() after in-flight cancellation: %v", err)
 	}
 }
 
@@ -1173,12 +1429,12 @@ func TestDebugPortKeepsFramingAfterWAITThenFAULT(t *testing.T) {
 	}
 
 	req := apRead(0x0c)
-	target.arm(req, 1)
+	target.arm(req, 101)
 	target.fault = true
 	if _, err := dp.ReadAPIDR(t.Context(), apSel(0)); !errors.Is(err, swd.ErrFault) {
 		t.Fatalf("ReadAPIDR() error = %v, want %v", err, swd.ErrFault)
 	}
-	if target.attempts != 2 || target.executed[req] != 0 {
+	if target.attempts != 102 || target.executed[req] != 0 {
 		t.Fatalf("WAIT-to-FAULT request attempted %d times and executed %d times", target.attempts, target.executed[req])
 	}
 	if _, err := mem.ReadWord(t.Context(), 0xe000ed00); err == nil || !strings.Contains(err.Error(), "invalidated") {
@@ -1198,8 +1454,9 @@ func TestDebugPortKeepsFramingAfterWAITThenFAULT(t *testing.T) {
 	}
 }
 
-func TestDebugPortPreservesWAITAndAbortFailure(t *testing.T) {
-	target := newWaitTarget()
+func TestDebugPortJoinsContextCancellationAndDAPABORTFailure(t *testing.T) {
+	base := newWaitTarget()
+	target := &cancelAfterOverrunClearTarget{waitTarget: base}
 	addAP(t, target, 0, 0x24770011)
 	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
@@ -1207,11 +1464,13 @@ func TestDebugPortPreservesWAITAndAbortFailure(t *testing.T) {
 	}
 
 	abortErr := errors.New("injected DAPABORT failure")
-	target.abortErr = abortErr
+	base.abortErr = abortErr
+	ctx, cancel := context.WithCancel(t.Context())
+	target.cancel = cancel
 	target.arm(apRead(0x0c), -1)
-	_, err := dp.ReadAPIDR(t.Context(), apSel(0))
-	if !errors.Is(err, swd.ErrWait) || !errors.Is(err, abortErr) {
-		t.Fatalf("ReadAPIDR() error = %v, want WAIT and abort failure", err)
+	_, err := dp.ReadAPIDR(ctx, apSel(0))
+	if !errors.Is(err, context.Canceled) || !errors.Is(err, abortErr) || errors.Is(err, swd.ErrWait) {
+		t.Fatalf("ReadAPIDR() error = %v, want context cancellation and abort failure without ErrWait", err)
 	}
 }
 
@@ -1383,7 +1642,8 @@ func TestDebugPortStopsRecoveryAfterStickyCleanupFailure(t *testing.T) {
 }
 
 func TestDebugPortStopsRecoveryAfterStickyStateReadFailure(t *testing.T) {
-	target := newWaitTarget()
+	base := newWaitTarget()
+	target := &cancelAfterOverrunClearTarget{waitTarget: base}
 	addAP(t, target, 0, 0x24770011)
 	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
@@ -1391,13 +1651,15 @@ func TestDebugPortStopsRecoveryAfterStickyStateReadFailure(t *testing.T) {
 	}
 
 	readErr := errors.New("injected sticky-state read failure")
-	target.readErrAfterAbort = readErr
+	base.readErrAfterAbort = readErr
 	selectReq := dpWrite(0x08)
 	target.executed[selectReq] = 0
+	ctx, cancel := context.WithCancel(t.Context())
+	target.cancel = cancel
 	target.arm(apRead(0x0c), -1)
-	_, err := dp.ReadAPIDR(t.Context(), apSel(0))
-	if !errors.Is(err, swd.ErrWait) || !errors.Is(err, readErr) {
-		t.Fatalf("ReadAPIDR() error = %v, want WAIT and sticky-state read failure", err)
+	_, err := dp.ReadAPIDR(ctx, apSel(0))
+	if !errors.Is(err, context.Canceled) || !errors.Is(err, readErr) {
+		t.Fatalf("ReadAPIDR() error = %v, want context cancellation and sticky-state read failure", err)
 	}
 	if target.executed[selectReq] != 1 {
 		t.Fatalf("SELECT writes = %d, want no write after sticky-state read failure", target.executed[selectReq])
@@ -1660,7 +1922,8 @@ func TestReentryRejectsChangedDebugPort(t *testing.T) {
 }
 
 func TestDebugPortRetriesSELECTAfterDAPAbort(t *testing.T) {
-	target := newWaitTarget()
+	base := newWaitTarget()
+	target := &cancelAfterOverrunClearTarget{waitTarget: base}
 	addAP(t, target, 0, 0x24770011)
 	target.selectWaits = 2
 	dp := newDebugPort(t, target)
@@ -1670,10 +1933,12 @@ func TestDebugPortRetriesSELECTAfterDAPAbort(t *testing.T) {
 
 	selectReq := dpWrite(0x08)
 	target.executed[selectReq] = 0
+	ctx, cancel := context.WithCancel(t.Context())
+	target.cancel = cancel
 	target.arm(apRead(0x0c), -1)
-	_, err := dp.ReadAPIDR(t.Context(), apSel(0))
-	if !errors.Is(err, swd.ErrWait) {
-		t.Fatalf("ReadAPIDR() error = %v, want %v", err, swd.ErrWait)
+	_, err := dp.ReadAPIDR(ctx, apSel(0))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("ReadAPIDR() error = %v, want context cancellation", err)
 	}
 	if target.selectAttempts != 2 {
 		t.Fatalf("post-abort SELECT WAITs = %d, want 2", target.selectAttempts)
@@ -1707,7 +1972,8 @@ func TestDebugPortAbortsWAITAfterContextCancellation(t *testing.T) {
 }
 
 func TestDAPAbortInvalidatesExistingMEMAP(t *testing.T) {
-	target := newWaitTarget()
+	base := newWaitTarget()
+	target := &cancelAfterOverrunClearTarget{waitTarget: base}
 	addMEMAP(t, target, 0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
 	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
@@ -1726,9 +1992,11 @@ func TestDAPAbortInvalidatesExistingMEMAP(t *testing.T) {
 		}
 	})
 
+	ctx, cancel := context.WithCancel(t.Context())
+	target.cancel = cancel
 	target.arm(dpRead(0x0c), -1)
-	if _, err := mem.ReadWord(t.Context(), 0xe000ed00); !errors.Is(err, swd.ErrWait) {
-		t.Fatalf("ReadWord() error = %v, want %v", err, swd.ErrWait)
+	if _, err := mem.ReadWord(ctx, 0xe000ed00); !errors.Is(err, context.Canceled) {
+		t.Fatalf("ReadWord() error = %v, want context cancellation", err)
 	}
 	_, err = mem.ReadWord(t.Context(), 0xe000ed00)
 	if err == nil || !strings.Contains(err.Error(), "invalidated") {
@@ -1749,7 +2017,8 @@ func assertMEMAPInvalidated(t *testing.T, mem *dap.MemAP) {
 }
 
 func TestMEMAPReleaseRearmsRestorationAfterDAPAbort(t *testing.T) {
-	target := newWaitTarget()
+	base := newWaitTarget()
+	target := &cancelAfterOverrunClearTarget{waitTarget: base}
 	addMEMAP(t, target, 0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
 	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
@@ -1779,9 +2048,11 @@ func TestMEMAPReleaseRearmsRestorationAfterDAPAbort(t *testing.T) {
 
 	tarReq := apWrite(0x04 & 0x0c)
 	before := target.executed[tarReq]
+	ctx, cancel := context.WithCancel(t.Context())
+	target.cancel = cancel
 	target.arm(apWrite(0x00&0x0c), -1)
-	if err := mem.Release(t.Context()); !errors.Is(err, swd.ErrWait) {
-		t.Fatalf("Release() error = %v, want WAIT", err)
+	if err := mem.Release(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Release() error = %v, want context cancellation", err)
 	}
 	if err := mem.Release(t.Context()); err != nil {
 		t.Fatalf("retried Release(): %v", err)

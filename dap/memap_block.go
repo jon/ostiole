@@ -73,15 +73,15 @@ func validateBlockRange(addr uint64, length int, largeAddress bool) error {
 	return nil
 }
 
-// ReadBlock reads an arbitrary target-memory range into buf. It retries the
-// same request after WAIT while selection and framing remain known, WAIT
-// cleanup succeeds, and ctx remains active. If selection, framing, or cleanup
-// becomes uncertain, it returns an error and the debug port requires repair. A
-// FAULT returns the contiguous byte prefix definitely obtained before the
-// fault. Cancellation and transport or protocol failures can also interrupt
-// the read; bytes beyond the returned prefix are left unchanged. If the MEM-AP
-// does not accept single address increment, ReadBlock writes TAR before each
-// word instead.
+// ReadBlock reads an arbitrary target-memory range into buf. Like other DAP
+// operations, it retries the same physical request after a clean WAIT until the
+// debug port's configured limit is reached or the operation context ends. If
+// selection, framing, or cleanup becomes uncertain, it returns an error and the
+// debug port requires repair. A FAULT returns the contiguous byte prefix
+// definitely obtained before the fault. Cancellation and transport or protocol
+// failures can also interrupt the read; bytes beyond the returned prefix are
+// left unchanged. If the MEM-AP does not accept single address increment,
+// ReadBlock writes TAR before each word instead.
 func (m *MemAP) ReadBlock(ctx context.Context, addr uint64, buf []byte) (int, error) {
 	if len(buf) == 0 {
 		return 0, nil
@@ -227,11 +227,11 @@ func (m *MemAP) putBlockValue(dst []byte, size TransferSize, value uint64) {
 // the current chunk might have reached memory, the error wraps ErrIndeterminate
 // and WriteBlock does not retry that chunk. An indeterminate chunk invalidates
 // the MemAP; Release remains available to restore its saved state. WriteBlock
-// retries the same request after WAIT while selection and framing remain known,
-// WAIT cleanup succeeds, and the context remains active. It never replays an
-// accepted write; if the RDBUFF completion request returns WAIT, it retries only
-// that request. If the MEM-AP does not accept single address increment,
-// WriteBlock writes TAR before each word.
+// retries the same physical request after a clean WAIT until the operation
+// context ends or the debug port's configured limit is reached. It never
+// replays an accepted write; if the RDBUFF completion request returns WAIT, it
+// retries only that request. If the MEM-AP does not accept single address
+// increment, WriteBlock writes TAR before each word.
 func (m *MemAP) WriteBlock(ctx context.Context, addr uint64, buf []byte) (int, error) {
 	if len(buf) == 0 {
 		return 0, nil
