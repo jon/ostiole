@@ -94,10 +94,6 @@ func (dp *DebugPort) NewTxn() *Txn {
 	return &Txn{dp: dp}
 }
 
-func (dp *DebugPort) newTxnUntilContext() *Txn {
-	return dp.NewTxn()
-}
-
 // ReadDP queues one logical debug-port read.
 func (t *Txn) ReadDP(reg DPRegister) *ReadResult {
 	return &ReadResult{result: t.queue(txnOp{kind: txnReadDP, dpReg: reg})}

@@ -125,13 +125,7 @@ func (m *MemAP) checkBlockSizes(ctx context.Context, segments []blockSegment, op
 			continue
 		}
 		checked |= bit
-		var err error
-		if operation == "read" {
-			err = m.selectCSWUntilContext(ctx, segment.size, 0)
-		} else {
-			err = m.selectCSWUntilContext(ctx, segment.size, 0)
-		}
-		if err != nil {
+		if err := m.selectCSW(ctx, segment.size, 0); err != nil {
 			return fmt.Errorf("dap: %s target memory: %w", operation, err)
 		}
 	}
@@ -139,7 +133,7 @@ func (m *MemAP) checkBlockSizes(ctx context.Context, segments []blockSegment, op
 }
 
 func (m *MemAP) readBlockEdge(ctx context.Context, buf []byte, segment blockSegment, n int) (int, error) {
-	value, err := m.readScalar(ctx, segment.address, segment.size, true)
+	value, err := m.readScalar(ctx, segment.address, segment.size)
 	if err != nil {
 		return n, err
 	}
@@ -172,13 +166,13 @@ func (m *MemAP) readWordSegment(ctx context.Context, buf []byte, segment blockSe
 }
 
 func (m *MemAP) readWordChunk(ctx context.Context, addr uint64, count int) ([]*ReadResult, error) {
-	if err := m.selectCSWUntilContext(ctx, Size32, cswIncSingle); err != nil {
+	if err := m.selectCSW(ctx, Size32, cswIncSingle); err != nil {
 		if errors.Is(err, errAddressIncrementUnsupported) {
 			return m.readWordsWithoutIncrement(ctx, addr, count)
 		}
 		return nil, err
 	}
-	txn := m.dp.newTxnUntilContext()
+	txn := m.dp.NewTxn()
 	if m.largeAddress {
 		m.restoreTARHI = true
 		txn.writeAP(m.sel, memAPTARHI, uint32(addr>>32))
@@ -193,12 +187,12 @@ func (m *MemAP) readWordChunk(ctx context.Context, addr uint64, count int) ([]*R
 }
 
 func (m *MemAP) readWordsWithoutIncrement(ctx context.Context, addr uint64, count int) ([]*ReadResult, error) {
-	if err := m.selectCSWUntilContext(ctx, Size32, 0); err != nil {
+	if err := m.selectCSW(ctx, Size32, 0); err != nil {
 		return nil, err
 	}
 	results := make([]*ReadResult, count)
 	for i := range results {
-		txn := m.scalarTxnUntilContext(addr + uint64(i*4))
+		txn := m.scalarTxn(addr + uint64(i*4))
 		results[i] = txn.readAP(m.sel, memAPDRW)
 		if err := txn.Commit(ctx); err != nil {
 			return results[:i+1], err
@@ -289,7 +283,7 @@ func (m *MemAP) writeBlockSegment(ctx context.Context, buf []byte, segment block
 }
 
 func (m *MemAP) writeBlockChunk(ctx context.Context, addr uint64, size TransferSize, addrInc uint32, values []uint32) (int, error) {
-	if err := m.selectCSWUntilContext(ctx, size, addrInc); err != nil {
+	if err := m.selectCSW(ctx, size, addrInc); err != nil {
 		if addrInc == cswIncSingle && errors.Is(err, errAddressIncrementUnsupported) {
 			return m.writeWordsWithoutIncrement(ctx, addr, size, values)
 		}
@@ -299,7 +293,7 @@ func (m *MemAP) writeBlockChunk(ctx context.Context, addr uint64, size TransferS
 }
 
 func (m *MemAP) writeWordsWithoutIncrement(ctx context.Context, addr uint64, size TransferSize, values []uint32) (int, error) {
-	if err := m.selectCSWUntilContext(ctx, size, 0); err != nil {
+	if err := m.selectCSW(ctx, size, 0); err != nil {
 		return 0, err
 	}
 	width, _ := sizeBytes(size)
@@ -317,15 +311,15 @@ func (m *MemAP) writeWordsWithoutIncrement(ctx context.Context, addr uint64, siz
 func (m *MemAP) writeBlockValues(ctx context.Context, addr uint64, values []uint32) (int, error) {
 	if m.largeAddress {
 		m.restoreTARHI = true
-		if err := m.writeAPUntilContext(ctx, memAPTARHI, uint32(addr>>32)); err != nil {
+		if err := m.writeBlockRegister(ctx, memAPTARHI, uint32(addr>>32)); err != nil {
 			return 0, err
 		}
 	}
 	m.restoreTAR = true
-	if err := m.writeAPUntilContext(ctx, memAPTAR, uint32(addr)); err != nil {
+	if err := m.writeBlockRegister(ctx, memAPTAR, uint32(addr)); err != nil {
 		return 0, err
 	}
-	writeTxn := m.dp.newTxnUntilContext()
+	writeTxn := m.dp.NewTxn()
 	writeTxn.writeAPSequence(m.sel, memAPDRW, values)
 	generation := m.dp.state.apGeneration
 	err := writeTxn.Commit(ctx)
@@ -342,8 +336,8 @@ func (m *MemAP) writeBlockValues(ctx context.Context, addr uint64, values []uint
 	return 0, err
 }
 
-func (m *MemAP) writeAPUntilContext(ctx context.Context, addr uint8, value uint32) error {
-	txn := m.dp.newTxnUntilContext()
+func (m *MemAP) writeBlockRegister(ctx context.Context, addr uint8, value uint32) error {
+	txn := m.dp.NewTxn()
 	txn.writeAP(m.sel, addr, value)
 	return txn.Commit(ctx)
 }
