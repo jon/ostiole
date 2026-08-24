@@ -18,14 +18,15 @@ family or every feature of a protocol.
 | macOS host access | Yes | IOKit and IOUSBLib through cgo; macOS 26 arm64 and Intel CI with a macOS 12 deployment target. |
 | Filtered enumeration | Yes | Explicit exact-product and vendor-only filters, including an exact product ID of zero; deterministic bus/address ordering and context checks. |
 | Exact open | Yes | Revalidates bus, address, vendor, and product before and after opening, then retains that identity on the device. |
+| Active configuration | Yes | Returns a detached snapshot of standard interface, alternate-setting, and endpoint descriptors without claiming or changing the device. |
 | Interface ownership | Yes | `ClaimedInterface` selects alternate settings and releases the interface; a failed release can be retried. `Device.Close` waits for that release. Linux reports contention rather than detaching a bound kernel driver. |
 | Control transfers | Yes | Synchronous, deadline-bounded endpoint-zero transfers. |
 | Bulk transfers | Yes | Synchronous, deadline-bounded bulk IN and OUT transfers. |
 | Linux FT232H ownership | HIL | Manual `ftdi_sio` unbind, unprivileged usbfs claim and MPSSE/SWD traffic, release, and explicit driver rebind. |
 | macOS FT232H ownership | HIL | Interface seizure, control/bulk traffic, MPSSE setup, close, and Apple driver rematch. |
 
-The USB package does not currently expose descriptor trees, device strings,
-hotplug events, multiple simultaneous interface claims, interrupt or
+The USB package does not currently expose device strings, hotplug events,
+multiple simultaneous interface claims, interrupt or
 isochronous transfers, device reset, or configuration switching.
 
 Linux is the only pure-Go host. macOS builds require cgo and the Xcode or

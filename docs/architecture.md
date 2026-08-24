@@ -33,7 +33,7 @@ debugger service.
 
 | Package | Responsibility |
 | --- | --- |
-| `usb` | Enumerate, open, claim, transfer through, and close one host USB attachment. |
+| `usb` | Enumerate, open, inspect the active standard configuration, claim, transfer through, and close one host USB attachment. |
 | `ftdi` | Own one explicitly selected FTDI MPSSE port and expose direction-safe SWD bits. |
 | `swd` | Enter SWD, establish its response grammar, and encode, execute, and validate individual or packed DP/AP register transactions. |
 | `swd/sim` | Model SWD protocol entry, register transfers, fixed-frame packing, and transfer limits without hardware. |
