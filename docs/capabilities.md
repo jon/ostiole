@@ -53,6 +53,13 @@ It does not inspect USB descriptors to verify a different layout. A listed
 USB identity is a candidate, not evidence that every board using that identity
 wires its MPSSE port for debugging.
 
+## J-Link USB discovery
+
+| Capability | Implemented | Validation and boundary |
+| --- | --- | --- |
+| Exact discovery catalog | Yes | Reviewed SEGGER application PIDs only; CDC-only `0x0106`, CMSIS-DAP `0x1008`, vendor wildcards, and inferred neighboring products are excluded. |
+| Session or target access | No | Discovery neither opens the application interface nor sends probe or target traffic. |
+
 ## Serial Wire Debug
 
 | Capability | Implemented | Validation and boundary |
@@ -150,8 +157,8 @@ the volatile DAP and MEM-AP state described above.
 
 ## Not currently provided
 
-There is no public J-Link or CMSIS-DAP driver, JTAG protocol layer, automatic
-probe discovery policy, CoreSight or ROM-table discovery,
+There is no public J-Link session or CMSIS-DAP driver, JTAG protocol layer,
+automatic probe discovery policy, CoreSight or ROM-table discovery,
 multi-core or SoC attachment, general target control, semihosting, trace,
 debugger protocol server, firmware flashing, FPGA programming, or Windows
 host implementation.

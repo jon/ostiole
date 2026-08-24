@@ -35,6 +35,7 @@ debugger service.
 | --- | --- |
 | `usb` | Enumerate, open, inspect the active standard configuration, claim, transfer through, and close one host USB attachment, including explicit asynchronous bulk transfers. |
 | `ftdi` | Own one explicitly selected FTDI MPSSE port and expose direction-safe SWD bits. |
+| `jlink` | List the exact J-Link USB application identities accepted by its driver. |
 | `swd` | Enter SWD, establish its response grammar, and encode, execute, and validate individual or packed DP/AP register transactions. |
 | `swd/sim` | Model SWD protocol entry, register transfers, fixed-frame packing, and transfer limits without hardware. |
 | `dap` | Manage SW-DP identity and power, ordered DP/AP transactions, posted AP access, and scalar or block MEM-AP access. |
@@ -65,6 +66,9 @@ silently opening a replacement.
 driver. It does not select a device. `ftdi.Open` derives the product from the
 opened USB device; `ftdi.Config` selects the MPSSE port and a maximum SWD
 clock. The channel reports the attainable clock it configured.
+
+`jlink.SupportedDevices` likewise returns exact candidate identities rather
+than a vendor wildcard. It does not open a session or select a target.
 
 This split keeps inventory policy in the application. Listing hardware does
 not claim an interface or send adapter or target traffic.

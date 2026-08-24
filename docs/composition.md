@@ -17,6 +17,7 @@ data-register write can write target memory.
 | Task | Public API | Executable reference |
 | --- | --- | --- |
 | List USB attachments understood by the FTDI driver | `usb.New`, `ftdi.SupportedDevices`, `Enumerator.List` | `ost ftdi list` |
+| List USB attachments understood by the J-Link driver | `usb.New`, `jlink.SupportedDevices`, `Enumerator.List` | Package tests |
 | Open one FTDI MPSSE SWD port | `Enumerator.Open`, `ftdi.Open` | `examples/trivial/swd-dpidr` |
 | Connect SWD or transfer DP/AP registers | `swd.New`, `Conn.Connect`, `Conn.ReadDP`, `Conn.WriteDP`, `Conn.ReadAP`, `Conn.WriteAP`, `Conn.NewBatch`, `Conn.Release` | `examples/trivial/swd-dpidr` |
 | Enter SWD, decode a DPIDR, and manage SW-DP power | `dap.NewDebugPort`, `DebugPort.Connect`, `DebugPort.Release` | `ost dap dp id` |
