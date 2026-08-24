@@ -17,7 +17,7 @@ data-register write can write target memory.
 | Task | Public API | Executable reference |
 | --- | --- | --- |
 | List USB attachments understood by the FTDI driver | `usb.New`, `ftdi.SupportedDevices`, `Enumerator.List` | `ost ftdi list` |
-| List USB attachments understood by the J-Link driver | `usb.New`, `jlink.SupportedDevices`, `Enumerator.List` | Package tests |
+| Read metadata from one J-Link | `usb.New`, `jlink.SupportedDevices`, `Enumerator.Open`, `jlink.Open`, `Session.Info` | Package tests |
 | Open one FTDI MPSSE SWD port | `Enumerator.Open`, `ftdi.Open` | `examples/trivial/swd-dpidr` |
 | Connect SWD or transfer DP/AP registers | `swd.New`, `Conn.Connect`, `Conn.ReadDP`, `Conn.WriteDP`, `Conn.ReadAP`, `Conn.WriteAP`, `Conn.NewBatch`, `Conn.Release` | `examples/trivial/swd-dpidr` |
 | Enter SWD, decode a DPIDR, and manage SW-DP power | `dap.NewDebugPort`, `DebugPort.Connect`, `DebugPort.Release` | `ost dap dp id` |
@@ -41,6 +41,46 @@ The current examples require exactly one supported FTDI attachment. A larger
 application can present the returned identities to a user, but it should
 still make one explicit selection before calling `Open`. Do not silently pick
 the first result from an ambiguous inventory.
+
+A metadata-only J-Link session follows the same explicit inventory rule:
+
+```go
+func readJLinkInfo(ctx context.Context) (_ jlink.Info, cleanup func() error, err error) {
+    enumerator := usb.New()
+    candidates, err := enumerator.List(ctx, jlink.SupportedDevices())
+    if err != nil {
+        return jlink.Info{}, nil, err
+    }
+    if len(candidates) != 1 {
+        return jlink.Info{}, nil, fmt.Errorf("found %d supported J-Links, want one", len(candidates))
+    }
+    device, err := enumerator.Open(ctx, candidates[0])
+    if err != nil {
+        return jlink.Info{}, nil, err
+    }
+    session, err := jlink.Open(ctx, device)
+    if err != nil {
+        closeErr := device.Close()
+        if closeErr != nil {
+            return jlink.Info{}, device.Close, errors.Join(err, closeErr)
+        }
+        return jlink.Info{}, nil, err
+    }
+    info := session.Info()
+    if err := session.Close(); err != nil {
+        return jlink.Info{}, session.Close, err
+    }
+    return info, nil, nil
+}
+```
+
+Inventory policy still belongs to the application. `jlink.Open` takes
+ownership on success. It claims only the J-Link application interface,
+resolves the active endpoints after selecting its alternate, and does not
+select or configure a target interface. If a close fails, the returned
+`cleanup` function keeps the affected device or session reachable. Calling it
+again either retries a retained interface claim or returns the cached
+device-close result.
 
 Pass the opened device to `ftdi.Open` with the MPSSE port and maximum requested
 clock. The driver reads and validates the product from the device identity;

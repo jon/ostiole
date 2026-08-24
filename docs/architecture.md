@@ -35,7 +35,7 @@ debugger service.
 | --- | --- |
 | `usb` | Enumerate, open, inspect the active standard configuration, claim, transfer through, and close one host USB attachment, including explicit asynchronous bulk transfers. |
 | `ftdi` | Own one explicitly selected FTDI MPSSE port and expose direction-safe SWD bits. |
-| `jlink` | List the exact J-Link USB application identities accepted by its driver. |
+| `jlink` | Find one reviewed J-Link USB application interface, own its session, and expose probe metadata. |
 | `swd` | Enter SWD, establish its response grammar, and encode, execute, and validate individual or packed DP/AP register transactions. |
 | `swd/sim` | Model SWD protocol entry, register transfers, fixed-frame packing, and transfer limits without hardware. |
 | `dap` | Manage SW-DP identity and power, ordered DP/AP transactions, posted AP access, and scalar or block MEM-AP access. |
@@ -68,7 +68,12 @@ opened USB device; `ftdi.Config` selects the MPSSE port and a maximum SWD
 clock. The channel reports the attainable clock it configured.
 
 `jlink.SupportedDevices` likewise returns exact candidate identities rather
-than a vendor wildcard. It does not open a session or select a target.
+than a vendor wildcard. `jlink.Open` inspects the active descriptors, rejects
+missing or ambiguous application interfaces, selects the descriptor-chosen
+alternate, resolves its active bulk endpoints, and reads metadata without
+selecting a target interface. An immediate reopen may briefly find the probe
+unconfigured; `jlink.Open` retries only that typed USB state for at most one
+second.
 
 This split keeps inventory policy in the application. Listing hardware does
 not claim an interface or send adapter or target traffic.
@@ -84,6 +89,7 @@ up and released in reverse order.
 | `*usb.Device` | Owns one open attachment. `ClaimInterface` returns the sole owner of one interface; that value reads the selected alternate before its first endpoint lookup, selects later alternates explicitly, submits bulk transfers, and releases the claim. A successful macOS alternate selection retains the active pipe properties IOKit reports. A failed alternate selection invalidates cached endpoint state so the next lookup reads the host state again. A failed release can be retried, and `Device.Close` does not close the attachment while release remains pending. |
 | `*usb.BulkTransfer` | Represents one request on one active bulk endpoint. Its buffer length is the requested transfer length; the endpoint address supplies direction. `Wait` reports the exact count for a successful short or zero-length completion, and ending the wait context does not cancel the request. A host-engine failure can end `Wait` before `Done` closes; the buffer remains host-owned until `Done`. `AbortBulk` cancels and performs a bounded drain of every pending request on the named endpoint. Failed cancellation or drain retains the requests and claim for another cleanup attempt. Closing the claim applies the same bound before release. |
 | `*ftdi.Channel` | Takes ownership of the USB device after `ftdi.Open` succeeds. It keeps enough ordered maximum-packet-sized IN requests armed to cover its largest response and consumes FTDI status-only completions independently of MPSSE writes. An ambiguous transfer or asynchronous receive failure poisons the channel before later traffic can use the command stream. Recovery requires closing it and opening a new one. `Close` drains bulk OUT before resetting bit mode, setting the latency timer to 16 ms, purging the receive and transmit paths, releasing the interface, and closing the device. A failed cancellation or interface release leaves the channel and device open for another `Close`. It does not preserve prior FTDI settings. |
+| `*jlink.Session` | Takes ownership of the USB device after `jlink.Open` succeeds. Metadata-only open claims the descriptor-selected application interface and resolves its active endpoint properties, but does not select or configure a target interface. An ambiguous bulk exchange or abandoned response poisons the session, and later commands require closing it and explicitly reopening the device. A failed interface release leaves `Close` retryable. Device close runs once, and later calls return its cached result. |
 | `*swd.Conn` | Owns one logical SWD transaction stream and the ORUNDETECT bit it adds. `Connect` establishes the target's response grammar and `Release` restores the inherited setting. It does not own a separate host resource. Calls must be serialized. |
 | `*dap.DebugPort` | Requires exclusive use of its SWD connection and owns only the debug and system power requests it adds. It records newly requested power bits before writing them so bounded cleanup can attempt to clear them even when the write's result is ambiguous. `Release` settles its final SELECT write through RDBUFF, releases power, then releases the SWD connection. |
 | `*dap.MemAP` | `OpenMemAP` validates the selected AP and saves its CSW, TAR, and optional TARHI. `Release` retries failed restoration; if DAPABORT interrupts cleanup, the next `Release` retries every saved value. Calls sharing the MEM-AP or its debug port must be serialized. |

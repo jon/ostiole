@@ -53,12 +53,21 @@ It does not inspect USB descriptors to verify a different layout. A listed
 USB identity is a candidate, not evidence that every board using that identity
 wires its MPSSE port for debugging.
 
-## J-Link USB discovery
+## J-Link USB session
 
 | Capability | Implemented | Validation and boundary |
 | --- | --- | --- |
 | Exact discovery catalog | Yes | Reviewed SEGGER application PIDs only; CDC-only `0x0106`, CMSIS-DAP `0x1008`, vendor wildcards, and inferred neighboring products are excluded. |
-| Session or target access | No | Discovery neither opens the application interface nor sends probe or target traffic. |
+| Application interface selection | Yes | Requires one unambiguous `ff/ff/ff` alternate setting with exactly one bulk IN and one bulk OUT endpoint. The descriptors select the interface, alternate, and endpoint addresses; after selection, the session resolves the active endpoint properties and uses the active bulk IN maximum packet size. An immediate reopen retries only `usb.ErrNotConfigured`, at 10 ms intervals for at most one second; other inspection errors return immediately. |
+| Firmware record | Yes | Retains the complete length-delimited record and exposes its first NUL-delimited field for display. |
+| Capabilities | Yes | Preserves the opaque short or long bitset. The long query is gated by short bit 31, and the common prefix must agree. |
+| Optional metadata | Yes | Capability-gated hardware version, workspace hint, available target interfaces, and current target interface. A selected interface outside the 0–31 range represented by the availability mask is rejected. |
+| Target-interface effects | No | Metadata-only `Open` does not select an interface, set a target clock, scan pins, reset, halt, or access the target. |
+| Ambiguous transfer handling | Yes | A failed, invalid, or progress-free bulk exchange poisons the session. Cancellation after a complete command but before its complete response is likewise ambiguous. The first transfer failure remains visible through cancellation cleanup; later commands require an explicit close and reopen. |
+| Metadata-only reopen | HIL | A genuine J-Link EDU Mini V2 completed 100 consecutive reopen tests, or 200 fresh sessions, on macOS. Every session returned its full firmware record, 256 capability bits, hardware version, workspace, available interfaces, and current interface. The selected interface remained SWD. No scan or target-control command was sent. |
+
+The J-Link metadata session does not depend on the FTDI adapter and does not
+introduce a shared probe abstraction. J-Link SWD scans are not implemented.
 
 ## Serial Wire Debug
 
@@ -157,7 +166,7 @@ the volatile DAP and MEM-AP state described above.
 
 ## Not currently provided
 
-There is no public J-Link session or CMSIS-DAP driver, JTAG protocol layer,
+There is no public J-Link SWD or CMSIS-DAP driver, JTAG protocol layer,
 automatic probe discovery policy, CoreSight or ROM-table discovery,
 multi-core or SoC attachment, general target control, semihosting, trace,
 debugger protocol server, firmware flashing, FPGA programming, or Windows
