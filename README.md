@@ -32,8 +32,8 @@ target, inspect a system, or provide a project-specific recovery utility.
 
 Ostiole is at an early, exploratory stage. The available packages provide
 native Linux and macOS USB access, an explicitly configured FTDI MPSSE path,
-descriptor-selected J-Link session metadata, and conservative raw Serial Wire
-Debug transactions without automatic retries.
+descriptor-selected J-Link metadata and SWD sessions, and conservative raw
+Serial Wire Debug transactions without automatic retries.
 
 The `swd/sim` package provides a hardware-free behavioral wire that models SWD
 protocol entry and basic DP/AP register transfers against a caller-supplied
@@ -72,8 +72,9 @@ They compose the public packages explicitly without duplicating their framing.
 The `target/cortexm` package reads and decodes the architectural CPUID value
 through any compatible target-word reader.
 
-This initial FTDI path uses the standard H-series MPSSE port and endpoint
-layout. Descriptor-driven port binding is not implemented yet.
+The FTDI path uses the standard H-series MPSSE port and endpoint layout.
+Descriptor-driven FTDI port binding is not implemented yet. J-Link instead
+selects its application interface from the active USB descriptors.
 
 ## Design direction
 

@@ -67,35 +67,38 @@ func (c ownedUSBClaim) SubmitBulk(ctx context.Context, endpoint uint8, buffer []
 // Session owns one J-Link application interface and its USB device. Calls on a
 // session must be serialized.
 type Session struct {
-	device      usbDevice
-	claim       usbClaim
-	application applicationInterface
-	input       []byte
-	info        Info
-	poisoned    bool
-	closeDone   bool
-	closeErr    error
+	device       usbDevice
+	claim        usbClaim
+	application  applicationInterface
+	input        []byte
+	info         Info
+	poisoned     bool
+	configured   bool
+	clockHz      uint32
+	transferBits int
+	delayInput   bool
+	inputCarry   bool
+	closeDone    bool
+	closeErr     error
 }
 
-// Open claims the J-Link application interface, reads probe metadata, and
-// takes ownership of device on success. It does not select or configure a
-// target interface. After an error, the caller must still call device.Close;
-// Open has already attempted cleanup.
-func Open(ctx context.Context, device *usb.Device) (*Session, error) {
+// Open claims the J-Link application interface, reads probe metadata, applies
+// its options, and takes ownership of the device on success. With no options it
+// does not select or configure a target interface. After an error, the caller
+// must still call device.Close; Open has already attempted cleanup.
+func Open(ctx context.Context, device *usb.Device, options ...Option) (*Session, error) {
 	if device == nil {
 		return nil, errors.New("jlink: nil USB device")
 	}
-	return openSession(ctx, ownedUSBDevice{Device: device})
+	return openSession(ctx, ownedUSBDevice{Device: device}, options...)
 }
 
-func openSession(ctx context.Context, device usbDevice) (_ *Session, err error) {
+func openSession(ctx context.Context, device usbDevice, options ...Option) (_ *Session, err error) {
 	if device == nil {
 		return nil, errors.New("jlink: nil USB device")
 	}
-	if ctx == nil {
-		return nil, errors.Join(errors.New("jlink: nil open context"), device.Close())
-	}
-	if err := ctx.Err(); err != nil {
+	config, err := prepareOpen(ctx, options)
+	if err != nil {
 		return nil, errors.Join(err, device.Close())
 	}
 	identity := device.Identity()
@@ -132,7 +135,17 @@ func openSession(ctx context.Context, device usbDevice) (_ *Session, err error) 
 	if err := session.readInfo(ctx); err != nil {
 		return nil, err
 	}
+	if err := configureOpen(ctx, session, config); err != nil {
+		return nil, err
+	}
 	return session, nil
+}
+
+func configureOpen(ctx context.Context, session *Session, config openConfig) error {
+	if !config.configureSWD {
+		return nil
+	}
+	return session.ConfigureSWD(ctx, config.maxClockHz)
 }
 
 func selectedEndpoint(ctx context.Context, claim usbClaim, address uint8, direction string) (usb.Endpoint, error) {
@@ -144,6 +157,29 @@ func selectedEndpoint(ctx context.Context, claim usbClaim, address uint8, direct
 		return usb.Endpoint{}, fmt.Errorf("jlink: invalid active bulk %s endpoint %#02x", direction, address)
 	}
 	return endpoint, nil
+}
+
+func prepareOpen(ctx context.Context, options []Option) (openConfig, error) {
+	if ctx == nil {
+		return openConfig{}, errors.New("jlink: nil open context")
+	}
+	if err := ctx.Err(); err != nil {
+		return openConfig{}, err
+	}
+	return applyOptions(options)
+}
+
+func applyOptions(options []Option) (openConfig, error) {
+	var config openConfig
+	for index, option := range options {
+		if option.apply == nil {
+			continue
+		}
+		if err := option.apply(&config); err != nil {
+			return openConfig{}, fmt.Errorf("jlink: option %d: %w", index, err)
+		}
+	}
+	return config, nil
 }
 
 func inspectApplication(ctx context.Context, device usbDevice) (applicationInterface, error) {
@@ -217,7 +253,10 @@ func (s *Session) readInfo(ctx context.Context) error {
 }
 
 func (s *Session) readVersion(ctx context.Context) error {
-	length, err := s.exchange(ctx, []byte{commandVersion}, 2)
+	if err := s.writeExact(ctx, []byte{commandVersion}); err != nil {
+		return fmt.Errorf("jlink: read firmware length: %w", err)
+	}
+	length, err := s.readResponsePart(ctx, 2)
 	if err != nil {
 		return fmt.Errorf("jlink: read firmware length: %w", err)
 	}
