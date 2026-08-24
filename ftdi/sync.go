@@ -7,10 +7,7 @@ import (
 
 func (c *Channel) synchronize(ctx context.Context) error {
 	const invalidCommand = 0xab
-	if err := c.writeExact(ctx, []byte{invalidCommand}); err != nil {
-		return err
-	}
-	payload, err := c.readPayload(ctx, 2)
+	payload, err := c.exchangePayload(ctx, []byte{invalidCommand, cmdSendImmediate}, 2)
 	if err != nil {
 		return err
 	}

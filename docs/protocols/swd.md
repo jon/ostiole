@@ -267,3 +267,25 @@ WAIT recovery remains simulator evidence.
 Measuring turnaround requires a capture of SWCLK, SWDIO, and the FTDI
 direction pin. A real WAIT still requires a target which can be made to stall;
 the ordinary transfers here did not produce one.
+
+## Linux explicit-transfer regression, 2026-08-25
+
+I moved the same FT232H and Cortex-M bench to an Ubuntu x86-64 host running
+Linux 6.8.0-137. The serialized read-only SWD and DAP integration tests read
+DPIDR `0x2BA01477`, found AP0 and AP1, completed packed transactions and a DAP
+reconnect, then restored the interface to `ftdi_sio`.
+
+The continuous-receive stress command was:
+
+```sh
+OSTIOLE_FTDI_HIL=1 OSTIOLE_FTDI_HIL_ENUMERATIONS=1000 \
+  go test -count=1 -tags=integration \
+  -run '^TestEnumerateAPsOverFTDI$' -v ./dap
+```
+
+One session completed all 1,000 AP enumerations with 1,024,022 physical OK
+acknowledgements, no WAIT, FAULT, or invalid acknowledgement, and one SWD
+entry. It used 32,033 physical SWDIO calls. The experiment exercises Linux
+usbfs submission, completion notification and reaping, endpoint cancellation,
+and release on this bench; it is not a USB or SWD waveform capture and does
+not establish behavior for another host controller or FTDI product.

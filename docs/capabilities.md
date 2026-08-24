@@ -19,9 +19,9 @@ family or every feature of a protocol.
 | Filtered enumeration | Yes | Explicit exact-product and vendor-only filters, including an exact product ID of zero; deterministic bus/address ordering and context checks. |
 | Exact open | Yes | Revalidates bus, address, vendor, and product before and after opening, then retains that identity on the device. |
 | Active configuration | Yes | Returns a detached snapshot of standard interface, alternate-setting, and endpoint descriptors without claiming or changing the device. |
-| Interface ownership | Yes | `ClaimedInterface` selects alternate settings and releases the interface; a failed release can be retried. `Device.Close` waits for that release. Linux reports contention rather than detaching a bound kernel driver. |
+| Interface ownership | Yes | `ClaimedInterface` reads the current alternate setting before its first endpoint lookup, selects later alternates explicitly, and releases the interface. A failed alternate selection invalidates its endpoint cache; a failed release can be retried. `Device.Close` waits for that release. Linux reports contention rather than detaching a bound kernel driver. |
 | Control transfers | Yes | Synchronous, deadline-bounded endpoint-zero transfers. |
-| Bulk transfers | Yes | Synchronous, deadline-bounded bulk IN and OUT transfers. |
+| Bulk transfers | Yes | A claimed interface exposes active endpoint descriptors and accepts explicit asynchronous transfers by endpoint address and buffer length. Short and zero-length completions remain visible. Wait cancellation does not cancel a request. A host-engine error ends pending waits without releasing buffers which native requests still own. Endpoint abort and claim close use bounded drains; failed cancellation or drain retains the requests and claim for a retry. Pairing, buffer sizing, ordering across handles, and read scheduling belong to the adapter driver. |
 | Linux FT232H ownership | HIL | Manual `ftdi_sio` unbind, unprivileged usbfs claim and MPSSE/SWD traffic, release, and explicit driver rebind. |
 | macOS FT232H ownership | HIL | Interface seizure, control/bulk traffic, MPSSE setup, close, and Apple driver rematch. |
 
@@ -42,8 +42,10 @@ for the host setup required by physical Linux USB operations.
 | FT2232H | Yes | Ports A and B using the standard H-series interface and endpoint layout. |
 | FT4232H | Yes | Ports A and B using the standard H-series interface and endpoint layout. |
 | Explicit clock | Yes | `MaxClockHz` is a ceiling; `Channel.ClockHz` reports the attainable configured rate. Examples request 400 kHz. |
-| MPSSE lifecycle | Yes | Claim, reset, synchronize, configure pins/clock, reset bit mode, set the latency timer to 16 ms, purge the receive and transmit paths, release, and close. |
-| SWD bit streams | Yes | Direction-safe output and input runs with exact bulk exchange. |
+| MPSSE lifecycle | Yes | Claim, reset bit mode, purge stale traffic, synchronize, and configure pins and clock. Close drains pending bulk OUT work before resetting bit mode, setting the latency timer to 16 ms, purging the receive and transmit paths, releasing, and closing. |
+| SWD bit streams | Yes | Direction-safe output and input runs. Enough maximum-packet-sized IN transfers remain posted to cover the largest response admitted by the 16,384-bit SWD limit, including FTDI status bytes. That requires seventeen requests for a 512-byte endpoint and 133 for a 64-byte endpoint. The receive path consumes them in submission order, replenishes each before delivering its payload, and discards status-only packets independently of OUT completion. |
+| Ambiguous transfer handling | Yes | A USB error, including an asynchronous receive failure, invalid transfer count, malformed FTDI packet, or surplus payload poisons the channel. A call which observes the poisoned channel returns the first cause and matches `ErrChannelPoisoned`; later SWD traffic requires a fresh channel. `Close` remains available and retryable. |
+| Continuous receive | HIL | One FT232H session completed 1,000 consecutive full AP enumerations on each host: 1,024,012 physical OK acknowledgements on macOS and 1,024,022 on Linux, with no WAIT, FAULT, or invalid acknowledgement and one SWD entry per run. The macOS bench had reproduced intermittent OUT completion failures when IN was not kept armed. |
 | JTAG | No | No public JTAG engine or FTDI JTAG interface exists. |
 
 The driver binds the standard FTDI H-series interfaces and endpoint numbers.

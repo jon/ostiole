@@ -13,12 +13,14 @@ import (
 
 // Device is one open Linux usbfs attachment.
 type Device struct {
-	file      *os.File
-	identity  DeviceInfo
-	ioctl     ioctlFunc
-	claim     *ClaimedInterface
-	closeOnce sync.Once
-	closeErr  error
+	file          *os.File
+	identity      DeviceInfo
+	ioctl         ioctlFunc
+	newBulkPoller func(uintptr) (linuxBulkPoller, error)
+	claim         *ClaimedInterface
+	bulk          sync.Mutex
+	closeOnce     sync.Once
+	closeErr      error
 }
 
 // Open opens the exact attachment selected during enumeration.

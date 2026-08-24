@@ -27,17 +27,22 @@ func (c *Channel) SWDIO(ctx context.Context, direction, output []byte, bits int)
 	if bits < 0 || len(direction)*8 < bits || len(output)*8 < bits {
 		return nil, fmt.Errorf("ftdi: invalid %d-bit SWD stream", bits)
 	}
-	commands, reads := swdCommands(direction, output, bits)
-	if err := c.writeExact(ctx, commands); err != nil {
+	if err := c.transportReady(); err != nil {
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	commands, reads := swdCommands(direction, output, bits)
 	var response []byte
 	if len(reads) != 0 {
 		var err error
-		response, err = c.readPayload(ctx, len(reads))
+		response, err = c.exchangePayload(ctx, commands, len(reads))
 		if err != nil {
 			return nil, err
 		}
+	} else if err := c.writeExact(ctx, commands); err != nil {
+		return nil, err
 	}
 	return decodeSWD(response, reads, bits), nil
 }

@@ -50,6 +50,60 @@ returned channel rather than separately closing the device. After an error,
 call `Device.Close`. `Open` has already attempted cleanup, so that call either
 finishes cleanup or harmlessly repeats it.
 
+Adapter drivers submit USB transfers through the claimed interface and keep
+their scheduling policy themselves:
+
+```go
+claim, err := device.ClaimInterface(0)
+if err != nil {
+    return err
+}
+endpoint, err := claim.Endpoint(ctx, 0x81)
+if err != nil {
+    return errors.Join(err, claim.Close())
+}
+if endpoint.TransferType != usb.TransferBulk || endpoint.MaxPacketSize == 0 {
+    return errors.Join(errors.New("invalid bulk IN endpoint"), claim.Close())
+}
+buffer := make([]byte, endpoint.MaxPacketSize)
+input, err := claim.SubmitBulk(ctx, endpoint.Address, buffer)
+if err != nil {
+    return errors.Join(err, claim.Close())
+}
+output, err := claim.SubmitBulk(ctx, 0x02, command)
+if err != nil {
+    return errors.Join(err, claim.AbortBulk(endpoint.Address), claim.Close())
+}
+if _, err := output.Wait(ctx); err != nil {
+    return errors.Join(err, claim.AbortBulk(0x02), claim.AbortBulk(endpoint.Address), claim.Close())
+}
+received, err := input.Wait(ctx)
+if err != nil {
+    return errors.Join(err, claim.Close())
+}
+completion := buffer[:received]
+if err := consume(completion); err != nil {
+    return errors.Join(err, claim.Close())
+}
+return claim.Close()
+```
+
+This example posts one IN request before its OUT request. A protocol which
+needs a receive window submits several maximum-packet-sized buffers instead;
+one which does not tolerate read-ahead submits its IN request only when the
+response is due. Each handle reports its own completion, including a short or
+zero-length transfer. Ending a `Wait` context does not cancel the request.
+If the host transfer engine fails, `Wait` returns that error while `Done` can
+remain open; the caller must not reuse the buffer until `Done` closes.
+`AbortBulk` is endpoint-wide and performs a bounded drain of every pending
+request on that endpoint. A drain timeout matches `context.DeadlineExceeded`.
+If native cancellation or the drain fails, those requests and the claim remain
+owned so cleanup can be retried. Closing the claim applies the same bound
+across its endpoints before release. The first endpoint lookup reads the
+interface's current alternate setting; a new claim does not imply alternate
+zero. If alternate selection fails, the next endpoint lookup reads the host
+state again instead of retaining descriptors for the previous alternate.
+
 ## Choose between raw SWD and DAP
 
 Use `swd.Conn` when the application needs one explicit wire-protocol

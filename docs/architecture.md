@@ -33,7 +33,7 @@ debugger service.
 
 | Package | Responsibility |
 | --- | --- |
-| `usb` | Enumerate, open, inspect the active standard configuration, claim, transfer through, and close one host USB attachment. |
+| `usb` | Enumerate, open, inspect the active standard configuration, claim, transfer through, and close one host USB attachment, including explicit asynchronous bulk transfers. |
 | `ftdi` | Own one explicitly selected FTDI MPSSE port and expose direction-safe SWD bits. |
 | `swd` | Enter SWD, establish its response grammar, and encode, execute, and validate individual or packed DP/AP register transactions. |
 | `swd/sim` | Model SWD protocol entry, register transfers, fixed-frame packing, and transfer limits without hardware. |
@@ -77,8 +77,9 @@ up and released in reverse order.
 | Value | Ownership rule |
 | --- | --- |
 | `*usb.Enumerator` | Holds inventory configuration, not an open attachment. |
-| `*usb.Device` | Owns one open attachment. `ClaimInterface` returns the sole owner of one interface; that value selects alternates and releases the claim. A failed release can be retried, and `Device.Close` does not close the attachment while release remains pending. |
-| `*ftdi.Channel` | Takes ownership of the USB device after `ftdi.Open` succeeds. `Close` resets bit mode, sets the latency timer to 16 ms, purges the receive and transmit paths, releases the interface, and closes the device. A failed interface release leaves the channel and device open for another `Close`. It does not preserve prior FTDI settings. |
+| `*usb.Device` | Owns one open attachment. `ClaimInterface` returns the sole owner of one interface; that value reads the selected alternate before its first endpoint lookup, selects later alternates explicitly, submits bulk transfers, and releases the claim. A failed alternate selection invalidates cached endpoint state so the next lookup reads the host state again. A failed release can be retried, and `Device.Close` does not close the attachment while release remains pending. |
+| `*usb.BulkTransfer` | Represents one request on one active bulk endpoint. Its buffer length is the requested transfer length; the endpoint address supplies direction. `Wait` reports the exact count for a successful short or zero-length completion, and ending the wait context does not cancel the request. A host-engine failure can end `Wait` before `Done` closes; the buffer remains host-owned until `Done`. `AbortBulk` cancels and performs a bounded drain of every pending request on the named endpoint. Failed cancellation or drain retains the requests and claim for another cleanup attempt. Closing the claim applies the same bound before release. |
+| `*ftdi.Channel` | Takes ownership of the USB device after `ftdi.Open` succeeds. It keeps enough ordered maximum-packet-sized IN requests armed to cover its largest response and consumes FTDI status-only completions independently of MPSSE writes. An ambiguous transfer or asynchronous receive failure poisons the channel before later traffic can use the command stream. Recovery requires closing it and opening a new one. `Close` drains bulk OUT before resetting bit mode, setting the latency timer to 16 ms, purging the receive and transmit paths, releasing the interface, and closing the device. A failed cancellation or interface release leaves the channel and device open for another `Close`. It does not preserve prior FTDI settings. |
 | `*swd.Conn` | Owns one logical SWD transaction stream and the ORUNDETECT bit it adds. `Connect` establishes the target's response grammar and `Release` restores the inherited setting. It does not own a separate host resource. Calls must be serialized. |
 | `*dap.DebugPort` | Requires exclusive use of its SWD connection and owns only the debug and system power requests it adds. It records newly requested power bits before writing them so bounded cleanup can attempt to clear them even when the write's result is ambiguous. `Release` settles its final SELECT write through RDBUFF, releases power, then releases the SWD connection. |
 | `*dap.MemAP` | `OpenMemAP` validates the selected AP and saves its CSW, TAR, and optional TARHI. `Release` retries failed restoration; if DAPABORT interrupts cleanup, the next `Release` retries every saved value. Calls sharing the MEM-AP or its debug port must be serialized. |
@@ -198,11 +199,25 @@ address and encoding, but it does not know about USB, FTDI, or SWD.
 
 The `usb` API is the same on both supported hosts:
 
-- Linux uses sysfs for inventory and usbfs for ownership and transfers. It is
-  implemented in pure Go.
+- Linux uses sysfs for inventory and usbfs for ownership and transfers. Each
+  bulk request is one pinned usbfs URB. One claim-owned worker submits, reaps,
+  cancels, and drains those URBs while a companion waits for completion
+  readiness on the usbfs descriptor. A terminal readiness or reap failure
+  stops new submissions and wakes pending waits without releasing buffers
+  still owned by the kernel. It is implemented in pure Go.
 - macOS uses cgo with the system IOKit and CoreFoundation frameworks. Claiming
   an interface temporarily seizes that interface from its current driver and
-  closing it releases ownership.
+  closing it releases ownership. A claim-owned worker confines asynchronous
+  pipe operations and the interface event source to one locked OS thread and
+  run loop.
+
+The API keeps USB endpoint addresses, directions, maximum packet sizes,
+transfer lengths, completion boundaries, short transfers, and zero-length
+transfers visible. It does not pair IN with OUT, flatten endpoints into byte
+streams, choose buffer sizes, or rearm reads. Adapter drivers submit as many
+requests as their protocols require and interpret each completion themselves.
+When a driver treats several IN requests as one ordered flow, it consumes their
+handles in submission order.
 
 The native implementation remains inside `usb`; packages above it do not
 inspect host-specific state.

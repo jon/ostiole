@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sync"
 	"unsafe"
 )
 
@@ -22,7 +23,8 @@ type iokitDevice struct {
 }
 
 type iokitInterface struct {
-	native *C.ostiole_usb_interface
+	native   *C.ostiole_usb_interface
+	transfer sync.Mutex
 }
 
 func (iokitInventory) snapshot() ([]darwinAttachment, error) {
@@ -155,34 +157,24 @@ func (i *iokitInterface) pipes() ([]darwinPipe, error) {
 			return nil, iokitError(result)
 		}
 		pipes = append(pipes, darwinPipe{
-			endpoint:     uint8(native.endpoint),
-			ref:          uint8(native.ref),
-			transferType: uint8(native.transfer_type),
+			endpoint:      uint8(native.endpoint),
+			ref:           uint8(native.ref),
+			transferType:  uint8(native.transfer_type),
+			maxPacketSize: uint16(native.max_packet_size),
 		})
 	}
 	return pipes, nil
 }
 
-func (i *iokitInterface) readPipe(ref uint8, data []byte, timeout uint32) (uint32, error) {
-	pointer := bytePointer(data)
-	size := C.uint32_t(len(data))
-	result := C.ostiole_usb_interface_read(i.native, C.uint8_t(ref), pointer,
-		&size, C.uint32_t(timeout))
-	runtime.KeepAlive(data)
-	if result != C.kIOReturnSuccess {
-		return 0, iokitError(result)
+func iokitTransferError(result, cleanup uint32) error {
+	var err error
+	if result != 0 {
+		err = iokitErrorCode(result)
 	}
-	return uint32(size), nil
-}
-
-func (i *iokitInterface) writePipe(ref uint8, data []byte, timeout uint32) error {
-	result := C.ostiole_usb_interface_write(i.native, C.uint8_t(ref),
-		bytePointer(data), C.uint32_t(len(data)), C.uint32_t(timeout))
-	runtime.KeepAlive(data)
-	if result != C.kIOReturnSuccess {
-		return iokitError(result)
+	if cleanup != 0 {
+		err = errors.Join(err, fmt.Errorf("clear pipe after failed transfer: %w", iokitErrorCode(cleanup)))
 	}
-	return nil
+	return err
 }
 
 func bytePointer(data []byte) unsafe.Pointer {
@@ -193,6 +185,8 @@ func bytePointer(data []byte) unsafe.Pointer {
 }
 
 func (i *iokitInterface) close() error {
+	i.transfer.Lock()
+	defer i.transfer.Unlock()
 	if i.native == nil {
 		return nil
 	}

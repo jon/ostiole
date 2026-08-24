@@ -35,6 +35,7 @@ func TestChannelReportsTheConfiguredClock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	claimFakeChannel(t, channel)
 	if err := channel.configure(t.Context()); err != nil {
 		t.Fatal(err)
 	}

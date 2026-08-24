@@ -24,10 +24,10 @@ func (c *Channel) enterMPSSE(ctx context.Context) error {
 	}
 	for _, step := range []controlStep{
 		{request: requestReset, value: 0},
+		{request: requestSetBitmode, value: 0},
 		{request: requestReset, value: 1},
 		{request: requestReset, value: 2},
 		{request: requestSetLatency, value: 2},
-		{request: requestSetBitmode, value: 0},
 		{request: requestSetBitmode, value: 0x0200},
 	} {
 		if err := c.runControl(ctx, step); err != nil {
@@ -57,14 +57,18 @@ func settleMPSSE(ctx context.Context) error {
 
 // Close resets bit mode, sets the latency timer to 16 ms, purges the receive
 // and transmit paths, releases the selected port, and closes the USB device. It
-// does not restore the function's prior settings. If interface release fails,
-// the channel remains open and Close can be retried.
+// does not restore the function's prior settings. Pending bulk OUT work is
+// drained before adapter state changes. If cancellation or interface release
+// fails, the channel remains open and Close can be retried.
 func (c *Channel) Close() error {
 	if c == nil || c.device == nil {
 		return nil
 	}
 	var result error
 	if c.claim != nil {
+		if err := c.claim.AbortBulk(c.bulkOut); err != nil {
+			return fmt.Errorf("ftdi: drain bulk OUT before close: %w", err)
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		for _, step := range []controlStep{
