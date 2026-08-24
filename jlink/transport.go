@@ -72,9 +72,17 @@ func (s *Session) readExact(ctx context.Context, size int) ([]byte, error) {
 }
 
 func (s *Session) readResponse(ctx context.Context, size int) ([]byte, error) {
-	if size == 0 {
-		return []byte{}, nil
+	response, err := s.readResponsePart(ctx, size)
+	if err != nil {
+		return nil, err
 	}
+	if len(s.input) != 0 {
+		return nil, s.poison(fmt.Errorf("jlink: response leaves an unexpected %d-byte remainder", len(s.input)))
+	}
+	return response, nil
+}
+
+func (s *Session) readResponsePart(ctx context.Context, size int) ([]byte, error) {
 	response, err := s.readExact(ctx, size)
 	if err == nil || errors.Is(err, ErrSessionPoisoned) {
 		return response, err
@@ -83,6 +91,16 @@ func (s *Session) readResponse(ctx context.Context, size int) ([]byte, error) {
 }
 
 func (s *Session) transportReady(ctx context.Context) error {
+	if err := s.sessionReady(); err != nil {
+		return err
+	}
+	if ctx == nil {
+		return errors.New("jlink: nil transfer context")
+	}
+	return ctx.Err()
+}
+
+func (s *Session) sessionReady() error {
 	if s == nil || s.device == nil {
 		return errors.New("jlink: session is closed")
 	}
@@ -92,10 +110,7 @@ func (s *Session) transportReady(ctx context.Context) error {
 	if s.poisoned {
 		return ErrSessionPoisoned
 	}
-	if ctx == nil {
-		return errors.New("jlink: nil transfer context")
-	}
-	return ctx.Err()
+	return nil
 }
 
 func (s *Session) readBulk(ctx context.Context) ([]byte, error) {

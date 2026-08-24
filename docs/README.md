@@ -9,6 +9,8 @@ today and how to assemble them without duplicating lower-level behavior.
 - [Serial Wire Debug](protocols/swd.md) describes the wire transaction, the
   parts of the specification which are easy to misread, and the current bench
   result.
+- [J-Link USB and SWD](protocols/jlink.md) records the command boundaries and
+  the short experiments behind the current adapter path.
 - [Arm Debug Access Ports](ports/dap.md) describes the ADIv5 register window,
   posted AP access, power handshakes, and MEM-AP details worth testing.
 - [Composition](composition.md) maps common tasks to the narrowest public

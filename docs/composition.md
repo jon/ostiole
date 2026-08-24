@@ -19,6 +19,7 @@ data-register write can write target memory.
 | List USB attachments understood by the FTDI driver | `usb.New`, `ftdi.SupportedDevices`, `Enumerator.List` | `ost ftdi list` |
 | Read metadata from one J-Link | `usb.New`, `jlink.SupportedDevices`, `Enumerator.Open`, `jlink.Open`, `Session.Info` | Package tests |
 | Open one FTDI MPSSE SWD port | `Enumerator.Open`, `ftdi.Open` | `examples/trivial/swd-dpidr` |
+| Open one J-Link SWD session | `Enumerator.Open`, `jlink.Open`, `jlink.WithSWD` | Package tests |
 | Connect SWD or transfer DP/AP registers | `swd.New`, `Conn.Connect`, `Conn.ReadDP`, `Conn.WriteDP`, `Conn.ReadAP`, `Conn.WriteAP`, `Conn.NewBatch`, `Conn.Release` | `examples/trivial/swd-dpidr` |
 | Enter SWD, decode a DPIDR, and manage SW-DP power | `dap.NewDebugPort`, `DebugPort.Connect`, `DebugPort.Release` | `ost dap dp id` |
 | Identify one explicitly selected AP | `DebugPort.ReadAPIDR`, `DecodeAPIDR` | `examples/simple/ap-id` |
@@ -81,6 +82,68 @@ select or configure a target interface. If a close fails, the returned
 `cleanup` function keeps the affected device or session reachable. Calling it
 again either retries a retained interface claim or returns the cached
 device-close result.
+
+To use the same selected probe as an SWD wire, configure it while opening and
+pass the session to `swd.New`. Keep the cleanup closure when the operation
+fails: it retains the highest owner until release succeeds, and reconfigures
+after a complete scan error before retrying SWD cleanup.
+
+```go
+func connectJLinkSWD(ctx context.Context, device *usb.Device) (_ uint32, cleanup func() error, err error) {
+    session, err := jlink.Open(ctx, device, jlink.WithSWD(100_000))
+    if err != nil {
+        closeErr := device.Close()
+        if closeErr != nil {
+            return 0, device.Close, errors.Join(err, closeErr)
+        }
+        return 0, nil, err
+    }
+    connection := swd.New(session)
+    connectionOwned := true
+    var abandoned error
+    cleanup = func() error {
+        cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+        defer cancel()
+        if connectionOwned {
+            if session.ClockHz() == 0 {
+                if err := session.ConfigureSWD(cleanupCtx, 100_000); err != nil {
+                    if !errors.Is(err, jlink.ErrSessionPoisoned) {
+                        return err
+                    }
+                    abandoned = errors.Join(abandoned, fmt.Errorf("reconfigure SWD for release: %w", err))
+                    connectionOwned = false
+                }
+            }
+            if connectionOwned {
+                if err := connection.Release(cleanupCtx); err != nil {
+                    if !errors.Is(err, jlink.ErrSessionPoisoned) {
+                        return err
+                    }
+                    abandoned = errors.Join(abandoned, fmt.Errorf("release SWD connection: %w", err))
+                }
+                connectionOwned = false
+            }
+        }
+        return errors.Join(abandoned, session.Close())
+    }
+    raw, err := connection.Connect(ctx)
+    return raw, cleanup, err
+}
+```
+
+`WithSWD` selects the advertised SWD interface and requests a whole-kHz clock
+no greater than its argument. A metadata-only session can instead call
+`ConfigureSWD` later. Both forms change volatile probe interface and clock
+state, which `Close` does not restore. A complete nonzero scan status requires
+another `ConfigureSWD`; an ambiguous transfer requires close and reopen. The
+returned cleanup closure stops at a transient higher-level release failure and
+can be retried. After a complete nonzero scan status, `ClockHz()` returns zero,
+so the closure reconfigures SWD before retrying `swd.Conn.Release`; it does not
+close the session while the connection still owns restorable target state.
+`jlink.ErrSessionPoisoned` is different because restoration is no longer
+possible. The closure records that restoration error, drops the higher-level
+owner, continues with retryable session cleanup, and keeps returning the error
+after the session closes.
 
 Pass the opened device to `ftdi.Open` with the MPSSE port and maximum requested
 clock. The driver reads and validates the product from the device identity;
@@ -268,12 +331,15 @@ independent of the host, adapter, and wire protocol.
 
 ## Release in reverse order
 
-A complete Cortex-M identity composition acquires and releases state in this
-order:
+A complete Cortex-M identity composition acquires and releases state in one
+of these orders:
 
 ```text
 acquire: USB device → FTDI channel → debug port (enters SWD) → MEM-AP
 release: MEM-AP → debug port → FTDI channel
+
+acquire: USB device → J-Link session (configures SWD) → debug port → MEM-AP
+release: MEM-AP → debug port → J-Link session
 ```
 
 Use a fresh, bounded cleanup context if the operation context may already be
@@ -290,7 +356,7 @@ to the caller until its documented release or close method succeeds.
 Applications own choices that depend on their users:
 
 - which enumerated attachment to open;
-- which explicit FTDI port and clock to request;
+- which explicit FTDI port or J-Link session and clock to request;
 - which access port to inspect;
 - operation and cleanup deadlines;
 - how errors and identities are presented.

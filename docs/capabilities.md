@@ -62,12 +62,18 @@ wires its MPSSE port for debugging.
 | Firmware record | Yes | Retains the complete length-delimited record and exposes its first NUL-delimited field for display. |
 | Capabilities | Yes | Preserves the opaque short or long bitset. The long query is gated by short bit 31, and the common prefix must agree. |
 | Optional metadata | Yes | Capability-gated hardware version, workspace hint, available target interfaces, and current target interface. A selected interface outside the 0–31 range represented by the availability mask is rejected. |
-| Target-interface effects | No | Metadata-only `Open` does not select an interface, set a target clock, scan pins, reset, halt, or access the target. |
+| Target-interface effects | Optional | Metadata-only `Open` remains passive. `WithSWD` or `ConfigureSWD` explicitly selects advertised SWD and requests a whole-kHz target clock no greater than the caller's ceiling. The clock command has no application response. Close does not restore an unknown prior interface or clock. |
+| SWD adapter | Yes | A configured session implements `swd.Wire` and `swd.TransferLimits` through scan v3. It masks output where the target drives SWDIO and reports the configured clock and conservative scan limit. |
+| Scan completion | Yes | Samples and the trailing status byte are read separately. Status 6 reports insufficient probe workspace. Any complete nonzero status requires explicit SWD reconfiguration but does not poison the USB session. No scan is replayed. |
 | Ambiguous transfer handling | Yes | A failed, invalid, or progress-free bulk exchange poisons the session. Cancellation after a complete command but before its complete response is likewise ambiguous. The first transfer failure remains visible through cancellation cleanup; later commands require an explicit close and reopen. |
 | Metadata-only reopen | HIL | A genuine J-Link EDU Mini V2 completed 100 consecutive reopen tests, or 200 fresh sessions, on macOS. Every session returned its full firmware record, 256 capability bits, hardware version, workspace, available interfaces, and current interface. The selected interface remained SWD. No scan or target-control command was sent. |
+| Read-only SWD composition | HIL | At a requested 100 kHz, a genuine J-Link EDU Mini V2 reported a 504-bit scan limit and completed ten full restoration runs against a Cortex-M target. Each run used two fresh sessions, read DPIDR `0x2BA01477`, AP0 IDR `0x24770011`, CPUID `0x410FC241` with part `0xC24`, and DHCSR, and matched DPIDR, CPUID, and DHCSR.S_HALT across reopen. The saved AP0 CSW and TAR values were restored before release. An earlier target returned DPIDR `0x0BB11477`, AP0 IDR `0x04770021`, and Cortex-M0 CPUID `0x410CC200`. |
 
-The J-Link metadata session does not depend on the FTDI adapter and does not
-introduce a shared probe abstraction. J-Link SWD scans are not implemented.
+The J-Link session does not depend on the FTDI adapter and does not
+introduce a shared probe abstraction. The tested EDU Mini returned target-input
+samples displaced by one clock. The correction is gated to its USB product and
+full firmware record; for other firmware records, the package returns the
+samples unchanged.
 
 ## Serial Wire Debug
 
@@ -85,10 +91,10 @@ introduce a shared probe abstraction. J-Link SWD scans are not implemented.
 | Fixed-frame batching | Yes | In overrun mode the ordered queue packs complete 54-bit frames up to an optional wire limit; simple mode remains sequential. Operations in a failed physical chunk are indeterminate; later chunks remain unsent, and requested operations are never replayed. |
 | Multidrop or dormant state | No | The public connection models one entered SWD target. |
 | Behavioral simulation | Yes | Protocol entry and line-reset effects, live overrun response grammar, DP/AP register transfers, packed fixed frames, transfer limits, and request-phase WAIT or FAULT injection. |
-| Physical DPIDR read | HIL | Opt-in FTDI test and trivial example on Linux and macOS. |
+| Physical DPIDR read | HIL | Opt-in FTDI test and trivial example on Linux and macOS, plus an opt-in J-Link test on macOS. |
 
-The public `swd.Wire` boundary permits another wire implementation, but FTDI
-is the only physical implementation currently provided.
+The public `swd.Wire` boundary is implemented by both FTDI and J-Link without
+a shared probe abstraction.
 The [Serial Wire Debug guide](protocols/swd.md) gives the bit-level protocol,
 specification notes, and current physical observation.
 
@@ -166,8 +172,8 @@ the volatile DAP and MEM-AP state described above.
 
 ## Not currently provided
 
-There is no public J-Link SWD or CMSIS-DAP driver, JTAG protocol layer,
-automatic probe discovery policy, CoreSight or ROM-table discovery,
+There is no public CMSIS-DAP driver, JTAG protocol layer, automatic
+probe discovery policy, CoreSight or ROM-table discovery,
 multi-core or SoC attachment, general target control, semihosting, trace,
 debugger protocol server, firmware flashing, FPGA programming, or Windows
 host implementation.

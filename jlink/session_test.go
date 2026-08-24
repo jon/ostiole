@@ -40,6 +40,7 @@ type peerUSBDevice struct {
 	releaseErr        error
 	writeErr          error
 	readErr           error
+	readErrs          []error
 	readCount         int
 	closeErr          error
 	afterWrite        func()
@@ -147,6 +148,48 @@ func TestSessionSubmitsInputOnlyAfterOutputCompletes(t *testing.T) {
 	}
 	if !reflect.DeepEqual(response, []byte{2}) || !reflect.DeepEqual(device.submissions, []uint8{0x03, 0x84}) {
 		t.Fatalf("exchange = response %x submissions %#v", response, device.submissions)
+	}
+}
+
+func TestSessionPoisonsUnexpectedTrailingResponseBytes(t *testing.T) {
+	device := metadataPeer(t, []peerOperation{
+		{request: []byte{1}, response: [][]byte{{2, 3}}},
+		{request: []byte{4}, response: [][]byte{{5}}},
+	})
+	session := &Session{device: device, claim: &peerUSBClaim{device: device}, application: applicationInterface{
+		bulkIn: usb.Endpoint{Address: 0x84, MaxPacketSize: 512}, bulkOut: usb.Endpoint{Address: 0x03, MaxPacketSize: 512},
+	}}
+	if _, err := session.exchange(context.Background(), []byte{1}, 1); !errors.Is(err, ErrSessionPoisoned) || !strings.Contains(err.Error(), "unexpected 1-byte remainder") {
+		t.Fatalf("exchange() error = %v", err)
+	}
+	if _, err := session.exchange(context.Background(), []byte{4}, 1); !errors.Is(err, ErrSessionPoisoned) {
+		t.Fatalf("exchange() after surplus error = %v", err)
+	}
+	if device.writes != 1 || len(device.operations) != 1 {
+		t.Fatalf("writes = %d, operations left = %d", device.writes, len(device.operations))
+	}
+}
+
+func TestSessionAcceptsCoalescedFirmwareLengthAndRecord(t *testing.T) {
+	device := metadataPeer(t, []peerOperation{{request: []byte{commandVersion}, response: [][]byte{{2, 0, 'v', 0}}}})
+	session := &Session{device: device, claim: &peerUSBClaim{device: device}, application: applicationInterface{
+		bulkIn: usb.Endpoint{Address: 0x84, MaxPacketSize: 512}, bulkOut: usb.Endpoint{Address: 0x03, MaxPacketSize: 512},
+	}}
+	if err := session.readVersion(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(session.info.FirmwareRecord, []byte{'v', 0}) || device.reads != 1 {
+		t.Fatalf("firmware record = %x after %d reads", session.info.FirmwareRecord, device.reads)
+	}
+}
+
+func TestSessionPoisonsTrailingFirmwareRecordBytes(t *testing.T) {
+	device := metadataPeer(t, []peerOperation{{request: []byte{commandVersion}, response: [][]byte{{2, 0, 'v', 0, 0xff}}}})
+	session := &Session{device: device, claim: &peerUSBClaim{device: device}, application: applicationInterface{
+		bulkIn: usb.Endpoint{Address: 0x84, MaxPacketSize: 512}, bulkOut: usb.Endpoint{Address: 0x03, MaxPacketSize: 512},
+	}}
+	if err := session.readVersion(context.Background()); !errors.Is(err, ErrSessionPoisoned) || !strings.Contains(err.Error(), "unexpected 1-byte remainder") {
+		t.Fatalf("readVersion() error = %v", err)
 	}
 }
 
@@ -280,6 +323,13 @@ func (d *peerUSBDevice) write(data []byte) (int, error) {
 
 func (d *peerUSBDevice) read(buffer []byte) (int, error) {
 	d.reads++
+	if len(d.readErrs) != 0 {
+		err := d.readErrs[0]
+		d.readErrs = d.readErrs[1:]
+		if err != nil {
+			return 0, err
+		}
+	}
 	if d.readErr != nil {
 		return 0, d.readErr
 	}

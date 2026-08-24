@@ -4,13 +4,13 @@ Ostiole separates host access, adapter behavior, wire protocols, debug-port
 policy, and target-specific operations. Each package owns one kind of state
 and exposes the smallest useful mechanism to the layer above it.
 
-The current hardware path is:
+The current hardware paths are:
 
 ```text
 USB host access
       |
       v
-FTDI MPSSE adapter
+FTDI MPSSE or J-Link adapter
       |
       v
 Serial Wire Debug
@@ -35,7 +35,7 @@ debugger service.
 | --- | --- |
 | `usb` | Enumerate, open, inspect the active standard configuration, claim, transfer through, and close one host USB attachment, including explicit asynchronous bulk transfers. |
 | `ftdi` | Own one explicitly selected FTDI MPSSE port and expose direction-safe SWD bits. |
-| `jlink` | Find one reviewed J-Link USB application interface, own its session, and expose probe metadata. |
+| `jlink` | Find one reviewed J-Link USB application interface, own its command session, configure SWD, and adapt scan v3 to direction-explicit SWD bits. |
 | `swd` | Enter SWD, establish its response grammar, and encode, execute, and validate individual or packed DP/AP register transactions. |
 | `swd/sim` | Model SWD protocol entry, register transfers, fixed-frame packing, and transfer limits without hardware. |
 | `dap` | Manage SW-DP identity and power, ordered DP/AP transactions, posted AP access, and scalar or block MEM-AP access. |
@@ -70,10 +70,11 @@ clock. The channel reports the attainable clock it configured.
 `jlink.SupportedDevices` likewise returns exact candidate identities rather
 than a vendor wildcard. `jlink.Open` inspects the active descriptors, rejects
 missing or ambiguous application interfaces, selects the descriptor-chosen
-alternate, resolves its active bulk endpoints, and reads metadata without
-selecting a target interface. An immediate reopen may briefly find the probe
-unconfigured; `jlink.Open` retries only that typed USB state for at most one
-second.
+alternate, resolves its active bulk endpoints, and reads metadata. With no
+options it does not select a target interface. An immediate reopen may briefly
+find the probe unconfigured; `jlink.Open` retries only that typed USB state for
+at most one second. `jlink.WithSWD` selects SWD during open and requests a
+whole-kHz clock no greater than the requested ceiling.
 
 This split keeps inventory policy in the application. Listing hardware does
 not claim an interface or send adapter or target traffic.
@@ -89,14 +90,15 @@ up and released in reverse order.
 | `*usb.Device` | Owns one open attachment. `ClaimInterface` returns the sole owner of one interface; that value reads the selected alternate before its first endpoint lookup, selects later alternates explicitly, submits bulk transfers, and releases the claim. A successful macOS alternate selection retains the active pipe properties IOKit reports. A failed alternate selection invalidates cached endpoint state so the next lookup reads the host state again. A failed release can be retried, and `Device.Close` does not close the attachment while release remains pending. |
 | `*usb.BulkTransfer` | Represents one request on one active bulk endpoint. Its buffer length is the requested transfer length; the endpoint address supplies direction. `Wait` reports the exact count for a successful short or zero-length completion, and ending the wait context does not cancel the request. A host-engine failure can end `Wait` before `Done` closes; the buffer remains host-owned until `Done`. `AbortBulk` cancels and performs a bounded drain of every pending request on the named endpoint. Failed cancellation or drain retains the requests and claim for another cleanup attempt. Closing the claim applies the same bound before release. |
 | `*ftdi.Channel` | Takes ownership of the USB device after `ftdi.Open` succeeds. It keeps enough ordered maximum-packet-sized IN requests armed to cover its largest response and consumes FTDI status-only completions independently of MPSSE writes. An ambiguous transfer or asynchronous receive failure poisons the channel before later traffic can use the command stream. Recovery requires closing it and opening a new one. `Close` drains bulk OUT before resetting bit mode, setting the latency timer to 16 ms, purging the receive and transmit paths, releasing the interface, and closing the device. A failed cancellation or interface release leaves the channel and device open for another `Close`. It does not preserve prior FTDI settings. |
-| `*jlink.Session` | Takes ownership of the USB device after `jlink.Open` succeeds. Metadata-only open claims the descriptor-selected application interface and resolves its active endpoint properties, but does not select or configure a target interface. An ambiguous bulk exchange or abandoned response poisons the session, and later commands require closing it and explicitly reopening the device. A failed interface release leaves `Close` retryable. Device close runs once, and later calls return its cached result. |
+| `*jlink.Session` | Takes ownership of the USB device after `jlink.Open` succeeds. Metadata-only open claims the descriptor-selected application interface, resolves its active endpoint properties, and leaves target configuration unchanged. `WithSWD` or `ConfigureSWD` selects SWD and sets volatile probe clock state; `Close` does not restore an unknown prior interface or clock. A complete nonzero scan status requires explicit reconfiguration. An ambiguous bulk exchange or abandoned response poisons the session, and later commands require closing it and explicitly reopening the device. A failed interface release leaves `Close` retryable. Device close runs once, and later calls return its cached result. |
 | `*swd.Conn` | Owns one logical SWD transaction stream and the ORUNDETECT bit it adds. `Connect` establishes the target's response grammar and `Release` restores the inherited setting. It does not own a separate host resource. Calls must be serialized. |
 | `*dap.DebugPort` | Requires exclusive use of its SWD connection and owns only the debug and system power requests it adds. It records newly requested power bits before writing them so bounded cleanup can attempt to clear them even when the write's result is ambiguous. `Release` settles its final SELECT write through RDBUFF, releases power, then releases the SWD connection. |
 | `*dap.MemAP` | `OpenMemAP` validates the selected AP and saves its CSW, TAR, and optional TARHI. `Release` retries failed restoration; if DAPABORT interrupts cleanup, the next `Release` retries every saved value. Calls sharing the MEM-AP or its debug port must be serialized. |
 
 An application that reaches the MEM-AP layer releases the MEM-AP before the
-debug port, then closes the FTDI channel. Cleanup errors remain meaningful and
-should be joined with the operation error rather than discarded.
+debug port, then closes its FTDI channel or J-Link session. Cleanup errors
+remain meaningful and should be joined with the operation error rather than
+discarded.
 
 `dap.DebugPort` caches register-selection and AP state. Direct transfers
 on its `swd.Conn` can make that cached state stale, so do not share the
@@ -110,10 +112,12 @@ already completed cleanup and retries it otherwise.
 
 ## Protocol and policy boundaries
 
-The FTDI channel clocks direction-explicit bit streams. It does not interpret
-SWD requests. `swd.Conn` owns request framing, turnaround, acknowledgements,
-data parity, line reset, the JTAG-to-SWD selection sequence, and the
-CTRL/STAT.ORUNDETECT setting which selects the response grammar.
+The FTDI channel and configured J-Link session clock direction-explicit bit
+streams. Neither interprets SWD requests. FTDI owns MPSSE framing; J-Link owns
+probe command framing, target-interface selection, clock selection, scan
+limits, and scan status. `swd.Conn` owns request framing, turnaround,
+acknowledgements, data parity, line reset, the JTAG-to-SWD selection sequence,
+and the CTRL/STAT.ORUNDETECT setting which selects the response grammar.
 
 `swd.Conn.Connect` reads and validates DPIDR before configuration, clears
 supported sticky state, writes zero to SELECT, settles it through RDBUFF, then
@@ -255,6 +259,9 @@ The layers are not entirely passive:
   MPSSE mode. Closing resets bit mode, sets the latency timer to 16 ms, purges
   the receive and transmit paths, releases the interface, and closes the USB
   device; it does not restore the function's prior FTDI settings.
+- Configuring J-Link SWD selects the probe's SWD target interface and changes
+  its volatile target clock. Closing releases the application interface and
+  USB device but does not restore an unknown prior interface or clock.
 - Entering SWD clocks line-reset and protocol-selection sequences.
 - Connecting a debug port clears sticky status, selects a register bank, and
   may request volatile debug and system power.
