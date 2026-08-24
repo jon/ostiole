@@ -1,6 +1,7 @@
 #include "iokit_darwin.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 kern_return_t ostiole_usb_iterator(io_iterator_t* iterator) {
   CFMutableDictionaryRef matching = IOServiceMatching("IOUSBHostDevice");
@@ -175,7 +176,18 @@ ostiole_usb_interface* ostiole_usb_find_interface(ostiole_usb_device* opened,
 
 kern_return_t ostiole_usb_interface_open_seize(
     ostiole_usb_interface* interface) {
-  return (*interface->interface)->USBInterfaceOpenSeize(interface->interface);
+  kern_return_t result =
+      (*interface->interface)->USBInterfaceOpenSeize(interface->interface);
+  if (result != kIOReturnSuccess) {
+    return result;
+  }
+  result = (*interface->interface)
+               ->CreateInterfaceAsyncEventSource(interface->interface,
+                                                 &interface->source);
+  if (result != kIOReturnSuccess) {
+    return result;
+  }
+  return kIOReturnSuccess;
 }
 
 kern_return_t ostiole_usb_interface_set_alternate(
@@ -202,24 +214,154 @@ kern_return_t ostiole_usb_interface_pipe(ostiole_usb_interface* interface,
   }
   pipe->endpoint = number | (direction == kUSBIn ? 0x80 : 0);
   pipe->ref = ref;
+  pipe->max_packet_size = max_packet;
   return kIOReturnSuccess;
 }
 
-kern_return_t ostiole_usb_interface_read(ostiole_usb_interface* interface,
-                                         uint8_t ref, void* data,
-                                         uint32_t* size, uint32_t timeout) {
-  return (*interface->interface)
-      ->ReadPipeTO(interface->interface, ref, data, size, timeout, timeout);
+typedef struct {
+  volatile int complete;
+  ostiole_usb_transfer_result transfer;
+  CFRunLoopRef run_loop;
+} ostiole_usb_async_state;
+
+static void ostiole_usb_transfer_complete(void* refcon, IOReturn result,
+                                          void* done) {
+  ostiole_usb_async_state* state = refcon;
+  state->transfer.result = result;
+  state->transfer.done = (uint32_t)(uintptr_t)done;
+  state->complete = 1;
+  CFRunLoopStop(state->run_loop);
 }
 
-kern_return_t ostiole_usb_interface_write(ostiole_usb_interface* interface,
-                                          uint8_t ref, void* data,
-                                          uint32_t size, uint32_t timeout) {
-  return (*interface->interface)
-      ->WritePipeTO(interface->interface, ref, data, size, timeout, timeout);
+struct ostiole_usb_bulk_engine {
+  ostiole_usb_interface* interface;
+  CFRunLoopRef run_loop;
+};
+
+struct ostiole_usb_bulk_transfer {
+  ostiole_usb_async_state state;
+  ostiole_usb_bulk_engine* engine;
+  void* data;
+  uint32_t size;
+  uint8_t pipe_ref;
+  uint8_t input;
+  int pending;
+};
+
+ostiole_usb_bulk_engine* ostiole_usb_bulk_engine_open(
+    ostiole_usb_interface* interface, kern_return_t* result) {
+  ostiole_usb_bulk_engine* engine = calloc(1, sizeof(*engine));
+  if (engine == NULL) {
+    *result = kIOReturnNoMemory;
+    return NULL;
+  }
+  engine->interface = interface;
+  engine->run_loop = CFRunLoopGetCurrent();
+  CFRunLoopAddSource(engine->run_loop, interface->source,
+                     kCFRunLoopDefaultMode);
+  *result = kIOReturnSuccess;
+  return engine;
+}
+
+ostiole_usb_bulk_transfer* ostiole_usb_bulk_transfer_submit(
+    ostiole_usb_bulk_engine* engine, uint8_t pipe_ref, uint8_t input,
+    const void* data, uint32_t size, kern_return_t* result) {
+  ostiole_usb_bulk_transfer* transfer = calloc(1, sizeof(*transfer));
+  if (transfer == NULL) {
+    *result = kIOReturnNoMemory;
+    return NULL;
+  }
+  transfer->data = size == 0 ? NULL : malloc(size);
+  if (size != 0 && transfer->data == NULL) {
+    free(transfer);
+    *result = kIOReturnNoMemory;
+    return NULL;
+  }
+  if (!input && size != 0) {
+    memcpy(transfer->data, data, size);
+  }
+  transfer->engine = engine;
+  transfer->size = size;
+  transfer->pipe_ref = pipe_ref;
+  transfer->input = input;
+  transfer->state.run_loop = engine->run_loop;
+  if (input) {
+    *result = (*engine->interface->interface)
+                  ->ReadPipeAsync(
+                      engine->interface->interface, pipe_ref, transfer->data,
+                      size, ostiole_usb_transfer_complete, &transfer->state);
+  } else {
+    *result = (*engine->interface->interface)
+                  ->WritePipeAsync(
+                      engine->interface->interface, pipe_ref, transfer->data,
+                      size, ostiole_usb_transfer_complete, &transfer->state);
+  }
+  if (*result != kIOReturnSuccess) {
+    free(transfer->data);
+    free(transfer);
+    return NULL;
+  }
+  transfer->pending = 1;
+  return transfer;
+}
+
+void ostiole_usb_bulk_engine_poll(ostiole_usb_bulk_engine* engine,
+                                  uint32_t timeout) {
+  if (engine->run_loop != CFRunLoopGetCurrent()) {
+    return;
+  }
+  CFRunLoopRunInMode(kCFRunLoopDefaultMode, (CFTimeInterval)timeout / 1000,
+                     true);
+}
+
+ostiole_usb_transfer_event ostiole_usb_bulk_transfer_take(
+    ostiole_usb_bulk_transfer* transfer, void* data, uint32_t size) {
+  ostiole_usb_transfer_event event = {
+      .available = 0,
+      .transfer = {.result = kIOReturnSuccess,
+                   .cleanup = kIOReturnSuccess,
+                   .done = 0},
+  };
+  if (!transfer->pending || !transfer->state.complete) {
+    return event;
+  }
+  transfer->pending = 0;
+  event.available = 1;
+  event.transfer = transfer->state.transfer;
+  if (event.transfer.result == kIOReturnSuccess && transfer->input) {
+    if (event.transfer.done > size || event.transfer.done > transfer->size) {
+      event.transfer.result = kIOReturnNoSpace;
+      event.transfer.done = 0;
+    } else if (event.transfer.done != 0) {
+      memcpy(data, transfer->data, event.transfer.done);
+    }
+  }
+  return event;
+}
+
+kern_return_t ostiole_usb_bulk_engine_abort(ostiole_usb_bulk_engine* engine,
+                                            uint8_t pipe_ref) {
+  return (*engine->interface->interface)
+      ->AbortPipe(engine->interface->interface, pipe_ref);
+}
+
+void ostiole_usb_bulk_transfer_free(ostiole_usb_bulk_transfer* transfer) {
+  free(transfer->data);
+  free(transfer);
+}
+
+void ostiole_usb_bulk_engine_close(ostiole_usb_bulk_engine* engine) {
+  CFRunLoopRemoveSource(engine->run_loop, engine->interface->source,
+                        kCFRunLoopDefaultMode);
+  free(engine);
 }
 
 kern_return_t ostiole_usb_interface_close(ostiole_usb_interface* interface) {
+  if (interface->source != NULL) {
+    CFRunLoopSourceInvalidate(interface->source);
+    CFRelease(interface->source);
+    interface->source = NULL;
+  }
   kern_return_t result =
       (*interface->interface)->USBInterfaceClose(interface->interface);
   if (result != kIOReturnSuccess && result != kIOReturnNotOpen) {

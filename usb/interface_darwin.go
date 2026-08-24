@@ -13,6 +13,7 @@ var errDarwinDeviceClosed = errors.New("usb: device is closed")
 
 type darwinPipe struct {
 	endpoint, ref, transferType uint8
+	maxPacketSize               uint16
 }
 
 type darwinInterfaceHandle interface {

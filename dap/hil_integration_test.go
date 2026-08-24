@@ -103,6 +103,9 @@ func releaseHardwareDebugPortWithin(ctx context.Context, dp *dap.DebugPort) erro
 		if err == nil {
 			return nil
 		}
+		if errors.Is(err, ftdi.ErrChannelPoisoned) {
+			return err
+		}
 		if ctx.Err() != nil {
 			return errors.Join(err, ctx.Err())
 		}
@@ -123,6 +126,9 @@ func releaseHardwareMemAPWithin(ctx context.Context, mem *dap.MemAP) error {
 		err := mem.Release(ctx)
 		if err == nil {
 			return nil
+		}
+		if errors.Is(err, ftdi.ErrChannelPoisoned) {
+			return err
 		}
 		if ctx.Err() != nil {
 			return errors.Join(err, ctx.Err())

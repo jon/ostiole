@@ -4,6 +4,8 @@ package dap_test
 
 import (
 	"context"
+	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -123,15 +125,15 @@ func TestTransactionOverFTDI(t *testing.T) {
 }
 
 func TestEnumerateAPsOverFTDI(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-
-	dp, faultWire := openHardwareDebugPortWithFaultWire(t, ctx)
+	openCtx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	dp, faultWire := openHardwareDebugPortWithFaultWire(t, openCtx)
 	t.Cleanup(func() { releaseHardwareDebugPort(t, dp) })
-	if _, err := dp.Connect(ctx); err != nil {
+	if _, err := dp.Connect(openCtx); err != nil {
+		cancel()
 		t.Fatal(err)
 	}
-	direct, err := dp.ReadAPIDR(ctx, hardwareAP)
+	direct, err := dp.ReadAPIDR(openCtx, hardwareAP)
+	cancel()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,12 +141,18 @@ func TestEnumerateAPsOverFTDI(t *testing.T) {
 	beforeCalls := counter.calls
 	beforeFixed := counter.fixed
 	beforeOK := counter.counts[0b001]
-	ports, err := dp.EnumerateAPs(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(ports) == 0 || ports[0].Selector != hardwareAP || ports[0].Identity != direct {
-		t.Fatalf("enumerated APs = %+v, direct AP0 = %+v", ports, direct)
+	iterations := hardwareEnumerationIterations(t)
+	var ports []dap.APInfo
+	for iteration := range iterations {
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		ports, err = dp.EnumerateAPs(ctx)
+		cancel()
+		if err != nil {
+			t.Fatalf("enumeration %d: %v", iteration+1, err)
+		}
+		if len(ports) == 0 || ports[0].Selector != hardwareAP || ports[0].Identity != direct {
+			t.Fatalf("enumeration %d: APs = %+v, direct AP0 = %+v", iteration+1, ports, direct)
+		}
 	}
 	for _, port := range ports {
 		selector, err := port.Selector.Value()
@@ -153,5 +161,18 @@ func TestEnumerateAPsOverFTDI(t *testing.T) {
 		}
 		t.Logf("AP%d IDR=%#08x", selector, port.Identity.Raw)
 	}
-	t.Logf("enumeration SWDIO_calls=%d fixed_frames=%d OK=%d", counter.calls-beforeCalls, counter.fixed-beforeFixed, counter.counts[0b001]-beforeOK)
+	t.Logf("enumerations=%d SWDIO_calls=%d fixed_frames=%d OK=%d", iterations, counter.calls-beforeCalls, counter.fixed-beforeFixed, counter.counts[0b001]-beforeOK)
+}
+
+func hardwareEnumerationIterations(t *testing.T) int {
+	t.Helper()
+	raw := os.Getenv("OSTIOLE_FTDI_HIL_ENUMERATIONS")
+	if raw == "" {
+		return 1
+	}
+	iterations, err := strconv.Atoi(raw)
+	if err != nil || iterations <= 0 {
+		t.Fatalf("OSTIOLE_FTDI_HIL_ENUMERATIONS = %q, want a positive integer", raw)
+	}
+	return iterations
 }

@@ -9,14 +9,16 @@ import (
 )
 
 const (
-	requestTypeStandardDeviceIn = 0x80
-	requestGetConfiguration     = 0x08
-	requestGetDescriptor        = 0x06
-	descriptorDevice            = 0x01
-	descriptorConfiguration     = 0x02
-	descriptorInterface         = 0x04
-	descriptorEndpoint          = 0x05
-	classAudio                  = 0x01
+	requestTypeStandardDeviceIn    = 0x80
+	requestTypeStandardInterfaceIn = 0x81
+	requestGetConfiguration        = 0x08
+	requestGetDescriptor           = 0x06
+	requestGetInterface            = 0x0a
+	descriptorDevice               = 0x01
+	descriptorConfiguration        = 0x02
+	descriptorInterface            = 0x04
+	descriptorEndpoint             = 0x05
+	classAudio                     = 0x01
 )
 
 // TransferType identifies a USB endpoint transfer type.
@@ -129,6 +131,24 @@ func configurationValue(ctx context.Context, device controlTransferer) (uint8, e
 	value := make([]byte, 1)
 	if err := readStandard(ctx, device, requestGetConfiguration, 0, value); err != nil {
 		return 0, err
+	}
+	return value[0], nil
+}
+
+func interfaceAlternate(ctx context.Context, device controlTransferer, number uint8) (uint8, error) {
+	if ctx == nil {
+		return 0, errors.New("nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	value := make([]byte, 1)
+	count, err := device.ControlTransfer(ctx, requestTypeStandardInterfaceIn, requestGetInterface, 0, uint16(number), value)
+	if err != nil {
+		return 0, err
+	}
+	if count != len(value) {
+		return 0, fmt.Errorf("%w: got %d of %d bytes", io.ErrUnexpectedEOF, count, len(value))
 	}
 	return value[0], nil
 }

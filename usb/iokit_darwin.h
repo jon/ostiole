@@ -26,13 +26,29 @@ typedef struct {
 
 typedef struct {
   IOUSBInterfaceInterface300** interface;
+  CFRunLoopSourceRef source;
 } ostiole_usb_interface;
 
 typedef struct {
   uint8_t endpoint;
   uint8_t ref;
   uint8_t transfer_type;
+  uint16_t max_packet_size;
 } ostiole_usb_pipe;
+
+typedef struct {
+  kern_return_t result;
+  kern_return_t cleanup;
+  uint32_t done;
+} ostiole_usb_transfer_result;
+
+typedef struct ostiole_usb_bulk_engine ostiole_usb_bulk_engine;
+typedef struct ostiole_usb_bulk_transfer ostiole_usb_bulk_transfer;
+
+typedef struct {
+  int available;
+  ostiole_usb_transfer_result transfer;
+} ostiole_usb_transfer_event;
 
 kern_return_t ostiole_usb_iterator(io_iterator_t* iterator);
 int ostiole_usb_attachment_read(io_service_t service,
@@ -57,12 +73,19 @@ kern_return_t ostiole_usb_interface_pipe_count(ostiole_usb_interface* interface,
                                                uint8_t* count);
 kern_return_t ostiole_usb_interface_pipe(ostiole_usb_interface* interface,
                                          uint8_t ref, ostiole_usb_pipe* pipe);
-kern_return_t ostiole_usb_interface_read(ostiole_usb_interface* interface,
-                                         uint8_t ref, void* data,
-                                         uint32_t* size, uint32_t timeout);
-kern_return_t ostiole_usb_interface_write(ostiole_usb_interface* interface,
-                                          uint8_t ref, void* data,
-                                          uint32_t size, uint32_t timeout);
+ostiole_usb_bulk_engine* ostiole_usb_bulk_engine_open(
+    ostiole_usb_interface* interface, kern_return_t* result);
+ostiole_usb_bulk_transfer* ostiole_usb_bulk_transfer_submit(
+    ostiole_usb_bulk_engine* engine, uint8_t pipe_ref, uint8_t input,
+    const void* data, uint32_t size, kern_return_t* result);
+void ostiole_usb_bulk_engine_poll(ostiole_usb_bulk_engine* engine,
+                                  uint32_t timeout);
+ostiole_usb_transfer_event ostiole_usb_bulk_transfer_take(
+    ostiole_usb_bulk_transfer* transfer, void* data, uint32_t size);
+kern_return_t ostiole_usb_bulk_engine_abort(ostiole_usb_bulk_engine* engine,
+                                            uint8_t pipe_ref);
+void ostiole_usb_bulk_transfer_free(ostiole_usb_bulk_transfer* transfer);
+void ostiole_usb_bulk_engine_close(ostiole_usb_bulk_engine* engine);
 kern_return_t ostiole_usb_interface_close(ostiole_usb_interface* interface);
 
 #endif

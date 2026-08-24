@@ -6,19 +6,30 @@ import (
 	"io"
 )
 
+const packetStatusSize = 2
+
 func (c *Channel) writeExact(ctx context.Context, data []byte) error {
+	if err := c.transportReady(); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	for position := 0; position < len(data); {
 		count, err := c.bulkWrite(ctx, data[position:])
 		if count < 0 || count > len(data)-position {
-			return fmt.Errorf("ftdi: invalid bulk-write count %d for %d bytes", count, len(data)-position)
+			return c.poison(fmt.Errorf("ftdi: invalid bulk-write count %d for %d bytes", count, len(data)-position))
 		}
 		if err != nil {
-			return err
+			return c.poison(err)
 		}
 		if count == 0 {
-			return io.ErrNoProgress
+			return c.poison(io.ErrNoProgress)
 		}
 		position += count
+		if err := c.transportReady(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -27,49 +38,63 @@ func (c *Channel) readPayload(ctx context.Context, size int) ([]byte, error) {
 	if size < 0 {
 		return nil, fmt.Errorf("ftdi: negative payload size %d", size)
 	}
+	if err := c.transportReady(); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	payload := make([]byte, 0, size)
 	for len(payload) < size {
-		buffer := make([]byte, readCapacity(size-len(payload), c.packetSize))
-		count, err := c.bulkRead(ctx, buffer)
-		if err != nil {
-			return nil, err
+		var chunk []byte
+		select {
+		case chunk = <-c.receive:
+		case err := <-c.receiveErr:
+			return nil, c.poison(err)
+		case <-ctx.Done():
+			return nil, c.poison(ctx.Err())
 		}
-		chunk, err := decodePackets(buffer, count, size-len(payload), c.packetSize)
-		if err != nil {
-			return nil, err
-		}
-		if len(chunk) == 0 {
-			continue
+		if len(chunk) > size-len(payload) {
+			return nil, c.poison(fmt.Errorf("ftdi: received %d surplus payload bytes", len(chunk)-(size-len(payload))))
 		}
 		payload = append(payload, chunk...)
 	}
 	return payload, nil
 }
 
-func readCapacity(payload, packetSize int) int {
-	if payload <= 0 {
-		return packetSize
+func (c *Channel) exchangePayload(ctx context.Context, output []byte, size int) ([]byte, error) {
+	if size < 0 {
+		return nil, fmt.Errorf("ftdi: negative payload size %d", size)
 	}
-	perPacket := packetSize - 2
-	packets := (payload + perPacket - 1) / perPacket
-	return packets * packetSize
+	if err := c.beginResponse(); err != nil {
+		return nil, c.poison(err)
+	}
+	defer c.endResponse()
+	if err := c.writeExact(ctx, output); err != nil {
+		return nil, err
+	}
+	return c.readPayload(ctx, size)
 }
 
-func decodePackets(buffer []byte, count, wanted, packetSize int) ([]byte, error) {
-	if count > len(buffer) || count < 2 {
-		return nil, fmt.Errorf("ftdi: invalid bulk-read count %d", count)
+func receiveDepth(payload, packetSize int) int {
+	if payload <= 0 {
+		return 1
 	}
-	payload := make([]byte, 0, min(count-2, wanted))
-	for position := 0; position < count; {
-		packetLength := min(packetSize, count-position)
-		if packetLength < 2 {
+	perPacket := packetSize - packetStatusSize
+	return (payload + perPacket - 1) / perPacket
+}
+
+func decodeCompletion(buffer []byte, packetSize int) ([]byte, error) {
+	if len(buffer) < packetStatusSize {
+		return nil, fmt.Errorf("ftdi: invalid bulk-read count %d", len(buffer))
+	}
+	payload := make([]byte, 0, len(buffer)-packetStatusSize)
+	for position := 0; position < len(buffer); {
+		packetLength := min(packetSize, len(buffer)-position)
+		if packetLength < packetStatusSize {
 			return nil, fmt.Errorf("ftdi: short status packet of %d bytes", packetLength)
 		}
-		chunk := buffer[position+2 : position+packetLength]
-		if len(chunk) > wanted-len(payload) {
-			return nil, fmt.Errorf("ftdi: received %d surplus payload bytes", len(chunk)-(wanted-len(payload)))
-		}
-		payload = append(payload, chunk...)
+		payload = append(payload, buffer[position+packetStatusSize:position+packetLength]...)
 		position += packetLength
 	}
 	return payload, nil

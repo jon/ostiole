@@ -271,12 +271,17 @@ func TestDarwinAlternateSettingInvalidatesRoutesOnFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ClaimInterface: %v", err)
 	}
+	claim.altKnown = true
+	claim.endpoints = map[uint8]Endpoint{0x01: {Address: 0x01}}
 	nativeInterface.setAltErr = want
 	if err := claim.SetAltSetting(1); !errors.Is(err, want) {
 		t.Fatalf("SetAltSetting error = %v, want %v", err, want)
 	}
 	if device.routes != nil {
 		t.Fatalf("routes after failure = %#v", device.routes)
+	}
+	if claim.altKnown || claim.endpoints != nil {
+		t.Fatalf("claim cache after failure = known %t endpoints %#v", claim.altKnown, claim.endpoints)
 	}
 }
 
@@ -289,11 +294,16 @@ func TestDarwinAlternateSettingInvalidatesRoutesWhenPipesFail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ClaimInterface: %v", err)
 	}
+	claim.altKnown = true
+	claim.endpoints = map[uint8]Endpoint{0x01: {Address: 0x01}}
 	nativeInterface.pipesErr = want
 	if err := claim.SetAltSetting(1); !errors.Is(err, want) {
 		t.Fatalf("SetAltSetting error = %v, want %v", err, want)
 	}
 	if device.routes != nil {
 		t.Fatalf("routes after failure = %#v", device.routes)
+	}
+	if claim.altKnown || claim.endpoints != nil {
+		t.Fatalf("claim cache after failure = known %t endpoints %#v", claim.altKnown, claim.endpoints)
 	}
 }

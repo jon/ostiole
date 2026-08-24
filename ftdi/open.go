@@ -38,6 +38,9 @@ func prepareChannel(ctx context.Context, channel *Channel) (_ *Channel, err erro
 	if err = channel.enterMPSSE(ctx); err != nil {
 		return nil, err
 	}
+	if err = channel.openUSBTransfers(ctx); err != nil {
+		return nil, err
+	}
 	if err = channel.synchronize(ctx); err != nil {
 		return nil, err
 	}
