@@ -186,8 +186,28 @@ func TestActiveConfigurationRejectsChangedActiveValue(t *testing.T) {
 		{request: 6, value: 0x0200, data: raw},
 		{request: 8, data: []byte{9}},
 	}}
-	if _, err := activeConfiguration(context.Background(), device); err == nil || !strings.Contains(err.Error(), "active configuration changed from 7 to 9") {
+	_, err := activeConfiguration(context.Background(), device)
+	if err == nil || !strings.Contains(err.Error(), "active configuration changed from 7 to 9") {
 		t.Fatalf("ActiveConfiguration() error = %v", err)
+	}
+	if errors.Is(err, ErrNotConfigured) {
+		t.Fatalf("ActiveConfiguration() error = %v, unexpectedly matches ErrNotConfigured", err)
+	}
+}
+
+func TestActiveConfigurationReportsTransitionToUnconfigured(t *testing.T) {
+	deviceDescriptor := make([]byte, 18)
+	deviceDescriptor[0], deviceDescriptor[1], deviceDescriptor[17] = 18, 1, 1
+	raw := singleInterfaceConfiguration(7)
+	device := &scriptedDescriptorDevice{t: t, replies: []descriptorReply{
+		{request: 8, data: []byte{7}},
+		{request: 6, value: 0x0100, data: deviceDescriptor},
+		{request: 6, value: 0x0200, data: raw[:9]},
+		{request: 6, value: 0x0200, data: raw},
+		{request: 8, data: []byte{0}},
+	}}
+	if _, err := activeConfiguration(context.Background(), device); !errors.Is(err, ErrNotConfigured) {
+		t.Fatalf("ActiveConfiguration() error = %v, want ErrNotConfigured", err)
 	}
 }
 
@@ -386,8 +406,8 @@ func TestConfigurationIgnoresReservedEndpointAttributeBits(t *testing.T) {
 func TestActiveConfigurationRejectsUnavailableMetadata(t *testing.T) {
 	t.Run("unconfigured", func(t *testing.T) {
 		device := &scriptedDescriptorDevice{t: t, replies: []descriptorReply{{request: 8, data: []byte{0}}}}
-		if _, err := activeConfiguration(context.Background(), device); err == nil || !strings.Contains(err.Error(), "not configured") {
-			t.Fatalf("ActiveConfiguration() error = %v", err)
+		if _, err := activeConfiguration(context.Background(), device); !errors.Is(err, ErrNotConfigured) {
+			t.Fatalf("ActiveConfiguration() error = %v, want ErrNotConfigured", err)
 		}
 	})
 	t.Run("no matching descriptor", func(t *testing.T) {

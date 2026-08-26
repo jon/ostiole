@@ -68,7 +68,8 @@ type controlTransferer interface {
 }
 
 // ActiveConfiguration returns a detached snapshot of the device's active USB
-// configuration. It does not claim an interface or change device state.
+// configuration. It does not claim an interface or change device state. If
+// the device reports configuration zero, the error matches ErrNotConfigured.
 func (d *Device) ActiveConfiguration(ctx context.Context) (Configuration, error) {
 	if d == nil {
 		return Configuration{}, errors.New("usb: nil device")
@@ -111,9 +112,21 @@ func activeConfiguration(ctx context.Context, device controlTransferer) (Configu
 		return Configuration{}, fmt.Errorf("usb: re-read active configuration: %w", err)
 	}
 	if current != value {
-		return Configuration{}, fmt.Errorf("usb: active configuration changed from %d to %d", value, current)
+		return Configuration{}, configurationChangedError{from: value, to: current}
 	}
 	return configuration, nil
+}
+
+type configurationChangedError struct {
+	from, to uint8
+}
+
+func (e configurationChangedError) Error() string {
+	return fmt.Sprintf("usb: active configuration changed from %d to %d", e.from, e.to)
+}
+
+func (e configurationChangedError) Is(target error) bool {
+	return e.to == 0 && target == ErrNotConfigured
 }
 
 func activeConfigurationValue(ctx context.Context, device controlTransferer) (uint8, error) {
@@ -122,7 +135,7 @@ func activeConfigurationValue(ctx context.Context, device controlTransferer) (ui
 		return 0, fmt.Errorf("usb: read active configuration: %w", err)
 	}
 	if value == 0 {
-		return 0, errors.New("usb: device is not configured")
+		return 0, ErrNotConfigured
 	}
 	return value, nil
 }

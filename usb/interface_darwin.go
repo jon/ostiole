@@ -59,20 +59,32 @@ func (d *Device) ClaimInterface(iface uint8) (*ClaimedInterface, error) {
 	return claim, nil
 }
 
-func (d *Device) setAltSetting(claim *ClaimedInterface, alternate uint8) error {
+func (d *Device) setAltSetting(claim *ClaimedInterface, alternate uint8) (map[uint8]Endpoint, error) {
 	if d.claim != claim {
-		return errors.New("usb: claimed interface is not owned by this device")
+		return nil, errors.New("usb: claimed interface is not owned by this device")
 	}
 	d.routes = nil
 	if err := d.iface.setAlternate(alternate); err != nil {
-		return fmt.Errorf("usb: select interface %d alternate %d: %w", claim.number, alternate, err)
+		return nil, fmt.Errorf("usb: select interface %d alternate %d: %w", claim.number, alternate, err)
 	}
 	pipes, err := d.iface.pipes()
 	if err != nil {
-		return fmt.Errorf("usb: enumerate interface %d pipes: %w", claim.number, err)
+		return nil, fmt.Errorf("usb: enumerate interface %d pipes: %w", claim.number, err)
 	}
 	d.replaceRoutes(pipes)
-	return nil
+	return endpointsFromDarwinPipes(pipes), nil
+}
+
+func endpointsFromDarwinPipes(pipes []darwinPipe) map[uint8]Endpoint {
+	endpoints := make(map[uint8]Endpoint, len(pipes))
+	for _, pipe := range pipes {
+		endpoints[pipe.endpoint] = Endpoint{
+			Address:       pipe.endpoint,
+			TransferType:  TransferType(pipe.transferType),
+			MaxPacketSize: pipe.maxPacketSize,
+		}
+	}
+	return endpoints
 }
 
 func (d *Device) replaceRoutes(pipes []darwinPipe) {

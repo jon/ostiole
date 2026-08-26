@@ -148,6 +148,41 @@ func TestDarwinReclaimedInterfaceUsesItsSelectedAlternate(t *testing.T) {
 	}
 }
 
+func TestDarwinSelectedAlternateUsesEnumeratedPipeDescriptors(t *testing.T) {
+	nativeInterface := &fakeDarwinInterface{pipesValue: []darwinPipe{
+		{endpoint: 0x02, ref: 4, transferType: darwinBulkPipe, maxPacketSize: 64},
+		{endpoint: 0x81, ref: 7, transferType: darwinBulkPipe, maxPacketSize: 512},
+	}}
+	native := &fakeDarwinEndpointDevice{
+		fakeDarwinInterfaceDevice: fakeDarwinInterfaceDevice{iface: nativeInterface},
+		t:                         t,
+	}
+	device := &Device{handle: native}
+	claim, err := device.ClaimInterface(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := claim.SetAltSetting(2); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []Endpoint{
+		{Address: 0x02, TransferType: TransferBulk, MaxPacketSize: 64},
+		{Address: 0x81, TransferType: TransferBulk, MaxPacketSize: 512},
+	} {
+		endpoint, err := claim.Endpoint(context.Background(), want.Address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if endpoint != want {
+			t.Fatalf("Endpoint(%#02x) = %#v, want %#v", want.Address, endpoint, want)
+		}
+	}
+	if native.calls != 0 {
+		t.Fatalf("control transfers after alternate selection = %d, want 0", native.calls)
+	}
+}
+
 func assertDarwinBulkSubmissions(t *testing.T, engine *fakeDarwinBulkEngine) {
 	t.Helper()
 	if engine.opens != 1 || len(engine.endpoints) != 2 || engine.endpoints[0] != 0x81 || engine.endpoints[1] != 0x02 || engine.sizes[0] != 512 || engine.sizes[1] != 37 {
@@ -180,7 +215,7 @@ func TestClaimedInterfaceClosesIdleTransferEngineBeforeAlternateSetting(t *testi
 	if err := claim.SetAltSetting(1); err != nil {
 		t.Fatal(err)
 	}
-	if engine.closes != 1 || claim.transfers != nil || claim.endpoints != nil || claim.alternate != 1 {
+	if engine.closes != 1 || claim.transfers != nil || len(claim.endpoints) != 0 || claim.alternate != 1 {
 		t.Fatalf("claim after alternate setting = %#v, engine closes %d", claim, engine.closes)
 	}
 	if len(native.alternates) != 1 || native.alternates[0] != 1 {

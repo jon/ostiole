@@ -13,6 +13,9 @@ import (
 // ErrStaleCandidate reports that an attachment changed after enumeration.
 var ErrStaleCandidate = errors.New("usb: stale candidate")
 
+// ErrNotConfigured reports that a USB device has no active configuration.
+var ErrNotConfigured = errors.New("usb: device is not configured")
+
 // DeviceFilter selects either one exact USB identity or every product from one
 // vendor. Its zero value is invalid.
 type DeviceFilter struct {

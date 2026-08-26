@@ -31,11 +31,13 @@ func (c *ClaimedInterface) SetAltSetting(alternate uint8) error {
 	}
 	c.altKnown = false
 	c.endpoints = nil
-	if err := c.device.setAltSetting(c, alternate); err != nil {
+	endpoints, err := c.device.setAltSetting(c, alternate)
+	if err != nil {
 		return err
 	}
 	c.alternate = alternate
 	c.altKnown = true
+	c.endpoints = endpoints
 	return nil
 }
 
