@@ -32,15 +32,15 @@ func (d *Device) ClaimInterface(iface uint8) (*ClaimedInterface, error) {
 	return claim, nil
 }
 
-func (d *Device) setAltSetting(claim *ClaimedInterface, alternate uint8) error {
+func (d *Device) setAltSetting(claim *ClaimedInterface, alternate uint8) (map[uint8]Endpoint, error) {
 	if d.claim != claim {
-		return errors.New("usb: claimed interface is not owned by this device")
+		return nil, errors.New("usb: claimed interface is not owned by this device")
 	}
 	value := [2]uint32{uint32(claim.number), uint32(alternate)}
 	if _, err := d.runIOCTL(usbfsSetInterface, &value); err != nil {
-		return fmt.Errorf("usb: select interface %d alternate %d: %w", claim.number, alternate, err)
+		return nil, fmt.Errorf("usb: select interface %d alternate %d: %w", claim.number, alternate, err)
 	}
-	return nil
+	return nil, nil
 }
 
 func (d *Device) releaseInterface(claim *ClaimedInterface) error {

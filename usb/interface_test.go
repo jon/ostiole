@@ -40,6 +40,9 @@ func TestDeviceClaimsSelectsAndReleasesOneInterface(t *testing.T) {
 	if err := claim.SetAltSetting(3); err != nil {
 		t.Fatal(err)
 	}
+	if claim.alternate != 3 || !claim.altKnown || claim.endpoints != nil {
+		t.Fatalf("claim after alternate selection = %#v", claim)
+	}
 	if err := claim.Close(); err != nil {
 		t.Fatal(err)
 	}
