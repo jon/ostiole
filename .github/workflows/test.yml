@@ -146,6 +146,8 @@ jobs:
             markdown_files+=("$file")
           done < <(git ls-files -z '*.md')
           npx --yes "markdownlint-cli2@${MARKDOWNLINT_VERSION}" -- "${markdown_files[@]}"
+      - name: Test Codex review signal
+        run: bash .github/scripts/codex-review-signal_test.sh
       - name: Lint workflows
         run: |
           go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
@@ -202,14 +204,17 @@ jobs:
       actions: read
       contents: read
       issues: read
-      pull-requests: read
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
-      RUN_ID: ${{ github.run_id }}
     steps:
+      - name: Check out the review policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Wait for Codex to review the current head
         shell: bash
         run: |
@@ -241,7 +246,7 @@ jobs:
               <<< "$post_head_entries"
           }
 
-          clean_comment_review() {
+          reviewed_head() {
             while read -r reviewed_commit; do
               if [[ ! "$reviewed_commit" =~ ^[0-9a-f]{7,40}$ ]]; then
                 continue
@@ -252,60 +257,78 @@ jobs:
               if [[ "$resolved_sha" == "$HEAD_SHA" ]]; then
                 return 0
               fi
-            done < <(clean_review_prefixes)
+            done
             return 1
           }
 
-          previous_gate() {
-            while read -r candidate_run_id; do
-              if [[ ! "$candidate_run_id" =~ ^[0-9]+$ ]]; then
-                continue
-              fi
-              gate_count=$(gh api \
-                --paginate \
-                --slurp \
-                "repos/${GH_REPO}/actions/runs/${candidate_run_id}/jobs?filter=all&per_page=100" | \
-                jq '[.[] | .jobs[] | select(.name == "codex-reviewed" and .conclusion == "success")] | length')
-              if [[ "$gate_count" -gt 0 ]]; then
-                return 0
-              fi
-            done < <(gh api \
-              --paginate \
-              "repos/${GH_REPO}/actions/workflows/test.yml/runs?event=pull_request&head_sha=${HEAD_SHA}&per_page=100" | \
-              jq -r ".workflow_runs[] | select(
-                .id != (${RUN_ID} | tonumber) and
-                .path == \".github/workflows/test.yml\" and
-                .event == \"pull_request\" and
-                .head_sha == \"${HEAD_SHA}\" and
-                any(.pull_requests[]?; .number == (${PR_NUMBER} | tonumber))
-              ) | .id")
-            return 1
+          clean_comment_review() {
+            reviewed_head < <(clean_review_prefixes)
           }
 
-          for attempt in {1..60}; do
-            if previous_gate; then
-              echo "A prior Codex gate already validated ${HEAD_SHA}."
-              exit 0
-            fi
-
-            review_count=$(gh api \
+          clean_reaction_review() {
+            gh api \
               --paginate \
               --slurp \
-              "repos/${GH_REPO}/pulls/${PR_NUMBER}/reviews?per_page=100" | \
-              jq "add | [.[] | select(.user.login == \"chatgpt-codex-connector[bot]\" and .commit_id == \"${HEAD_SHA}\" and .state != \"PENDING\" and .state != \"DISMISSED\" and (.body // \"\" | contains(\"Codex Security Review\") | not))] | length")
-            if [[ "$review_count" -gt 0 ]]; then
-              echo "Codex completed a review of ${HEAD_SHA}."
-              exit 0
+              -H "Accept: application/vnd.github+json" \
+              "repos/${GH_REPO}/issues/${PR_NUMBER}/comments?per_page=100" | \
+              jq -c 'add' > "$review_comments_file" || return 1
+            gh api \
+              --paginate \
+              --slurp \
+              -H "Accept: application/vnd.github+json" \
+              "repos/${GH_REPO}/issues/${PR_NUMBER}/reactions?per_page=100" | \
+              jq -c 'add' > "$review_reactions_file" || return 1
+            gh api \
+              --paginate \
+              --slurp \
+              -H "Accept: application/vnd.github+json" \
+              "repos/${GH_REPO}/actions/runs?event=pull_request&head_sha=${HEAD_SHA}&per_page=100" | \
+              jq -c '[.[] | .workflow_runs[]]' > "$review_runs_file" || return 1
+            jq -r -n \
+              --slurpfile comments "$review_comments_file" \
+              --slurpfile reactions "$review_reactions_file" \
+              --slurpfile runs "$review_runs_file" \
+              --arg head "$HEAD_SHA" \
+              --argjson pr "$PR_NUMBER" \
+              -f .github/scripts/codex-review-signal.jq > "$review_prefixes_file" || return 1
+            reviewed_head < "$review_prefixes_file"
+          }
+
+          review_signal_root=$(mktemp -d) || exit 1
+          if [[ -z "$review_signal_root" || ! -d "$review_signal_root" ]]; then
+            echo "Could not create temporary storage for the Codex review signal."
+            exit 1
+          fi
+          review_comments_file="${review_signal_root}/comments.json"
+          review_prefixes_file="${review_signal_root}/prefixes.txt"
+          review_reactions_file="${review_signal_root}/reactions.json"
+          review_runs_file="${review_signal_root}/runs.json"
+          cleanup() {
+            rm -f "$review_comments_file" "$review_prefixes_file" "$review_reactions_file" "$review_runs_file"
+            rmdir "$review_signal_root" 2>/dev/null || true
+          }
+          finish() {
+            local status=$1
+            trap - EXIT
+            cleanup
+            exit "$status"
+          }
+          trap cleanup EXIT
+
+          for attempt in {1..60}; do
+            if clean_reaction_review; then
+              echo "Codex completed a clean review of ${HEAD_SHA}."
+              finish 0
             fi
 
             post_head_entries=$(post_head_timeline)
             if clean_comment_review; then
               echo "Codex completed a clean review of ${HEAD_SHA}."
-              exit 0
+              finish 0
             fi
 
             echo "Waiting for Codex review of ${HEAD_SHA} (${attempt}/60)."
             sleep 20
           done
           echo "Codex did not complete a review of ${HEAD_SHA}."
-          exit 1
+          finish 1
