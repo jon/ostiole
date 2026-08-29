@@ -26,6 +26,22 @@ static int ostiole_registry_uint(io_service_t service, CFStringRef key,
   return ok;
 }
 
+static void ostiole_registry_string(io_service_t service, CFStringRef key,
+                                    char* value, size_t size) {
+  value[0] = '\0';
+  CFTypeRef property =
+      IORegistryEntryCreateCFProperty(service, key, kCFAllocatorDefault, 0);
+  if (property != NULL && CFGetTypeID(property) == CFStringGetTypeID()) {
+    if (!CFStringGetCString((CFStringRef)property, value, size,
+                            kCFStringEncodingUTF8)) {
+      value[0] = '\0';
+    }
+  }
+  if (property != NULL) {
+    CFRelease(property);
+  }
+}
+
 int ostiole_usb_attachment_read(io_service_t service,
                                 ostiole_usb_attachment* attachment) {
   uint32_t vid, pid, location, address;
@@ -39,6 +55,12 @@ int ostiole_usb_attachment_read(io_service_t service,
   attachment->pid = (uint16_t)pid;
   attachment->location = location;
   attachment->address = (uint8_t)address;
+  ostiole_registry_string(service, CFSTR("USB Serial Number"),
+                          attachment->serial, sizeof(attachment->serial));
+  if (attachment->serial[0] == '\0') {
+    ostiole_registry_string(service, CFSTR("kUSBSerialNumberString"),
+                            attachment->serial, sizeof(attachment->serial));
+  }
   return 1;
 }
 

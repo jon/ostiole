@@ -23,7 +23,7 @@ func (f *fakeDarwinInventory) snapshot() ([]darwinAttachment, error) {
 
 func TestDarwinListFiltersAndSortsAttachments(t *testing.T) {
 	inventory := &fakeDarwinInventory{attachments: []darwinAttachment{
-		{vid: 0x0403, pid: 0x6014, location: 0x02123456, address: 9},
+		{vid: 0x0403, pid: 0x6014, location: 0x02123456, address: 9, serial: "FT1234"},
 		{vid: 0x1366, pid: 0x0105, location: 0x01123456, address: 7},
 		{vid: 0x0403, pid: 0x6001, location: 0x01123456, address: 3},
 	}}
@@ -35,7 +35,7 @@ func TestDarwinListFiltersAndSortsAttachments(t *testing.T) {
 	}
 	want := []DeviceInfo{
 		{VID: 0x0403, PID: 0x6001, Bus: 1, Address: 3},
-		{VID: 0x0403, PID: 0x6014, Bus: 2, Address: 9},
+		{VID: 0x0403, PID: 0x6014, Bus: 2, Address: 9, Serial: "FT1234"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("List = %#v, want %#v", got, want)

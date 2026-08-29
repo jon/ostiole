@@ -16,6 +16,8 @@ import (
 
 const jlinkOwnerCloseAttempts = 3
 
+var errJLinkHILUnavailable = errors.New("J-Link HIL unavailable")
+
 type jlinkCleanupStep struct {
 	description string
 	needsSWD    bool
@@ -105,10 +107,25 @@ func releaseJLinkCleanup(t *testing.T, cleanup *jlinkCleanup) bool {
 	return false
 }
 
-func selectJLinkHILCandidate(candidates []usb.DeviceInfo, selection string) (usb.DeviceInfo, error) {
+func selectJLinkHILCandidate(candidates []usb.DeviceInfo, selection, serial string) (usb.DeviceInfo, error) {
+	if selection != "" && serial != "" {
+		return usb.DeviceInfo{}, errors.New("set only one of OSTIOLE_JLINK_HIL_DEVICE and OSTIOLE_JLINK_HIL_SERIAL")
+	}
+	if serial != "" {
+		var matches []usb.DeviceInfo
+		for _, candidate := range candidates {
+			if candidate.Serial == serial {
+				matches = append(matches, candidate)
+			}
+		}
+		if len(matches) != 1 {
+			return usb.DeviceInfo{}, fmt.Errorf("%w: found %d supported J-Links with the requested serial, want one", errJLinkHILUnavailable, len(matches))
+		}
+		return matches[0], nil
+	}
 	if selection == "" {
 		if len(candidates) != 1 {
-			return usb.DeviceInfo{}, fmt.Errorf("found %d supported J-Links, want one or OSTIOLE_JLINK_HIL_DEVICE=bus:address", len(candidates))
+			return usb.DeviceInfo{}, fmt.Errorf("%w: found %d supported J-Links, want one or an exact HIL device or serial selector", errJLinkHILUnavailable, len(candidates))
 		}
 		return candidates[0], nil
 	}
@@ -126,7 +143,7 @@ func selectJLinkHILCandidate(candidates []usb.DeviceInfo, selection string) (usb
 			return candidate, nil
 		}
 	}
-	return usb.DeviceInfo{}, fmt.Errorf("J-Link %s is not present in the supported inventory", selection)
+	return usb.DeviceInfo{}, fmt.Errorf("%w: J-Link %s is not present in the supported inventory", errJLinkHILUnavailable, selection)
 }
 
 func closeJLinkOwner(t *testing.T, owner interface{ Close() error }, description string) bool {
@@ -311,21 +328,35 @@ func TestJLinkCleanupRetriesWithFreshBoundedContexts(t *testing.T) {
 
 func TestSelectJLinkHILCandidate(t *testing.T) {
 	candidates := []usb.DeviceInfo{
-		{VID: jlink.VID, PID: 0x1020, Bus: 1, Address: 3},
-		{VID: jlink.VID, PID: 0x1020, Bus: 2, Address: 1},
+		{VID: jlink.VID, PID: 0x1020, Bus: 1, Address: 3, Serial: "first"},
+		{VID: jlink.VID, PID: 0x1020, Bus: 2, Address: 1, Serial: "second"},
 	}
-	if got, err := selectJLinkHILCandidate(candidates[:1], ""); err != nil || got != candidates[0] {
+	if got, err := selectJLinkHILCandidate(candidates[:1], "", ""); err != nil || got != candidates[0] {
 		t.Fatalf("single candidate = %#v, %v", got, err)
 	}
-	if _, err := selectJLinkHILCandidate(candidates, ""); err == nil {
-		t.Fatal("ambiguous selection succeeded")
+	if _, err := selectJLinkHILCandidate(candidates, "", ""); !errors.Is(err, errJLinkHILUnavailable) {
+		t.Fatalf("ambiguous selection error = %v", err)
 	}
-	if got, err := selectJLinkHILCandidate(candidates, "2:1"); err != nil || got != candidates[1] {
+	if got, err := selectJLinkHILCandidate(candidates, "2:1", ""); err != nil || got != candidates[1] {
 		t.Fatalf("explicit candidate = %#v, %v", got, err)
 	}
-	for _, selection := range []string{"bad", "2:9"} {
-		if _, err := selectJLinkHILCandidate(candidates, selection); err == nil {
-			t.Fatalf("selection %q succeeded", selection)
-		}
+	if got, err := selectJLinkHILCandidate(candidates, "", "second"); err != nil || got != candidates[1] {
+		t.Fatalf("serial candidate = %#v, %v", got, err)
+	}
+	if _, err := selectJLinkHILCandidate(candidates, "2:1", "second"); err == nil || errors.Is(err, errJLinkHILUnavailable) {
+		t.Fatalf("combined selection error = %v", err)
+	}
+	if _, err := selectJLinkHILCandidate(candidates, "bad", ""); err == nil || errors.Is(err, errJLinkHILUnavailable) {
+		t.Fatalf("malformed selection error = %v", err)
+	}
+	if _, err := selectJLinkHILCandidate(candidates, "2:9", ""); !errors.Is(err, errJLinkHILUnavailable) {
+		t.Fatalf("missing exact selection error = %v", err)
+	}
+	if _, err := selectJLinkHILCandidate(candidates, "", "missing"); !errors.Is(err, errJLinkHILUnavailable) {
+		t.Fatalf("missing serial selection error = %v", err)
+	}
+	duplicates := append(append([]usb.DeviceInfo(nil), candidates...), usb.DeviceInfo{VID: jlink.VID, PID: 0x1020, Bus: 3, Address: 1, Serial: "second"})
+	if _, err := selectJLinkHILCandidate(duplicates, "", "second"); !errors.Is(err, errJLinkHILUnavailable) {
+		t.Fatalf("duplicate serial selection error = %v", err)
 	}
 }

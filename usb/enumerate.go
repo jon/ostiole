@@ -51,11 +51,11 @@ func (e *Enumerator) List(ctx context.Context, filters []DeviceFilter) ([]Device
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		info, ok, err := e.readDevice(entry)
+		info, ok, err := e.readMatchingDevice(entry, filters)
 		if err != nil {
 			return nil, err
 		}
-		if ok && matchesAny(info, filters) {
+		if ok {
 			devices = append(devices, info)
 		}
 	}
@@ -66,6 +66,15 @@ func (e *Enumerator) List(ctx context.Context, filters []DeviceFilter) ([]Device
 		return devices[i].Address < devices[j].Address
 	})
 	return devices, nil
+}
+
+func (e *Enumerator) readMatchingDevice(entry os.DirEntry, filters []DeviceFilter) (DeviceInfo, bool, error) {
+	info, ok, err := e.readDevice(entry)
+	if err != nil || !ok || !matchesAny(info, filters) {
+		return DeviceInfo{}, false, err
+	}
+	info.Serial, err = e.readSerial(entry)
+	return info, err == nil, err
 }
 
 func (e *Enumerator) readDevice(entry os.DirEntry) (DeviceInfo, bool, error) {
@@ -102,6 +111,21 @@ func (e *Enumerator) readDevice(entry os.DirEntry) (DeviceInfo, bool, error) {
 		Bus:     uint8(bus),
 		Address: uint8(address),
 	}, true, nil
+}
+
+func (e *Enumerator) readSerial(entry os.DirEntry) (string, error) {
+	return readText(filepath.Join(e.sysfsRoot, entry.Name()), "serial")
+}
+
+func readText(root, name string) (string, error) {
+	value, err := os.ReadFile(filepath.Join(root, name))
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("usb: read %s: %w", name, err)
+	}
+	return strings.TrimSuffix(strings.TrimSuffix(string(value), "\n"), "\r"), nil
 }
 
 func readNumber(root, name string, base, bits int) (uint64, bool, error) {

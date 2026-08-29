@@ -51,6 +51,7 @@ func (iokitInventory) snapshot() ([]darwinAttachment, error) {
 			pid:      uint16(native.pid),
 			location: uint32(native.location),
 			address:  uint8(native.address),
+			serial:   C.GoString(&native.serial[0]),
 		})
 	}
 }
@@ -93,6 +94,7 @@ func (d *iokitDevice) identity() (darwinAttachment, error) {
 		pid:      uint16(native.pid),
 		location: uint32(native.location),
 		address:  uint8(native.address),
+		serial:   C.GoString(&native.serial[0]),
 	}, nil
 }
 

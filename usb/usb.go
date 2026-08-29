@@ -62,8 +62,10 @@ func validateFilters(filters []DeviceFilter) error {
 	return nil
 }
 
-// DeviceInfo identifies one physical USB attachment.
+// DeviceInfo identifies one physical USB attachment. Serial is the host-visible
+// USB serial number, or empty when the device or host does not provide one.
 type DeviceInfo struct {
 	VID, PID     uint16
 	Bus, Address uint8
+	Serial       string
 }

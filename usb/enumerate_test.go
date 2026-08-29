@@ -12,11 +12,14 @@ import (
 	"testing"
 )
 
-func TestEnumeratorListsMatchingUSBDevicesWithoutStrings(t *testing.T) {
+func TestEnumeratorListsMatchingUSBDevicesWithOptionalSerials(t *testing.T) {
 	root := t.TempDir()
 	writeSysfsDevice(t, root, "1-2", "0403", "6014", "1", "7")
 	writeSysfsDevice(t, root, "2-1", "0403", "6011", "2", "3")
 	writeSysfsDevice(t, root, "3-4", "1234", "5678", "3", "9")
+	if err := os.WriteFile(filepath.Join(root, "1-2", "serial"), []byte("FT1234\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Mkdir(filepath.Join(root, "1-2:1.0"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -30,9 +33,28 @@ func TestEnumeratorListsMatchingUSBDevicesWithoutStrings(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []DeviceInfo{
-		{VID: 0x0403, PID: 0x6014, Bus: 1, Address: 7},
+		{VID: 0x0403, PID: 0x6014, Bus: 1, Address: 7, Serial: "FT1234"},
 		{VID: 0x0403, PID: 0x6011, Bus: 2, Address: 3},
 	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("List() = %#v, want %#v", got, want)
+	}
+}
+
+func TestEnumeratorIgnoresUnreadableSerialOnUnrelatedDevice(t *testing.T) {
+	root := t.TempDir()
+	writeSysfsDevice(t, root, "1-2", "0403", "6014", "1", "7")
+	writeSysfsDevice(t, root, "2-1", "1234", "5678", "2", "3")
+	if err := os.Mkdir(filepath.Join(root, "2-1", "serial"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	enumerator := newEnumerator(root, "/dev/bus/usb")
+
+	got, err := enumerator.List(context.Background(), []DeviceFilter{ExactDevice(0x0403, 0x6014)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []DeviceInfo{{VID: 0x0403, PID: 0x6014, Bus: 1, Address: 7}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("List() = %#v, want %#v", got, want)
 	}
