@@ -4,6 +4,7 @@ package jlink_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -238,7 +239,10 @@ func openJLinkSession(t *testing.T, ctx context.Context, options ...jlink.Option
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate, err := selectJLinkHILCandidate(candidates, os.Getenv("OSTIOLE_JLINK_HIL_DEVICE"))
+	candidate, err := selectJLinkHILCandidate(candidates, os.Getenv("OSTIOLE_JLINK_HIL_DEVICE"), os.Getenv("OSTIOLE_JLINK_HIL_SERIAL"))
+	if errors.Is(err, errJLinkHILUnavailable) {
+		t.Skip(err)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

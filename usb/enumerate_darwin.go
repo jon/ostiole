@@ -13,6 +13,7 @@ type darwinAttachment struct {
 	vid, pid uint16
 	location uint32
 	address  uint8
+	serial   string
 }
 
 func (a darwinAttachment) info() DeviceInfo {
@@ -21,6 +22,7 @@ func (a darwinAttachment) info() DeviceInfo {
 		PID:     a.pid,
 		Bus:     uint8(a.location >> 24),
 		Address: a.address,
+		Serial:  a.serial,
 	}
 }
 

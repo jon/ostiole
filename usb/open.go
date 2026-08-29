@@ -72,7 +72,11 @@ func (e *Enumerator) revalidate(ctx context.Context, expected DeviceInfo) error 
 		if !ok || info.Bus != expected.Bus || info.Address != expected.Address {
 			continue
 		}
-		if info.VID != expected.VID || info.PID != expected.PID {
+		info.Serial, err = e.readSerial(entry)
+		if err != nil {
+			return err
+		}
+		if info.VID != expected.VID || info.PID != expected.PID || info.Serial != expected.Serial {
 			return fmt.Errorf("%w: bus %d address %d changed identity", ErrStaleCandidate, expected.Bus, expected.Address)
 		}
 		return nil

@@ -132,6 +132,14 @@ func TestDarwinOpenRejectsStaleCandidates(t *testing.T) {
 	}
 }
 
+func TestDarwinOpenRejectsChangedUSBSerial(t *testing.T) {
+	expected := DeviceInfo{VID: 0x1366, PID: 0x1020, Bus: 2, Address: 1, Serial: "old"}
+	actual := DeviceInfo{VID: 0x1366, PID: 0x1020, Bus: 2, Address: 1, Serial: "new"}
+	if err := validateDarwinIdentity(expected, actual); !errors.Is(err, ErrStaleCandidate) {
+		t.Fatalf("validateDarwinIdentity() error = %v, want ErrStaleCandidate", err)
+	}
+}
+
 func TestDarwinOpenValidatesContextAndCleansUpIdentityFailure(t *testing.T) {
 	wantIdentity := errors.New("identity failed")
 	native := &fakeDarwinDevice{identityErr: wantIdentity}

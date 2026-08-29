@@ -39,9 +39,12 @@ Start with `usb.New` and list only the identities accepted by the intended
 driver. Treat the result as a snapshot rather than a live handle.
 
 The current examples require exactly one supported FTDI attachment. A larger
-application can present the returned identities to a user, but it should
-still make one explicit selection before calling `Open`. Do not silently pick
-the first result from an ambiguous inventory.
+application can present the returned identities to a user or match a known
+nonempty `DeviceInfo.Serial`, but it should still make one explicit selection
+before calling `Open`. The selected candidate retains its enumerated bus and
+address; pass the complete value to `Open` so it can reject a replugged or
+replaced attachment. Do not silently pick the first result from an ambiguous
+inventory.
 
 A metadata-only J-Link session follows the same explicit inventory rule:
 
