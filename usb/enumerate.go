@@ -73,7 +73,7 @@ func (e *Enumerator) readMatchingDevice(entry os.DirEntry, filters []DeviceFilte
 	if err != nil || !ok || !matchesAny(info, filters) {
 		return DeviceInfo{}, false, err
 	}
-	info.Serial, err = e.readSerial(entry)
+	info.Product, info.Serial, err = e.readStrings(entry)
 	return info, err == nil, err
 }
 
@@ -113,8 +113,14 @@ func (e *Enumerator) readDevice(entry os.DirEntry) (DeviceInfo, bool, error) {
 	}, true, nil
 }
 
-func (e *Enumerator) readSerial(entry os.DirEntry) (string, error) {
-	return readText(filepath.Join(e.sysfsRoot, entry.Name()), "serial")
+func (e *Enumerator) readStrings(entry os.DirEntry) (string, string, error) {
+	root := filepath.Join(e.sysfsRoot, entry.Name())
+	product, err := readText(root, "product")
+	if err != nil {
+		return "", "", err
+	}
+	serial, err := readText(root, "serial")
+	return product, serial, err
 }
 
 func readText(root, name string) (string, error) {

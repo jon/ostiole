@@ -53,15 +53,15 @@ than reproduce their framing.
 ## Discovery and opening
 
 `usb.New` constructs access to the host USB inventory. `List` returns a
-snapshot matching either one exact vendor/product pair or every product from a
-vendor, without opening a device. Each candidate includes the host-visible USB
-serial number when available. The caller selects exactly one `usb.DeviceInfo`
-and passes that complete snapshot back to `Open`.
+snapshot matching every attachment, one exact vendor/product pair, or every
+product from a vendor, without opening a device. Each candidate includes the
+host-visible USB product and serial strings when available. The caller selects
+exactly one `usb.DeviceInfo` and passes that complete snapshot back to `Open`.
 
-`Open` revalidates the bus address, vendor, product, and serial before and after
-acquiring the attachment, then retains that identity for the driver. A device
-that disappeared or changed identity returns `usb.ErrStaleCandidate` instead
-of silently opening a replacement.
+`Open` revalidates the bus address, vendor ID, product ID, product string, and
+serial before and after acquiring the attachment, then retains that identity
+for the driver. A device that disappeared or changed identity returns
+`usb.ErrStaleCandidate` instead of silently opening a replacement.
 
 `ftdi.SupportedDevices` provides the USB identities understood by the FTDI
 driver. It does not select a device. `ftdi.Open` derives the product from the
