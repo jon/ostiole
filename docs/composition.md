@@ -19,6 +19,7 @@ data-register write can write target memory.
 | List every host USB attachment | `usb.New`, `usb.AllDevices`, `Enumerator.List` | Package tests |
 | List USB attachments understood by the FTDI driver | `usb.New`, `ftdi.SupportedDevices`, `Enumerator.List` | `ost ftdi list` |
 | Read metadata from one J-Link | `usb.New`, `jlink.SupportedDevices`, `Enumerator.Open`, `jlink.Open`, `Session.Info` | Package tests |
+| Shortlist USB attachments by the CMSIS-DAP product marker | `usb.New`, `usb.AllDevices`, `cmsisdap.Candidates` | Package tests |
 | Open one FTDI MPSSE SWD port | `Enumerator.Open`, `ftdi.Open` | `examples/trivial/swd-dpidr` |
 | Open one J-Link SWD session | `Enumerator.Open`, `jlink.Open`, `jlink.WithSWD` | Package tests |
 | Connect SWD or transfer DP/AP registers | `swd.New`, `Conn.Connect`, `Conn.ReadDP`, `Conn.WriteDP`, `Conn.ReadAP`, `Conn.WriteAP`, `Conn.NewBatch`, `Conn.Release` | `examples/trivial/swd-dpidr` |
@@ -51,6 +52,22 @@ before calling `Open`. The selected candidate retains its enumerated bus and
 address; pass the complete value to `Open` so it can reject a replugged or
 replaced attachment. Do not silently pick the first result from an ambiguous
 inventory.
+
+A CMSIS-DAP candidate shortlist begins with the explicit broad inventory:
+
+```go
+devices, err := usb.New().List(ctx, []usb.DeviceFilter{usb.AllDevices()})
+if err != nil {
+    return err
+}
+candidates := cmsisdap.Candidates(devices)
+```
+
+Product matching is case-sensitive and only shortlists candidates. An
+application which knows a composite probe by serial or another explicit policy
+may select it from `devices` even when its device product string is absent from
+`Candidates`. Do not silently pick the first result from an ambiguous
+shortlist.
 
 A metadata-only J-Link session follows the same explicit inventory rule:
 

@@ -75,6 +75,16 @@ samples displaced by one clock. The correction is gated to its USB product and
 full firmware record; for other firmware records, the package returns the
 samples unchanged.
 
+## CMSIS-DAP USB discovery
+
+| Capability | Implemented | Validation and boundary |
+| --- | --- | --- |
+| Candidate shortlist | Yes | Case-sensitive `CMSIS-DAP` match against the host-visible USB product string. The caller enumerates every USB attachment and makes the exact selection; a marker is not proof of protocol support. |
+| Product and serial inventory | HIL | The `0d28:0204` DAPLink on the Linux bench was found by product and serial. Its command interface is HID rather than v2 bulk; no probe or target command was sent. |
+
+The [CMSIS-DAP discovery guide](protocols/cmsisdap.md) gives the selection and
+current bench boundaries.
+
 ## Serial Wire Debug
 
 | Capability | Implemented | Validation and boundary |
@@ -172,8 +182,8 @@ the volatile DAP and MEM-AP state described above.
 
 ## Not currently provided
 
-There is no public CMSIS-DAP driver, JTAG protocol layer, automatic
-probe discovery policy, CoreSight or ROM-table discovery,
+There is no CMSIS-DAP command session, SWD adapter, or HID/v1 transport, JTAG
+protocol layer, automatic probe discovery policy, CoreSight or ROM-table discovery,
 multi-core or SoC attachment, general target control, semihosting, trace,
 debugger protocol server, firmware flashing, FPGA programming, or Windows
 host implementation.
