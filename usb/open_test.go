@@ -14,6 +14,9 @@ func TestOpenRevalidatesAndOwnsExactUSBDevice(t *testing.T) {
 	sysfs := t.TempDir()
 	devices := t.TempDir()
 	writeSysfsDevice(t, sysfs, "1-2", "0403", "6014", "1", "7")
+	if err := os.WriteFile(filepath.Join(sysfs, "1-2", "product"), []byte("FT232H\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	path := filepath.Join(devices, "001", "007")
 	if err := os.Mkdir(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
@@ -23,7 +26,7 @@ func TestOpenRevalidatesAndOwnsExactUSBDevice(t *testing.T) {
 	}
 	enumerator := newEnumerator(sysfs, devices)
 	info := DeviceInfo{
-		VID: 0x0403, PID: 0x6014, Bus: 1, Address: 7,
+		VID: 0x0403, PID: 0x6014, Bus: 1, Address: 7, Product: "FT232H",
 	}
 
 	device, err := enumerator.Open(context.Background(), info)
@@ -68,6 +71,20 @@ func TestOpenRejectsChangedUSBSerial(t *testing.T) {
 	}
 }
 
+func TestOpenRejectsChangedUSBProduct(t *testing.T) {
+	sysfs := t.TempDir()
+	writeSysfsDevice(t, sysfs, "1-2", "0d28", "0204", "1", "7")
+	if err := os.WriteFile(filepath.Join(sysfs, "1-2", "product"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := newEnumerator(sysfs, t.TempDir()).revalidate(context.Background(), DeviceInfo{
+		VID: 0x0d28, PID: 0x0204, Bus: 1, Address: 7, Product: "old",
+	})
+	if !errors.Is(err, ErrStaleCandidate) {
+		t.Fatalf("revalidate() error = %v, want ErrStaleCandidate", err)
+	}
+}
+
 func TestOpenRevalidationIgnoresUnreadableSerialOnUnrelatedDevice(t *testing.T) {
 	sysfs := t.TempDir()
 	writeSysfsDevice(t, sysfs, "1-2", "1234", "5678", "1", "3")
@@ -78,6 +95,22 @@ func TestOpenRevalidationIgnoresUnreadableSerialOnUnrelatedDevice(t *testing.T) 
 
 	err := newEnumerator(sysfs, t.TempDir()).revalidate(context.Background(), DeviceInfo{
 		VID: 0x0403, PID: 0x6014, Bus: 2, Address: 7,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOpenRevalidationIgnoresUnreadableProductOnUnrelatedDevice(t *testing.T) {
+	sysfs := t.TempDir()
+	writeSysfsDevice(t, sysfs, "1-2", "1234", "5678", "1", "3")
+	writeSysfsDevice(t, sysfs, "2-1", "0d28", "0204", "2", "7")
+	if err := os.Mkdir(filepath.Join(sysfs, "1-2", "product"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := newEnumerator(sysfs, t.TempDir()).revalidate(context.Background(), DeviceInfo{
+		VID: 0x0d28, PID: 0x0204, Bus: 2, Address: 7,
 	})
 	if err != nil {
 		t.Fatal(err)

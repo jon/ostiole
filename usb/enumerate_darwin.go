@@ -10,10 +10,10 @@ import (
 )
 
 type darwinAttachment struct {
-	vid, pid uint16
-	location uint32
-	address  uint8
-	serial   string
+	vid, pid        uint16
+	location        uint32
+	address         uint8
+	product, serial string
 }
 
 func (a darwinAttachment) info() DeviceInfo {
@@ -22,6 +22,7 @@ func (a darwinAttachment) info() DeviceInfo {
 		PID:     a.pid,
 		Bus:     uint8(a.location >> 24),
 		Address: a.address,
+		Product: a.product,
 		Serial:  a.serial,
 	}
 }

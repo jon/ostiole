@@ -101,7 +101,8 @@ func (e *Enumerator) find(ctx context.Context, expected DeviceInfo) (darwinAttac
 
 func validateDarwinIdentity(expected, actual DeviceInfo) error {
 	if actual.Bus != expected.Bus || actual.Address != expected.Address ||
-		actual.VID != expected.VID || actual.PID != expected.PID || actual.Serial != expected.Serial {
+		actual.VID != expected.VID || actual.PID != expected.PID ||
+		actual.Product != expected.Product || actual.Serial != expected.Serial {
 		return fmt.Errorf("%w: bus %d address %d changed identity",
 			ErrStaleCandidate, expected.Bus, expected.Address)
 	}

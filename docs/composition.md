@@ -16,6 +16,7 @@ data-register write can write target memory.
 
 | Task | Public API | Executable reference |
 | --- | --- | --- |
+| List every host USB attachment | `usb.New`, `usb.AllDevices`, `Enumerator.List` | Package tests |
 | List USB attachments understood by the FTDI driver | `usb.New`, `ftdi.SupportedDevices`, `Enumerator.List` | `ost ftdi list` |
 | Read metadata from one J-Link | `usb.New`, `jlink.SupportedDevices`, `Enumerator.Open`, `jlink.Open`, `Session.Info` | Package tests |
 | Open one FTDI MPSSE SWD port | `Enumerator.Open`, `ftdi.Open` | `examples/trivial/swd-dpidr` |
@@ -37,6 +38,11 @@ packages are not a reusable library surface.
 
 Start with `usb.New` and list only the identities accepted by the intended
 driver. Treat the result as a snapshot rather than a live handle.
+
+When a device family has no numeric identity catalog, `usb.AllDevices` makes
+that broader inventory request explicit. The caller can inspect
+`DeviceInfo.Product`, but a product string alone does not establish driver or
+protocol support.
 
 The current examples require exactly one supported FTDI attachment. A larger
 application can present the returned identities to a user or match a known

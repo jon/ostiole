@@ -55,6 +55,14 @@ int ostiole_usb_attachment_read(io_service_t service,
   attachment->pid = (uint16_t)pid;
   attachment->location = location;
   attachment->address = (uint8_t)address;
+  // kUSBProductString preserves the USB descriptor value. USB Product Name
+  // can replace descriptor punctuation with presentation-friendly characters.
+  ostiole_registry_string(service, CFSTR("kUSBProductString"),
+                          attachment->product, sizeof(attachment->product));
+  if (attachment->product[0] == '\0') {
+    ostiole_registry_string(service, CFSTR("USB Product Name"),
+                            attachment->product, sizeof(attachment->product));
+  }
   ostiole_registry_string(service, CFSTR("USB Serial Number"),
                           attachment->serial, sizeof(attachment->serial));
   if (attachment->serial[0] == '\0') {

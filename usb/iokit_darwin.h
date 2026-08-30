@@ -12,6 +12,7 @@ typedef struct {
   uint16_t pid;
   uint32_t location;
   uint8_t address;
+  char product[512];
   char serial[512];
 } ostiole_usb_attachment;
 

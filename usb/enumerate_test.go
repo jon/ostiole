@@ -12,11 +12,14 @@ import (
 	"testing"
 )
 
-func TestEnumeratorListsMatchingUSBDevicesWithOptionalSerials(t *testing.T) {
+func TestEnumeratorListsMatchingUSBDevicesWithOptionalStrings(t *testing.T) {
 	root := t.TempDir()
 	writeSysfsDevice(t, root, "1-2", "0403", "6014", "1", "7")
 	writeSysfsDevice(t, root, "2-1", "0403", "6011", "2", "3")
 	writeSysfsDevice(t, root, "3-4", "1234", "5678", "3", "9")
+	if err := os.WriteFile(filepath.Join(root, "1-2", "product"), []byte("FT232H\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(root, "1-2", "serial"), []byte("FT1234\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -33,8 +36,30 @@ func TestEnumeratorListsMatchingUSBDevicesWithOptionalSerials(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []DeviceInfo{
-		{VID: 0x0403, PID: 0x6014, Bus: 1, Address: 7, Serial: "FT1234"},
+		{VID: 0x0403, PID: 0x6014, Bus: 1, Address: 7, Product: "FT232H", Serial: "FT1234"},
 		{VID: 0x0403, PID: 0x6011, Bus: 2, Address: 3},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("List() = %#v, want %#v", got, want)
+	}
+}
+
+func TestEnumeratorListsAllUSBDevices(t *testing.T) {
+	root := t.TempDir()
+	writeSysfsDevice(t, root, "2-1", "0d28", "0204", "2", "3")
+	writeSysfsDevice(t, root, "1-2", "0403", "6014", "1", "7")
+	if err := os.WriteFile(filepath.Join(root, "2-1", "product"), []byte("DAPLink CMSIS-DAP\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	enumerator := newEnumerator(root, "/dev/bus/usb")
+
+	got, err := enumerator.List(context.Background(), []DeviceFilter{AllDevices()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []DeviceInfo{
+		{VID: 0x0403, PID: 0x6014, Bus: 1, Address: 7},
+		{VID: 0x0d28, PID: 0x0204, Bus: 2, Address: 3, Product: "DAPLink CMSIS-DAP"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("List() = %#v, want %#v", got, want)
@@ -46,6 +71,25 @@ func TestEnumeratorIgnoresUnreadableSerialOnUnrelatedDevice(t *testing.T) {
 	writeSysfsDevice(t, root, "1-2", "0403", "6014", "1", "7")
 	writeSysfsDevice(t, root, "2-1", "1234", "5678", "2", "3")
 	if err := os.Mkdir(filepath.Join(root, "2-1", "serial"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	enumerator := newEnumerator(root, "/dev/bus/usb")
+
+	got, err := enumerator.List(context.Background(), []DeviceFilter{ExactDevice(0x0403, 0x6014)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []DeviceInfo{{VID: 0x0403, PID: 0x6014, Bus: 1, Address: 7}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("List() = %#v, want %#v", got, want)
+	}
+}
+
+func TestEnumeratorIgnoresUnreadableProductOnUnrelatedDevice(t *testing.T) {
+	root := t.TempDir()
+	writeSysfsDevice(t, root, "1-2", "0403", "6014", "1", "7")
+	writeSysfsDevice(t, root, "2-1", "1234", "5678", "2", "3")
+	if err := os.Mkdir(filepath.Join(root, "2-1", "product"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	enumerator := newEnumerator(root, "/dev/bus/usb")

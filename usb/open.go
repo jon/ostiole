@@ -69,19 +69,28 @@ func (e *Enumerator) revalidate(ctx context.Context, expected DeviceInfo) error 
 		if err != nil {
 			return err
 		}
-		if !ok || info.Bus != expected.Bus || info.Address != expected.Address {
+		if !ok || !sameAttachmentLocation(info, expected) {
 			continue
 		}
-		info.Serial, err = e.readSerial(entry)
+		info.Product, info.Serial, err = e.readStrings(entry)
 		if err != nil {
 			return err
 		}
-		if info.VID != expected.VID || info.PID != expected.PID || info.Serial != expected.Serial {
+		if !sameAttachmentIdentity(info, expected) {
 			return fmt.Errorf("%w: bus %d address %d changed identity", ErrStaleCandidate, expected.Bus, expected.Address)
 		}
 		return nil
 	}
 	return fmt.Errorf("%w: bus %d address %d disappeared", ErrStaleCandidate, expected.Bus, expected.Address)
+}
+
+func sameAttachmentLocation(info, expected DeviceInfo) bool {
+	return info.Bus == expected.Bus && info.Address == expected.Address
+}
+
+func sameAttachmentIdentity(info, expected DeviceInfo) bool {
+	return info.VID == expected.VID && info.PID == expected.PID &&
+		info.Product == expected.Product && info.Serial == expected.Serial
 }
 
 // Close releases the open usbfs attachment. If interface release fails, the

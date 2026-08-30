@@ -16,8 +16,8 @@ var ErrStaleCandidate = errors.New("usb: stale candidate")
 // ErrNotConfigured reports that a USB device has no active configuration.
 var ErrNotConfigured = errors.New("usb: device is not configured")
 
-// DeviceFilter selects either one exact USB identity or every product from one
-// vendor. Its zero value is invalid.
+// DeviceFilter selects every USB attachment, one exact vendor/product ID pair,
+// or every product ID from one vendor. Its zero value is invalid.
 type DeviceFilter struct {
 	kind filterKind
 	vid  uint16
@@ -29,7 +29,13 @@ type filterKind uint8
 const (
 	filterExact filterKind = iota + 1
 	filterVendor
+	filterAll
 )
+
+// AllDevices selects every USB attachment in the host inventory.
+func AllDevices() DeviceFilter {
+	return DeviceFilter{kind: filterAll}
+}
 
 // ExactDevice selects one exact vendor and product ID. Product ID zero is an
 // exact product value, not a wildcard.
@@ -43,10 +49,13 @@ func VendorDevices(vid uint16) DeviceFilter {
 }
 
 func (f DeviceFilter) valid() bool {
-	return f.kind == filterExact || f.kind == filterVendor
+	return f.kind == filterExact || f.kind == filterVendor || f.kind == filterAll
 }
 
 func (f DeviceFilter) matches(info DeviceInfo) bool {
+	if f.kind == filterAll {
+		return true
+	}
 	if info.VID != f.vid {
 		return false
 	}
@@ -62,10 +71,11 @@ func validateFilters(filters []DeviceFilter) error {
 	return nil
 }
 
-// DeviceInfo identifies one physical USB attachment. Serial is the host-visible
-// USB serial number, or empty when the device or host does not provide one.
+// DeviceInfo identifies one physical USB attachment. Product and Serial are
+// the host-visible USB product and serial strings, or empty when the device or
+// host does not provide them.
 type DeviceInfo struct {
-	VID, PID     uint16
-	Bus, Address uint8
-	Serial       string
+	VID, PID        uint16
+	Bus, Address    uint8
+	Product, Serial string
 }
