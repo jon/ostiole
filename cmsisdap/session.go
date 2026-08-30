@@ -61,22 +61,24 @@ type Session struct {
 	closeErr    error
 }
 
-// Open claims the CMSIS-DAP v2 command interface, reads probe metadata, and
-// takes ownership of the device on success. It does not connect a target port.
-// After an error, the caller must still call device.Close; Open has already
+// Open claims the CMSIS-DAP v2 command interface, reads probe metadata, applies
+// its options, and takes ownership of the device on success. With no options it
+// does not connect a target port. After an error, close a returned non-nil
+// session; when Open returns no session, close device. Open has already
 // attempted cleanup.
-func Open(ctx context.Context, device *usb.Device) (*Session, error) {
+func Open(ctx context.Context, device *usb.Device, options ...Option) (*Session, error) {
 	if device == nil {
 		return nil, errors.New("cmsisdap: nil USB device")
 	}
-	return openSession(ctx, ownedUSBDevice{Device: device})
+	return openSession(ctx, ownedUSBDevice{Device: device}, options...)
 }
 
-func openSession(ctx context.Context, device usbDevice) (_ *Session, err error) {
+func openSession(ctx context.Context, device usbDevice, options ...Option) (result *Session, err error) {
 	if device == nil {
 		return nil, errors.New("cmsisdap: nil USB device")
 	}
-	if err := validateOpenContext(ctx); err != nil {
+	config, err := prepareOpen(ctx, options)
+	if err != nil {
 		return nil, errors.Join(err, device.Close())
 	}
 	configuration, err := device.ActiveConfiguration(ctx)
@@ -89,9 +91,7 @@ func openSession(ctx context.Context, device usbDevice) (_ *Session, err error) 
 	}
 	session := &Session{device: device, command: command, info: Info{USB: device.Identity()}}
 	defer func() {
-		if err != nil {
-			err = errors.Join(err, session.Close())
-		}
+		result, err = settleOpenFailure(session, result, err)
 	}()
 	claim, err := device.claimInterface(command.number)
 	if err != nil {
@@ -117,14 +117,47 @@ func openSession(ctx context.Context, device usbDevice) (_ *Session, err error) 
 	if err := session.readInfo(ctx); err != nil {
 		return nil, err
 	}
+	return finishOpenSession(ctx, session, config)
+}
+
+func settleOpenFailure(session, result *Session, err error) (*Session, error) {
+	if err == nil {
+		return result, nil
+	}
+	retain, cleanupErr := session.closeAfterOpenFailure()
+	if retain {
+		result = session
+	}
+	return result, errors.Join(err, cleanupErr)
+}
+
+func finishOpenSession(ctx context.Context, session *Session, config openConfig) (*Session, error) {
+	if !config.configureSWD {
+		return session, nil
+	}
+	if err := session.ConfigureSWD(ctx, config.maxClockHz); err != nil {
+		return nil, err
+	}
 	return session, nil
 }
 
-func validateOpenContext(ctx context.Context) error {
+func prepareOpen(ctx context.Context, options []Option) (openConfig, error) {
 	if ctx == nil {
-		return errors.New("cmsisdap: nil open context")
+		return openConfig{}, errors.New("cmsisdap: nil open context")
 	}
-	return ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return openConfig{}, err
+	}
+	var config openConfig
+	for index, option := range options {
+		if option.apply == nil {
+			continue
+		}
+		if err := option.apply(&config); err != nil {
+			return openConfig{}, fmt.Errorf("cmsisdap: option %d: %w", index, err)
+		}
+	}
+	return config, nil
 }
 
 func selectedEndpoint(ctx context.Context, claim usbClaim, address uint8, input bool) (usb.Endpoint, error) {
@@ -200,4 +233,22 @@ func (s *Session) closeTargetPort() error {
 func (s *Session) abandonTargetPort(err error) {
 	s.closePrefix = errors.Join(s.closePrefix, err)
 	s.clearSWDConfiguration()
+}
+
+func (s *Session) closeAfterOpenFailure() (bool, error) {
+	if s == nil {
+		return false, nil
+	}
+	if s.connected && !s.poisoned {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		err := s.disconnect(ctx)
+		cancel()
+		if err != nil {
+			if !s.poisoned {
+				return true, fmt.Errorf("cmsisdap: retain SWD port after failed open: %w", err)
+			}
+			return false, errors.Join(err, s.Close())
+		}
+	}
+	return false, s.Close()
 }

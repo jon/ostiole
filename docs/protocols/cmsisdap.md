@@ -58,18 +58,21 @@ session. The error retains its command phase and matches `ErrSessionPoisoned`.
 Recovery is close and explicit reopen; the package never replays a command.
 
 `Open` does not send `DAP_Connect`, select SWD or JTAG, set a clock, or touch a
-target. `ConfigureSWD` requires the advertised SWD capability, sends
-[DAP_Connect][connect] for port 1, and gives [DAP_SWJ_Clock][clock] the caller's
-nonzero maximum frequency in hertz. A successful response confirms that the
-request was accepted; CMSIS-DAP does not report the attained clock.
+target. `WithSWD` during open or `ConfigureSWD` afterward requires the
+advertised SWD capability, sends [DAP_Connect][connect] for port 1, and gives
+[DAP_SWJ_Clock][clock] the caller's nonzero maximum frequency in hertz. A
+successful response confirms that the request was accepted; CMSIS-DAP does not
+report the attained clock. `MaxClockHz` reports that accepted request.
 Reconfiguration disconnects the active port first.
 
 `Close` normally sends [DAP_Disconnect][disconnect] before releasing the USB
-interface. A complete disconnect failure retains the session for another
-attempt. If an earlier ambiguous exchange poisoned the command stream, another
-command is unsafe; close reports that it abandoned the active port and
-continues retryable USB cleanup. Device close still runs once and its result is
-cached.
+interface. If `DAP_Disconnect` returns a complete error response, the session
+retains ownership for another attempt. After failed SWD configuration, `Open`
+makes another bounded disconnect attempt; if synchronized cleanup remains
+pending, the caller receives the non-nil session with the setup error and
+retries `Session.Close`. After a poisoned exchange, `Close` reports the
+abandoned active port and continues USB cleanup without sending another
+command. Device close still runs once and its result is cached.
 
 ## Bench observation
 

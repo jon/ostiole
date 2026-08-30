@@ -9,8 +9,9 @@ import (
 )
 
 // ConfigureSWD connects the probe's advertised SWD port and requests a
-// maximum target clock. Reconfiguration disconnects an active port first. An
-// error can leave cleanup pending; Close retries a complete disconnect failure.
+// maximum target clock. Reconfiguration disconnects an active port first. If
+// DAP_Disconnect returns a complete error response, Close keeps ownership so
+// the caller can retry.
 func (s *Session) ConfigureSWD(ctx context.Context, maxClockHz uint32) error {
 	if err := s.validateSWDConfiguration(ctx, maxClockHz); err != nil {
 		return err
@@ -138,4 +139,14 @@ func (s *Session) validateStatusResponse(response []byte, command byte) error {
 		return fmt.Errorf("status = %#02x, want %#02x", response[1], statusOK)
 	}
 	return nil
+}
+
+// MaxClockHz reports the maximum target clock accepted by the most recent SWD
+// configuration, or zero while SWD is not configured. CMSIS-DAP does not
+// report the clock the probe actually attains.
+func (s *Session) MaxClockHz() uint32 {
+	if s == nil || !s.configured {
+		return 0
+	}
+	return s.maxClockHz
 }
