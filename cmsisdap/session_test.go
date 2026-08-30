@@ -51,6 +51,7 @@ func (d *peerUSBDevice) Close() error {
 type peerUSBClaim struct {
 	endpoints    map[uint8]usb.Endpoint
 	responses    map[byte][]byte
+	handle       func([]byte) ([]byte, error)
 	operations   []string
 	pendingIn    *peerBulkTransfer
 	alternateErr error
@@ -90,9 +91,19 @@ func (c *peerUSBClaim) SubmitBulk(_ context.Context, endpoint uint8, buffer []by
 	if c.pendingIn == nil {
 		return nil, errors.New("OUT submitted without a pending IN request")
 	}
-	response, ok := c.responses[buffer[1]]
-	if !ok || len(buffer) != 2 || buffer[0] != commandInfo {
-		return nil, fmt.Errorf("unexpected command %x", buffer)
+	var response []byte
+	if c.handle != nil {
+		var err error
+		response, err = c.handle(append([]byte(nil), buffer...))
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		var ok bool
+		response, ok = c.responses[buffer[1]]
+		if !ok || len(buffer) != 2 || buffer[0] != commandInfo {
+			return nil, fmt.Errorf("unexpected command %x", buffer)
+		}
 	}
 	count := copy(c.pendingIn.buffer, response)
 	c.pendingIn.count = count

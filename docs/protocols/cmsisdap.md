@@ -1,12 +1,16 @@
-# CMSIS-DAP v2 USB sessions
+# CMSIS-DAP v2 USB sessions and SWD configuration
 
-The `cmsisdap` package implements the metadata-only part of a CMSIS-DAP v2
-USB command session. Arm's [CMSIS-DAP documentation][commands] defines the
-command protocol, and its [USB firmware guidance][usb] defines the v2 USB
-interface. This note records the narrower host boundary Ostiole implements.
+The `cmsisdap` package implements a CMSIS-DAP v2 USB command session with
+metadata and optional SWD port configuration. Arm's
+[CMSIS-DAP documentation][commands] defines the command protocol, and its
+[USB firmware guidance][usb] defines the v2 USB interface. This note records
+the narrower host boundary Ostiole implements.
 
 [commands]: https://arm-software.github.io/CMSIS-DAP/latest/group__DAP__Info.html
 [usb]: https://arm-software.github.io/CMSIS-DAP/latest/dap_firmware.html#dap_bulk_usb
+[connect]: https://arm-software.github.io/CMSIS-DAP/latest/group__DAP__Connect.html
+[clock]: https://arm-software.github.io/CMSIS-DAP/latest/group__DAP__SWJ__Clock.html
+[disconnect]: https://arm-software.github.io/CMSIS-DAP/latest/group__DAP__Disconnect.html
 
 ## Discovery and interface selection
 
@@ -54,8 +58,18 @@ session. The error retains its command phase and matches `ErrSessionPoisoned`.
 Recovery is close and explicit reopen; the package never replays a command.
 
 `Open` does not send `DAP_Connect`, select SWD or JTAG, set a clock, or touch a
-target. `Close` releases the interface and closes the USB device. Interface
-release remains retryable; device close runs once and its result is cached.
+target. `ConfigureSWD` requires the advertised SWD capability, sends
+[DAP_Connect][connect] for port 1, and gives [DAP_SWJ_Clock][clock] the caller's
+nonzero maximum frequency in hertz. A successful response confirms that the
+request was accepted; CMSIS-DAP does not report the attained clock.
+Reconfiguration disconnects the active port first.
+
+`Close` normally sends [DAP_Disconnect][disconnect] before releasing the USB
+interface. A complete disconnect failure retains the session for another
+attempt. If an earlier ambiguous exchange poisoned the command stream, another
+command is unsafe; close reports that it abandoned the active port and
+continues retryable USB cleanup. Device close still runs once and its result is
+cached.
 
 ## Bench observation
 
@@ -73,4 +87,5 @@ inventory reported its product and serial. The HIL selected it by serial, and
 the v2 opener rejected it before claiming an interface. No CMSIS-DAP command
 or target traffic was sent.
 
-Neither bench exercises CMSIS-DAP SWD, JTAG, SWO, or a target connection.
+Neither bench exercises CMSIS-DAP SWD configuration, JTAG, SWO, or a target
+connection.

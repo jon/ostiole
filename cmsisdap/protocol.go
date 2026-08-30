@@ -9,7 +9,16 @@ import (
 )
 
 const (
-	commandInfo = 0x00
+	commandInfo       = 0x00
+	commandConnect    = 0x02
+	commandDisconnect = 0x03
+	commandSWJClock   = 0x11
+
+	portSWD  = 1
+	portJTAG = 2
+
+	statusOK    = 0x00
+	statusError = 0xff
 
 	infoVendor          = 0x01
 	infoProduct         = 0x02
