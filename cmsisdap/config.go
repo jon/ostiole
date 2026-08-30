@@ -45,6 +45,9 @@ func (s *Session) validateSWDConfiguration(ctx context.Context, maxClockHz uint3
 	if s.packetSize < 5 {
 		return fmt.Errorf("cmsisdap: packet size %d cannot hold DAP_SWJ_Clock", s.packetSize)
 	}
+	if !protocolSupportsSWDSequence(s.info.ProtocolVersion) {
+		return fmt.Errorf("cmsisdap: protocol version %q does not support DAP_SWD_Sequence", s.info.ProtocolVersion)
+	}
 	return nil
 }
 

@@ -9,10 +9,11 @@ import (
 )
 
 const (
-	commandInfo       = 0x00
-	commandConnect    = 0x02
-	commandDisconnect = 0x03
-	commandSWJClock   = 0x11
+	commandInfo        = 0x00
+	commandConnect     = 0x02
+	commandDisconnect  = 0x03
+	commandSWJClock    = 0x11
+	commandSWDSequence = 0x1d
 
 	portSWD  = 1
 	portJTAG = 2
