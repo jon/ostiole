@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jon/ostiole/usb"
 )
@@ -46,14 +47,18 @@ func (c ownedUSBClaim) SubmitBulk(ctx context.Context, endpoint uint8, buffer []
 // Session owns one CMSIS-DAP v2 command interface and its USB device. Calls on
 // a session must be serialized.
 type Session struct {
-	device     usbDevice
-	claim      usbClaim
-	command    commandInterface
-	packetSize int
-	info       Info
-	poisoned   bool
-	closeDone  bool
-	closeErr   error
+	device      usbDevice
+	claim       usbClaim
+	command     commandInterface
+	packetSize  int
+	info        Info
+	poisoned    bool
+	connected   bool
+	configured  bool
+	maxClockHz  uint32
+	closePrefix error
+	closeDone   bool
+	closeErr    error
 }
 
 // Open claims the CMSIS-DAP v2 command interface, reads probe metadata, and
@@ -141,16 +146,21 @@ func (s *Session) Info() Info {
 	return cloneInfo(s.info)
 }
 
-// Close releases the command interface and closes the USB device. A failed
-// interface release retains the claim so Close can retry it. Device close runs
-// once; later calls return its cached result.
+// Close disconnects an active target port, releases the command interface, and
+// closes the USB device. A complete disconnect failure or an interface-release
+// failure retains ownership for another attempt. A poisoned stream cannot
+// disconnect; Close reports the abandoned port and continues USB cleanup.
+// Device close runs once, and later calls return its cached result.
 func (s *Session) Close() error {
 	if s == nil {
 		return nil
 	}
+	if err := s.closeTargetPort(); err != nil {
+		return err
+	}
 	if s.claim != nil {
 		if err := s.claim.Close(); err != nil {
-			return err
+			return errors.Join(s.closePrefix, err)
 		}
 		s.claim = nil
 	}
@@ -160,8 +170,34 @@ func (s *Session) Close() error {
 	if s.device == nil {
 		return nil
 	}
-	s.closeErr = s.device.Close()
+	s.closeErr = errors.Join(s.closePrefix, s.device.Close())
 	s.closeDone = true
 	s.device = nil
 	return s.closeErr
+}
+
+func (s *Session) closeTargetPort() error {
+	if !s.connected {
+		return nil
+	}
+	if s.poisoned {
+		s.abandonTargetPort(fmt.Errorf("cmsisdap: cannot disconnect active SWD port: %w", ErrSessionPoisoned))
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	err := s.disconnect(ctx)
+	cancel()
+	if err == nil {
+		return nil
+	}
+	if !s.poisoned {
+		return err
+	}
+	s.abandonTargetPort(err)
+	return nil
+}
+
+func (s *Session) abandonTargetPort(err error) {
+	s.closePrefix = errors.Join(s.closePrefix, err)
+	s.clearSWDConfiguration()
 }
