@@ -75,15 +75,21 @@ samples displaced by one clock. The correction is gated to its USB product and
 full firmware record; for other firmware records, the package returns the
 samples unchanged.
 
-## CMSIS-DAP USB discovery
+## CMSIS-DAP v2 USB session
 
 | Capability | Implemented | Validation and boundary |
 | --- | --- | --- |
 | Candidate shortlist | Yes | Case-sensitive `CMSIS-DAP` match against the host-visible USB product string. The caller enumerates every USB attachment and makes the exact selection; a marker is not proof of protocol support. |
-| Product and serial inventory | HIL | The `0d28:0204` DAPLink on the Linux bench was found by product and serial. Its command interface is HID rather than v2 bulk; no probe or target command was sent. |
+| Command interface selection | Yes | Requires one unambiguous `ff/00/00` alternate whose descriptor-ordered endpoints are bulk OUT, bulk IN, and optionally a distinct bulk IN for SWO. An explicitly selected composite attachment need not have the marker in its device product string. HID/v1 is rejected with `ErrNoV2Interface`. |
+| Metadata-only session | Yes | Queries packet geometry, capabilities, protocol, vendor, product, serial, and firmware through `DAP_Info`. Missing product or serial values fall back to USB strings. No `DAP_Connect` or target command is sent. |
+| Command scheduling | Yes | Submits one negotiated-packet-sized response IN request before each command OUT request. Packet count is reported but does not enable pipelining. An ambiguous exchange poisons the session and commands are not replayed. |
+| Ownership and cleanup | Yes | Successful open owns the USB device. Interface release remains retryable; device close runs once and its result is cached. Failed open attempts cleanup, and the caller still closes the device to finish or repeat it. |
+| Passive v1 rejection | HIL | The Linux all-device inventory reported the `0d28:0204` DAPLink product and serial. HIL selected it by serial, then rejected it from the v2 path before interface claim. Its command interface is HID; no CMSIS-DAP command or target traffic was sent. |
+| v2 metadata reopen | HIL | The macOS all-device inventory found a `0d28:0204` micro:bit by its `BBC micro:bit CMSIS-DAP` product string. Two fresh sessions returned protocol `2.1.0`, firmware `0257`, packet size 64, packet count 5, and capabilities `0x11`. No target command was sent. |
+| SWD, JTAG, or SWO | No | The current session does not connect a target port or use the optional SWO endpoint. |
 
-The [CMSIS-DAP discovery guide](protocols/cmsisdap.md) gives the selection and
-current bench boundaries.
+The [CMSIS-DAP v2 session guide](protocols/cmsisdap.md) gives the descriptor,
+packet, ownership, and current bench boundaries.
 
 ## Serial Wire Debug
 
@@ -182,8 +188,8 @@ the volatile DAP and MEM-AP state described above.
 
 ## Not currently provided
 
-There is no CMSIS-DAP command session, SWD adapter, or HID/v1 transport, JTAG
-protocol layer, automatic probe discovery policy, CoreSight or ROM-table discovery,
+There is no CMSIS-DAP SWD adapter or HID/v1 transport, JTAG protocol layer,
+automatic probe discovery policy, CoreSight or ROM-table discovery,
 multi-core or SoC attachment, general target control, semihosting, trace,
 debugger protocol server, firmware flashing, FPGA programming, or Windows
 host implementation.

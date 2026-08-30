@@ -11,8 +11,8 @@ today and how to assemble them without duplicating lower-level behavior.
   result.
 - [J-Link USB and SWD](protocols/jlink.md) records the command boundaries and
   the short experiments behind the current adapter path.
-- [CMSIS-DAP USB discovery](protocols/cmsisdap.md) describes the product-string
-  candidate convention and explicit selection boundary.
+- [CMSIS-DAP v2 USB sessions](protocols/cmsisdap.md) describes product-string
+  discovery, bulk-interface validation, and the metadata-only command path.
 - [Arm Debug Access Ports](ports/dap.md) describes the ADIv5 register window,
   posted AP access, power handshakes, and MEM-AP details worth testing.
 - [Composition](composition.md) maps common tasks to the narrowest public
