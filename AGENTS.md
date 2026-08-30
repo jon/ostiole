@@ -32,20 +32,30 @@ downstream compositions.
 
 ## Commit-size checkpoint
 
-Before forming each commit:
+Approximately 200 added lines of non-test Go is the normal upper target for
+one commit. Before forming each commit:
 
-1. Format declarations and calls naturally, then measure the added non-test Go
-   in the proposed commit. Do not manipulate formatting to affect the count.
-2. If the change exceeds roughly 200 added lines, pause and identify any
-   independently testable functionality that could become an earlier commit.
-3. Split at a real capability boundary when each resulting commit remains
-   coherent, tested, documented, and bisectable.
-4. Keep the change together when splitting would separate coupled behavior,
-   create artificial seams, or make the history harder to understand. Explain
-   that decision in the handoff or pull-request notes.
+1. Format declarations and calls naturally, measure the proposed added
+   non-test Go, and report the count to the maintainer.
+2. Above 200 lines, pause and present credible splits at independently useful
+   capability boundaries, including the approximate count and usefulness of
+   each resulting commit.
+3. Keep each behavior together with its error handling, tests, and
+   documentation so the commit remains coherent, tested, documented, and
+   bisectable.
+4. Do not form a commit above 300 lines without explicit maintainer approval of
+   the proposed unsplit boundary before the commit is created. A later handoff
+   or pull-request explanation is not approval.
+5. An exception request must identify the concrete coupling which prevents a
+   coherent split. “The feature is cohesive” is not enough.
 
-The threshold is a review prompt, not a quota. Pure movement and formatting do
-not justify artificial commits and must not conceal behavioral changes.
+Do not manipulate formatting, create dead private seams, separate error
+handling from the behavior it protects, or use mechanical movement to disguise
+the count. Call out pure movement, generated code, and other unusual cases and
+judge them by their review burden; none is an automatic exemption. Repeated
+300–1,500-line exceptions indicate inadequate decomposition, not ordinary use
+of the exception. In the final handoff, list every commit's added non-test Go
+count and any approved exception.
 
 ## Code Review Rules
 
