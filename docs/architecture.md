@@ -36,6 +36,7 @@ debugger service.
 | `usb` | Enumerate, open, inspect the active standard configuration, claim, transfer through, and close one host USB attachment, including explicit asynchronous bulk transfers. |
 | `ftdi` | Own one explicitly selected FTDI MPSSE port and expose direction-safe SWD bits. |
 | `jlink` | Find one reviewed J-Link USB application interface, own its command session, configure SWD, and adapt scan v3 to direction-explicit SWD bits. |
+| `cmsisdap` | Shortlist CMSIS-DAP product strings without selecting or opening an attachment. |
 | `swd` | Enter SWD, establish its response grammar, and encode, execute, and validate individual or packed DP/AP register transactions. |
 | `swd/sim` | Model SWD protocol entry, register transfers, fixed-frame packing, and transfer limits without hardware. |
 | `dap` | Manage SW-DP identity and power, ordered DP/AP transactions, posted AP access, and scalar or block MEM-AP access. |
@@ -76,6 +77,13 @@ options it does not select a target interface. An immediate reopen may briefly
 find the probe unconfigured; `jlink.Open` retries only that typed USB state for
 at most one second. `jlink.WithSWD` selects SWD during open and requests a
 whole-kHz clock no greater than the requested ceiling.
+
+CMSIS-DAP has no equivalent numeric identity catalog. Applications explicitly
+request `usb.AllDevices`, may use `cmsisdap.Candidates` as a case-sensitive
+product-string shortlist, and still select one complete attachment before
+opening it. The shortlist is not protocol evidence. A known composite
+attachment can be selected directly from the broad inventory when its device
+product string lacks the marker.
 
 This split keeps inventory policy in the application. Listing hardware does
 not claim an interface or send adapter or target traffic.
