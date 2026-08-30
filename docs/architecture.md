@@ -86,8 +86,9 @@ opening it. The shortlist is not protocol evidence. `cmsisdap.Open` validates
 the exact v2 bulk-interface class and descriptor order. An explicitly selected
 composite attachment can be opened even when its device product string lacks
 the marker. Metadata-only open sends `DAP_Info` but no `DAP_Connect` command.
-`cmsisdap.ConfigureSWD` connects only the advertised SWD port and requests a
-maximum target clock on an open session.
+`cmsisdap.WithSWD` connects the advertised SWD port and requests a maximum
+target clock during open; `ConfigureSWD` applies the same configuration to an
+open session.
 
 This split keeps inventory policy in the application. Listing hardware does
 not claim an interface or send adapter or target traffic.
@@ -104,7 +105,7 @@ up and released in reverse order.
 | `*usb.BulkTransfer` | Represents one request on one active bulk endpoint. Its buffer length is the requested transfer length; the endpoint address supplies direction. `Wait` reports the exact count for a successful short or zero-length completion, and ending the wait context does not cancel the request. A host-engine failure can end `Wait` before `Done` closes; the buffer remains host-owned until `Done`. `AbortBulk` cancels and performs a bounded drain of every pending request on the named endpoint. Failed cancellation or drain retains the requests and claim for another cleanup attempt. Closing the claim applies the same bound before release. |
 | `*ftdi.Channel` | Takes ownership of the USB device after `ftdi.Open` succeeds. It keeps enough ordered maximum-packet-sized IN requests armed to cover its largest response and consumes FTDI status-only completions independently of MPSSE writes. An ambiguous transfer or asynchronous receive failure poisons the channel before later traffic can use the command stream. Recovery requires closing it and opening a new one. `Close` drains bulk OUT before resetting bit mode, setting the latency timer to 16 ms, purging the receive and transmit paths, releasing the interface, and closing the device. A failed cancellation or interface release leaves the channel and device open for another `Close`. It does not preserve prior FTDI settings. |
 | `*jlink.Session` | Takes ownership of the USB device after `jlink.Open` succeeds. Metadata-only open claims the descriptor-selected application interface, resolves its active endpoint properties, and leaves target configuration unchanged. `WithSWD` or `ConfigureSWD` selects SWD and sets volatile probe clock state; `Close` does not restore an unknown prior interface or clock. A complete nonzero scan status requires explicit reconfiguration. An ambiguous bulk exchange or abandoned response poisons the session, and later commands require closing it and explicitly reopening the device. A failed interface release leaves `Close` retryable. Device close runs once, and later calls return its cached result. |
-| `*cmsisdap.Session` | Takes ownership of the USB device after `cmsisdap.Open` succeeds. It claims one descriptor-selected v2 command interface and uses the probe's negotiated packet size, with one full response IN request submitted before each command OUT request. Metadata-only open sends no target-port command. `ConfigureSWD` connects the SWD port and requests a maximum clock. `Close` sends `DAP_Disconnect` before releasing USB; a complete disconnect failure retains ownership for another attempt, while a poisoned command stream makes restoration impossible and is abandoned explicitly before USB cleanup. Device close runs once, and later calls return its cached result. |
+| `*cmsisdap.Session` | Takes ownership of the USB device after `cmsisdap.Open` succeeds. It claims one descriptor-selected v2 command interface and uses the probe's negotiated packet size, with one full response IN request submitted before each command OUT request. Metadata-only open sends no target-port command. `WithSWD` or `ConfigureSWD` connects the SWD port and requests a maximum clock. After failed SWD configuration, `Open` makes a bounded cleanup attempt; if a synchronized disconnect remains pending, it returns the session with the error. After a poisoned exchange, `Close` reports the abandoned port and continues USB cleanup without sending another command. Device close runs once, and later calls return its cached result. |
 | `*swd.Conn` | Owns one logical SWD transaction stream and the ORUNDETECT bit it adds. `Connect` establishes the target's response grammar and `Release` restores the inherited setting. It does not own a separate host resource. Calls must be serialized. |
 | `*dap.DebugPort` | Requires exclusive use of its SWD connection and owns only the debug and system power requests it adds. It records newly requested power bits before writing them so bounded cleanup can attempt to clear them even when the write's result is ambiguous. `Release` settles its final SELECT write through RDBUFF, releases power, then releases the SWD connection. |
 | `*dap.MemAP` | `OpenMemAP` validates the selected AP and saves its CSW, TAR, and optional TARHI. `Release` retries failed restoration; if DAPABORT interrupts cleanup, the next `Release` retries every saved value. Calls sharing the MEM-AP or its debug port must be serialized. |
@@ -122,7 +123,9 @@ use. No layer adds a mutex; serialization belongs to the composition.
 Constructors and open operations attempt to clean up resources acquired before
 a failed return. `ftdi.Open` takes ownership of its input only on success. After
 an error, the caller closes the device; that call is harmless when `Open`
-already completed cleanup and retries it otherwise.
+already completed cleanup and retries it otherwise. A failed `cmsisdap.Open`
+can instead return a non-nil session when synchronized target-port cleanup
+remains retryable; the caller closes that session before the device.
 
 ## Protocol and policy boundaries
 

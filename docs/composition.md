@@ -22,6 +22,7 @@ data-register write can write target memory.
 | Read metadata from one CMSIS-DAP v2 probe | `usb.New`, `usb.AllDevices`, `cmsisdap.Candidates`, `Enumerator.Open`, `cmsisdap.Open`, `Session.Info` | Package tests |
 | Open one FTDI MPSSE SWD port | `Enumerator.Open`, `ftdi.Open` | `examples/trivial/swd-dpidr` |
 | Open one J-Link SWD session | `Enumerator.Open`, `jlink.Open`, `jlink.WithSWD` | Package tests |
+| Configure one CMSIS-DAP SWD session | `Enumerator.Open`, `cmsisdap.Open`, `cmsisdap.WithSWD` | Package tests |
 | Connect SWD or transfer DP/AP registers | `swd.New`, `Conn.Connect`, `Conn.ReadDP`, `Conn.WriteDP`, `Conn.ReadAP`, `Conn.WriteAP`, `Conn.NewBatch`, `Conn.Release` | `examples/trivial/swd-dpidr` |
 | Enter SWD, decode a DPIDR, and manage SW-DP power | `dap.NewDebugPort`, `DebugPort.Connect`, `DebugPort.Release` | `ost dap dp id` |
 | Identify one explicitly selected AP | `DebugPort.ReadAPIDR`, `DecodeAPIDR` | `examples/simple/ap-id` |
@@ -91,6 +92,17 @@ Product matching is case-sensitive and only shortlists candidates; `Open`
 still requires the exact v2 bulk interface. An application which knows a
 composite probe by serial or another explicit policy may select it from
 `devices` even when its device product string is absent from `Candidates`.
+
+To connect the selected probe's SWD port during the same ownership transfer,
+pass the target-clock ceiling to `Open`:
+
+```go
+session, err := cmsisdap.Open(ctx, device, cmsisdap.WithSWD(100_000))
+```
+
+`MaxClockHz` reports the request accepted by `DAP_SWJ_Clock`, not the rate the
+probe attained. The session retains the same cleanup obligation: a non-nil
+session owns the device, and `Close` first attempts `DAP_Disconnect`.
 
 A metadata-only J-Link session follows the same explicit inventory rule:
 

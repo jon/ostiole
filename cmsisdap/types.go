@@ -1,6 +1,33 @@
 package cmsisdap
 
-import "github.com/jon/ostiole/usb"
+import (
+	"errors"
+
+	"github.com/jon/ostiole/usb"
+)
+
+// Option configures Open. Its zero value is ignored.
+type Option struct {
+	apply func(*openConfig) error
+}
+
+type openConfig struct {
+	configureSWD bool
+	maxClockHz   uint32
+}
+
+// WithSWD configures Open to connect the SWD port and request a maximum target
+// clock after reading probe metadata.
+func WithSWD(maxClockHz uint32) Option {
+	return Option{apply: func(config *openConfig) error {
+		if maxClockHz == 0 {
+			return errors.New("SWD clock ceiling must be greater than zero")
+		}
+		config.configureSWD = true
+		config.maxClockHz = maxClockHz
+		return nil
+	}}
+}
 
 // Capability identifies one CMSIS-DAP capability bit.
 type Capability uint8
