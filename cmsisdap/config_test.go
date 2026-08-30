@@ -145,6 +145,25 @@ func TestOpenWithSWDRetainsPersistentDisconnectFailure(t *testing.T) {
 	}
 }
 
+func TestConfigureSWDRejectsProtocolWithoutSequenceBeforeEffects(t *testing.T) {
+	device := metadataPeer()
+	device.claim.responses[infoProtocolVersion] = infoResponse([]byte("1.1.0\x00"))
+	session, err := openSession(t.Context(), device)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := append([]string(nil), device.claim.operations...)
+	if err := session.ConfigureSWD(t.Context(), 100_000); err == nil || !strings.Contains(err.Error(), "does not support DAP_SWD_Sequence") {
+		t.Fatalf("ConfigureSWD with protocol 1.1 error = %v", err)
+	}
+	if !reflect.DeepEqual(device.claim.operations, before) {
+		t.Fatalf("old-protocol ConfigureSWD operations = %v", device.claim.operations[len(before):])
+	}
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestConfigureSWDLeavesUnimplementedConnectClean(t *testing.T) {
 	peer := newSWDCommandPeer(64)
 	peer.connectUnimplemented = true

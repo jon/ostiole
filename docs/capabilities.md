@@ -83,11 +83,14 @@ samples unchanged.
 | Command interface selection | Yes | Requires one unambiguous `ff/00/00` alternate whose descriptor-ordered endpoints are bulk OUT, bulk IN, and optionally a distinct bulk IN for SWO. An explicitly selected composite attachment need not have the marker in its device product string. HID/v1 is rejected with `ErrNoV2Interface`. |
 | Metadata-only session | Yes | Queries packet geometry, capabilities, protocol, vendor, product, serial, and firmware through `DAP_Info`. Missing product or serial values fall back to USB strings. No `DAP_Connect` or target command is sent. |
 | Command scheduling | Yes | Submits one negotiated-packet-sized response IN request before each command OUT request. Packet count is reported but does not enable pipelining. An ambiguous exchange poisons the session and commands are not replayed. |
-| SWD configuration | Optional | `WithSWD` or `ConfigureSWD` requires the advertised SWD capability, sends `DAP_Connect(SWD)`, and requests a nonzero maximum clock through `DAP_SWJ_Clock`. `MaxClockHz` reports the accepted request, not an attained rate. Reconfiguration disconnects the active port first. |
-| Ownership and cleanup | Yes | Successful open owns the USB device. A configured session attempts `DAP_Disconnect` before USB release. A complete disconnect failure retains ownership for retry; a poisoned stream cannot safely disconnect and is abandoned explicitly before USB cleanup. Interface release remains retryable, and device close runs once. Failed open attempts cleanup, and the caller still closes the device to finish or repeat it. |
+| SWD configuration | Optional | `WithSWD` or `ConfigureSWD` requires CMSIS-DAP 1.2 or later and the advertised SWD capability, sends `DAP_Connect(SWD)`, and requests a nonzero maximum clock through `DAP_SWJ_Clock`. `MaxClockHz` reports the accepted request, not an attained rate. Reconfiguration disconnects the active port first. |
+| SWD adapter | Yes | A configured session implements `swd.Wire` and `swd.TransferLimits` through direction-explicit `DAP_SWD_Sequence`. Runs are at most 64 cycles, commands and responses stay within the negotiated packet size, and one logical call may use several unpipelined command exchanges up to a conservative 16,384-bit limit. Output is omitted while the target owns SWDIO. |
+| Sequence failures | Yes | Complete command errors stop at the failing packet without replay and keep the command stream synchronized. Wrong command IDs, short captured data, and ambiguous USB exchanges poison the session. The probe may already have clocked the prefix sent in earlier packets. |
+| Ownership and cleanup | Yes | Successful open owns the USB device. After failed SWD configuration, `Open` makes a bounded cleanup attempt; if a synchronized disconnect remains pending, it returns the session with the error. After a poisoned exchange, `Close` reports the abandoned port and continues USB cleanup without sending another command. Interface release remains retryable, and device close runs once. When failed open returns no session, the caller closes the device to finish or repeat cleanup. |
 | Passive v1 rejection | HIL | The Linux all-device inventory reported the `0d28:0204` DAPLink product and serial. HIL selected it by serial, then rejected it from the v2 path before interface claim. Its command interface is HID; no CMSIS-DAP command or target traffic was sent. |
 | v2 metadata reopen | HIL | The macOS all-device inventory found a `0d28:0204` micro:bit by its `BBC micro:bit CMSIS-DAP` product string. Two fresh sessions returned protocol `2.1.0`, firmware `0257`, packet size 64, packet count 5, and capabilities `0x11`. No target command was sent. |
-| SWD adapter, JTAG, or SWO | No | The current session can configure SWD but does not implement an `swd.Wire`, connect JTAG, or use the optional SWO endpoint. |
+| SWD target access | HIL | Two fresh sessions against the same micro:bit used `ConfigureSWD` and `WithSWD` at 100 kHz. Both returned DPIDR `0x0bb11477`, AP0 IDR `0x04770021`, and CPUID `0x410cc200`; `DHCSR.S_HALT` was unchanged. Each restored the saved AP0 CSW and TAR before releasing the debug port and disconnecting. OpenOCD 0.12.0 independently selected the same serial and v2 bulk interface, returned the same DPIDR and AP0 IDR, and identified the target as Cortex-M0. This is read-only evidence from one probe and target; CMSIS-DAP does not report the attained clock. |
+| JTAG or SWO | No | The current session does not connect JTAG or use the optional SWO endpoint. |
 
 The [CMSIS-DAP v2 session guide](protocols/cmsisdap.md) gives the descriptor,
 packet, ownership, and current bench boundaries.
@@ -110,8 +113,8 @@ packet, ownership, and current bench boundaries.
 | Behavioral simulation | Yes | Protocol entry and line-reset effects, live overrun response grammar, DP/AP register transfers, packed fixed frames, transfer limits, and request-phase WAIT or FAULT injection. |
 | Physical DPIDR read | HIL | Opt-in FTDI test and trivial example on Linux and macOS, plus an opt-in J-Link test on macOS. |
 
-The public `swd.Wire` boundary is implemented by both FTDI and J-Link without
-a shared probe abstraction.
+The public `swd.Wire` boundary is implemented by FTDI, J-Link, and CMSIS-DAP
+without a shared probe abstraction.
 The [Serial Wire Debug guide](protocols/swd.md) gives the bit-level protocol,
 specification notes, and current physical observation.
 
@@ -189,8 +192,8 @@ the volatile DAP and MEM-AP state described above.
 
 ## Not currently provided
 
-There is no CMSIS-DAP SWD adapter or HID/v1 transport, JTAG protocol layer,
-automatic probe discovery policy, CoreSight or ROM-table discovery,
+There is no CMSIS-DAP HID/v1 transport, JTAG protocol layer, automatic probe
+discovery policy, CoreSight or ROM-table discovery,
 multi-core or SoC attachment, general target control, semihosting, trace,
 debugger protocol server, firmware flashing, FPGA programming, or Windows
 host implementation.

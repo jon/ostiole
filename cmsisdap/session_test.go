@@ -54,6 +54,7 @@ type peerUSBClaim struct {
 	handle       func([]byte) ([]byte, error)
 	operations   []string
 	pendingIn    *peerBulkTransfer
+	inputErr     error
 	alternateErr error
 	endpointErrs map[uint8]error
 	closes       int
@@ -83,7 +84,8 @@ func (c *peerUSBClaim) Endpoint(_ context.Context, address uint8) (usb.Endpoint,
 func (c *peerUSBClaim) SubmitBulk(_ context.Context, endpoint uint8, buffer []byte) (usbBulkTransfer, error) {
 	if endpoint&0x80 != 0 {
 		c.operations = append(c.operations, "submit IN")
-		transfer := &peerBulkTransfer{buffer: buffer}
+		transfer := &peerBulkTransfer{buffer: buffer, err: c.inputErr}
+		c.inputErr = nil
 		c.pendingIn = transfer
 		return transfer, nil
 	}

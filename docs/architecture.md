@@ -8,10 +8,9 @@ The current hardware paths are:
 
 ```text
 USB host access
-      |-- CMSIS-DAP v2 metadata session
       |
       v
-FTDI MPSSE or J-Link adapter
+FTDI MPSSE, J-Link, or CMSIS-DAP v2 adapter
       |
       v
 Serial Wire Debug
@@ -37,7 +36,7 @@ debugger service.
 | `usb` | Enumerate, open, inspect the active standard configuration, claim, transfer through, and close one host USB attachment, including explicit asynchronous bulk transfers. |
 | `ftdi` | Own one explicitly selected FTDI MPSSE port and expose direction-safe SWD bits. |
 | `jlink` | Find one reviewed J-Link USB application interface, own its command session, configure SWD, and adapt scan v3 to direction-explicit SWD bits. |
-| `cmsisdap` | Shortlist CMSIS-DAP product strings, validate one explicitly selected v2 bulk interface, and own a metadata-only command session. |
+| `cmsisdap` | Shortlist CMSIS-DAP product strings, validate one explicitly selected v2 bulk interface, own its command session, configure SWD, and adapt packet-bounded sequence commands to direction-explicit SWD bits. |
 | `swd` | Enter SWD, establish its response grammar, and encode, execute, and validate individual or packed DP/AP register transactions. |
 | `swd/sim` | Model SWD protocol entry, register transfers, fixed-frame packing, and transfer limits without hardware. |
 | `dap` | Manage SW-DP identity and power, ordered DP/AP transactions, posted AP access, and scalar or block MEM-AP access. |
@@ -85,10 +84,9 @@ product-string shortlist, and still select one complete attachment before
 opening it. The shortlist is not protocol evidence. `cmsisdap.Open` validates
 the exact v2 bulk-interface class and descriptor order. An explicitly selected
 composite attachment can be opened even when its device product string lacks
-the marker. Metadata-only open sends `DAP_Info` but no `DAP_Connect` command.
-`cmsisdap.WithSWD` connects the advertised SWD port and requests a maximum
-target clock during open; `ConfigureSWD` applies the same configuration to an
-open session.
+the marker. With no options, open sends `DAP_Info` but no `DAP_Connect` command.
+`cmsisdap.WithSWD` connects only the advertised SWD port and requests a maximum
+target clock; `ConfigureSWD` applies the same configuration to an open session.
 
 This split keeps inventory policy in the application. Listing hardware does
 not claim an interface or send adapter or target traffic.
@@ -111,9 +109,10 @@ up and released in reverse order.
 | `*dap.MemAP` | `OpenMemAP` validates the selected AP and saves its CSW, TAR, and optional TARHI. `Release` retries failed restoration; if DAPABORT interrupts cleanup, the next `Release` retries every saved value. Calls sharing the MEM-AP or its debug port must be serialized. |
 
 An application that reaches the MEM-AP layer releases the MEM-AP before the
-debug port, then closes its FTDI channel or J-Link session. A metadata-only
-CMSIS-DAP composition closes its session directly. Cleanup errors remain
-meaningful and should be joined with the operation error rather than discarded.
+debug port, then closes its FTDI channel, J-Link session, or CMSIS-DAP session.
+A metadata-only CMSIS-DAP composition closes its session directly. Cleanup
+errors remain meaningful and should be joined with the operation error rather
+than discarded.
 
 `dap.DebugPort` caches register-selection and AP state. Direct transfers
 on its `swd.Conn` can make that cached state stale, so do not share the
@@ -132,14 +131,16 @@ remains retryable; the caller closes that session before the device.
 USB owns the v2 interface descriptors and asynchronous bulk-transfer
 mechanism. `cmsisdap` owns the product-marker convention, exact interface and
 endpoint fingerprint, command and response framing, `DAP_Info` decoding,
-negotiated packet limits, and the rule that a response request is submitted
-before its command. It also owns SWD port connection and maximum-clock
-requests. The current package does not implement an `swd.Wire`.
+negotiated packet limits, target-port connection, maximum-clock request,
+packet-bounded `DAP_SWD_Sequence` framing, and the rule that a response request
+is submitted before its command. Packet count remains metadata; the driver
+does not pipeline commands.
 
-The FTDI channel and configured J-Link session clock direction-explicit bit
-streams. Neither interprets SWD requests. FTDI owns MPSSE framing; J-Link owns
-probe command framing, target-interface selection, clock selection, scan
-limits, and scan status. `swd.Conn` owns request framing, turnaround,
+The FTDI channel and configured J-Link or CMSIS-DAP session clock
+direction-explicit bit streams. None interprets SWD requests. FTDI owns MPSSE
+framing; J-Link owns its scan framing and status; CMSIS-DAP owns its sequence
+commands and response status. Each adapter owns its clock and transfer limits.
+`swd.Conn` owns request framing, turnaround,
 acknowledgements, data parity, line reset, the JTAG-to-SWD selection sequence,
 and the CTRL/STAT.ORUNDETECT setting which selects the response grammar.
 
@@ -287,9 +288,10 @@ The layers are not entirely passive:
   its volatile target clock. Closing releases the application interface and
   USB device but does not restore an unknown prior interface or clock.
 - Opening a CMSIS-DAP v2 session claims its command interface and exchanges
-  metadata commands. Configuring SWD also initializes the probe's SWD pins and
-  changes its volatile maximum-clock request. Close attempts `DAP_Disconnect`.
-  The package does not connect JTAG or use the optional SWO endpoint.
+  metadata commands. With SWD configuration, it also initializes the probe's
+  SWD pins and requests a volatile maximum target clock. Close attempts
+  `DAP_Disconnect`. The package does not connect JTAG or use the optional SWO
+  endpoint.
 - Entering SWD clocks line-reset and protocol-selection sequences.
 - Connecting a debug port clears sticky status, selects a register bank, and
   may request volatile debug and system power.
