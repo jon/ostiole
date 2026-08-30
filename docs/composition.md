@@ -19,7 +19,7 @@ data-register write can write target memory.
 | List every host USB attachment | `usb.New`, `usb.AllDevices`, `Enumerator.List` | Package tests |
 | List USB attachments understood by the FTDI driver | `usb.New`, `ftdi.SupportedDevices`, `Enumerator.List` | `ost ftdi list` |
 | Read metadata from one J-Link | `usb.New`, `jlink.SupportedDevices`, `Enumerator.Open`, `jlink.Open`, `Session.Info` | Package tests |
-| Shortlist USB attachments by the CMSIS-DAP product marker | `usb.New`, `usb.AllDevices`, `cmsisdap.Candidates` | Package tests |
+| Read metadata from one CMSIS-DAP v2 probe | `usb.New`, `usb.AllDevices`, `cmsisdap.Candidates`, `Enumerator.Open`, `cmsisdap.Open`, `Session.Info` | Package tests |
 | Open one FTDI MPSSE SWD port | `Enumerator.Open`, `ftdi.Open` | `examples/trivial/swd-dpidr` |
 | Open one J-Link SWD session | `Enumerator.Open`, `jlink.Open`, `jlink.WithSWD` | Package tests |
 | Connect SWD or transfer DP/AP registers | `swd.New`, `Conn.Connect`, `Conn.ReadDP`, `Conn.WriteDP`, `Conn.ReadAP`, `Conn.WriteAP`, `Conn.NewBatch`, `Conn.Release` | `examples/trivial/swd-dpidr` |
@@ -53,21 +53,44 @@ address; pass the complete value to `Open` so it can reject a replugged or
 replaced attachment. Do not silently pick the first result from an ambiguous
 inventory.
 
-A CMSIS-DAP candidate shortlist begins with the explicit broad inventory:
+A CMSIS-DAP v2 metadata session begins with the explicit broad inventory:
 
 ```go
-devices, err := usb.New().List(ctx, []usb.DeviceFilter{usb.AllDevices()})
-if err != nil {
-    return err
+func openCMSISDAP(ctx context.Context) (_ *cmsisdap.Session, cleanup func() error, err error) {
+    enumerator := usb.New()
+    devices, err := enumerator.List(ctx, []usb.DeviceFilter{usb.AllDevices()})
+    if err != nil {
+        return nil, nil, err
+    }
+    candidates := cmsisdap.Candidates(devices)
+    if len(candidates) != 1 {
+        return nil, nil, fmt.Errorf("found %d CMSIS-DAP candidates, want one", len(candidates))
+    }
+    device, err := enumerator.Open(ctx, candidates[0])
+    if err != nil {
+        return nil, nil, err
+    }
+    session, err := cmsisdap.Open(ctx, device)
+    if err != nil {
+        closeErr := device.Close()
+        if closeErr != nil {
+            return nil, device.Close, errors.Join(err, closeErr)
+        }
+        return nil, nil, err
+    }
+    return session, session.Close, nil
 }
-candidates := cmsisdap.Candidates(devices)
 ```
 
-Product matching is case-sensitive and only shortlists candidates. An
-application which knows a composite probe by serial or another explicit policy
-may select it from `devices` even when its device product string is absent from
-`Candidates`. Do not silently pick the first result from an ambiguous
-shortlist.
+On success the session owns the device, and `cleanup` calls `session.Close`.
+After a failed open whose device cleanup also fails, `cleanup` calls
+`device.Close` again. Retain a non-nil cleanup function. Calling it again
+either retries a retained interface claim or returns the cached device-close
+result.
+Product matching is case-sensitive and only shortlists candidates; `Open`
+still requires the exact v2 bulk interface. An application which knows a
+composite probe by serial or another explicit policy may select it from
+`devices` even when its device product string is absent from `Candidates`.
 
 A metadata-only J-Link session follows the same explicit inventory rule:
 

@@ -1,4 +1,5 @@
-// Package cmsisdap recognizes explicitly selected CMSIS-DAP probe candidates.
+// Package cmsisdap recognizes and opens explicitly selected CMSIS-DAP v2
+// probes over USB.
 package cmsisdap
 
 import (
