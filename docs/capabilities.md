@@ -36,6 +36,12 @@ for the host setup required by physical Linux USB operations.
 
 ## Probe ownership
 
+Transport providers can register with `discover`. `Transports` returns a
+repeatable sequence sorted by provider, serial, location, product, and unique
+attachment key. Successful attachments survive independent provider failures;
+the returned error retains each provider's cause. No registrations return
+`ErrNoProviders`; registered providers finding nothing return an empty sequence.
+
 `probe.New` takes an implementation without I/O. `Probe.SWD` borrows its SWD
 wire; failed activation attempts cleanup and retains failed cleanup for
 `Probe.Close` to retry. The owner imports no concrete driver or transport.

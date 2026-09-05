@@ -54,6 +54,11 @@ than reproduce their framing.
 
 ## Discovery and opening
 
+`discover.Registry` stores immutable transport providers. Registration is
+serialized; enumeration runs outside the lock against a provider snapshot.
+Core discovery imports no concrete transport. Applications register providers
+explicitly or use the package registry. Each call enumerates each provider once.
+
 Each concrete driver exposes `OpenProbe` to acquire an exact USB attachment
 under a generic `probe.Probe`. Interface claim and SWD configuration happen
 when the owner lends SWD. The concrete adapters share the USB-to-session
