@@ -47,18 +47,22 @@ func Transports(ctx context.Context) (TransportInventory, error) {
 // Handle those errors before using a partial inventory. Ordering is provider,
 // serial, location, product, then key, all case-sensitive and lexicographic.
 func (r *Registry) Transports(ctx context.Context) (TransportInventory, error) {
+	providers, classifiers := r.snapshot()
+	return enumerate(ctx, providers, classifiers)
+}
+
+func enumerate(ctx context.Context, providers []*TransportProvider, classifiers []*ProbeProvider) (TransportInventory, error) {
 	if ctx == nil {
 		return nil, errors.New("discover: nil context")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	providers, classifiers := r.snapshot()
 	if len(providers) == 0 {
 		return TransportInventory(slices.Values([]Transport{})), ErrNoProviders
 	}
 	var found []Transport
-	var failures []error
+	failures := missingDependencies(providers, classifiers)
 	for _, p := range providers {
 		if err := ctx.Err(); err != nil {
 			failures = append(failures, err)
