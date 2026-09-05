@@ -54,6 +54,14 @@ than reproduce their framing.
 
 ## Discovery and opening
 
+Each concrete driver exposes `OpenProbe` to acquire an exact USB attachment
+under a generic `probe.Probe`. Interface claim and SWD configuration happen
+when the owner lends SWD. The concrete adapters share the USB-to-session
+ownership transition and retain either the attachment or returned session
+after failed activation, so the generic owner can retry cleanup.
+FTDI's ownership adapter retains its channel after failed setup so a later
+close can retry the MPSSE reset sequence if the initial bulk drain failed.
+
 `usb.New` constructs access to the host USB inventory. `List` returns a
 snapshot matching every attachment, one exact vendor/product pair, or every
 product from a vendor, without opening a device. Each candidate includes the

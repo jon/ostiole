@@ -54,6 +54,18 @@ Use a named error result for this cleanup pattern. Release any SWD or DAP
 state before closing the probe. The caller must stop using the transferred
 backend directly; the borrowed wire has no independent close operation.
 
+Concrete drivers can open that owner from an exact USB identity:
+
+```go
+opened, err := jlink.OpenProbe(ctx, identity)
+// Or: ftdi.OpenProbe(ctx, identity, ftdi.PortA)
+// Or: cmsisdap.OpenProbe(ctx, identity)
+if err != nil {
+    return err
+}
+defer func() { err = errors.Join(err, opened.Close()) }()
+```
+
 Start with `usb.New` and list only the identities accepted by the intended
 driver. Treat the result as a snapshot rather than a live handle.
 
