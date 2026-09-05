@@ -38,6 +38,24 @@ packages are not a reusable library surface.
 
 ## Select and open hardware explicitly
 
+Transport discovery uses registered providers:
+
+```go
+transports, err := discover.Transports(ctx)
+if err != nil {
+    return err
+}
+for transport := range transports {
+    fmt.Println(transport.Info())
+}
+```
+
+Providers can instead register on a caller-owned `discover.Registry` with
+`RegisterTransport`. `EnsureTransport` shares an identical provider dependency
+without accepting a different provider under the same ID. Iteration repeats
+the detached snapshot without enumerating again. To use `slices.Collect`,
+convert the named sequence to `iter.Seq[discover.Transport]` explicitly.
+
 An application with a `probe.SWDBackend` can transfer it to a generic owner:
 
 ```go
