@@ -64,6 +64,12 @@ the concrete session. FTDI also requires one explicit supported MPSSE port.
 
 ## FTDI MPSSE
 
+`ftdi.Candidates` classifies a detached USB snapshot into supported MPSSE
+ports. Import `ftdi/discovery` to enable these bindings in `discover`, or use
+its `Register` with an explicit registry. FT2232H and FT4232H retain separate
+A/B candidates; selecting only their shared serial is ambiguous. Discovery
+does not prove that the board connects those pins to a debug target.
+
 | Capability | Implemented | Validation and boundary |
 | --- | --- | --- |
 | FT232H | Yes | Port A; full MPSSE and SWD HIL on Linux and macOS. |
