@@ -24,8 +24,9 @@ type TransportInfo struct {
 
 // Transport is a detached attachment from a registry snapshot.
 type Transport struct {
-	info       TransportInfo
-	attachment Attachment
+	info        TransportInfo
+	attachment  Attachment
+	classifiers []*ProbeProvider
 }
 
 // Info returns detached metadata.
@@ -52,7 +53,7 @@ func (r *Registry) Transports(ctx context.Context) (TransportInventory, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	providers := r.transportSnapshot()
+	providers, classifiers := r.snapshot()
 	if len(providers) == 0 {
 		return TransportInventory(slices.Values([]Transport{})), ErrNoProviders
 	}
@@ -72,7 +73,7 @@ func (r *Registry) Transports(ctx context.Context) (TransportInventory, error) {
 				failures = append(failures, fmt.Errorf("discover: transport %s returned invalid attachment", p.id))
 				continue
 			}
-			found = append(found, Transport{info: TransportInfo{Provider: p.id, AttachmentInfo: a.Info()}, attachment: a})
+			found = append(found, Transport{info: TransportInfo{Provider: p.id, AttachmentInfo: a.Info()}, attachment: a, classifiers: classifiers})
 		}
 	}
 	slices.SortFunc(found, compareTransports)

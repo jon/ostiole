@@ -36,6 +36,13 @@ for the host setup required by physical Linux USB operations.
 
 ## Probe ownership
 
+Probe classifiers register with `discover.RegisterProbe` or an explicit
+`Registry`. Each binding names its transport dependency. `TransportInventory.Probes`
+uses the registrations captured during enumeration, returning sorted candidates
+alongside attributed classification errors. It does not repeat enumeration or
+open hardware. Handle the original transport error separately before classifying
+a partial snapshot; the sequence does not retain that error.
+
 `discover.Candidate` captures an exact opening callback and copied display
 metadata. `ProbeInventory.Select` requires one match; `Open` combines that
 selection with one open attempt. Typed errors distinguish absence and ambiguity.
