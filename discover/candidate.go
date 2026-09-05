@@ -9,9 +9,16 @@ import (
 	"github.com/jon/ostiole/probe"
 )
 
+// BindingID is an opaque exact-selection token. It identifies a provider,
+// transport, and provider-owned binding key. Compare or display it, but do not
+// parse its representation. It remains stable only while those identities do;
+// it is not a persistent physical-device identifier.
+type BindingID string
+
 // CandidateInfo contains detached display and selection metadata.
 type CandidateInfo struct {
 	Provider ProviderID
+	Binding  BindingID
 	probe.Info
 }
 
@@ -33,7 +40,13 @@ func NewCandidate(info probe.Info, key string, open func(context.Context) (*prob
 }
 
 // Info returns detached display and selection metadata.
-func (c Candidate) Info() CandidateInfo { return c.info }
+func (c Candidate) Info() CandidateInfo {
+	i := c.info
+	if c.key != "" {
+		i.Binding = BindingID(fmt.Sprintf("%q/%q/%q", i.Provider, c.transport, c.key))
+	}
+	return i
+}
 
 // Open opens this binding once without rediscovery. If it returns an owner
 // with an error, the caller must retain that owner and retry Close as needed.
@@ -60,8 +73,10 @@ type ProbeInventory func(func(Candidate) bool)
 
 // Selection applies exact filters. Every empty field is a wildcard; the
 // complete selection must match exactly one candidate.
+// An empty selection deliberately selects the sole candidate, if there is one.
 type Selection struct {
 	Provider                   ProviderID
+	Binding                    BindingID
 	Serial, Function, Location string
 }
 
@@ -95,9 +110,9 @@ func (i ProbeInventory) Select(selection Selection) (Candidate, error) {
 	var selected Candidate
 	if i != nil {
 		for c := range i {
-			if selection.matches(c.info) {
+			if selection.matches(c.Info()) {
 				selected = c
-				found = append(found, c.info)
+				found = append(found, c.Info())
 			}
 		}
 	}
@@ -122,6 +137,7 @@ func (i ProbeInventory) Open(ctx context.Context, selection Selection) (*probe.P
 
 func (s Selection) matches(i CandidateInfo) bool {
 	return (s.Provider == "" || s.Provider == i.Provider) &&
+		(s.Binding == "" || s.Binding == i.Binding) &&
 		(s.Serial == "" || s.Serial == i.Serial) &&
 		(s.Function == "" || s.Function == i.Function) &&
 		(s.Location == "" || s.Location == i.Location)
