@@ -59,6 +59,12 @@ serialized; enumeration runs outside the lock against a provider snapshot.
 Core discovery imports no concrete transport. Applications register providers
 explicitly or use the package registry. Each call enumerates each provider once.
 
+Import `usb/discovery` to register all-device USB enumeration, or call its
+`Register` with an explicit registry. Its detached `Attachment` retains the
+exact `usb.DeviceInfo` snapshot for later opening. USB identity breaks final
+ordering ties by numeric bus/address and VID/PID; missing or duplicate serials
+cannot keep physical-device ordering stable when replugging changes addresses.
+
 Each concrete driver exposes `OpenProbe` to acquire an exact USB attachment
 under a generic `probe.Probe`. Interface claim and SWD configuration happen
 when the owner lends SWD. The concrete adapters share the USB-to-session
