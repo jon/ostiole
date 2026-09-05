@@ -135,6 +135,19 @@ and case-sensitively; empty strings sort first. USB uses numeric bus/address and
 VID/PID for its final identity key. Missing or duplicate serials cannot keep
 physical devices in the same order when replugging changes their addresses.
 
+`candidate.Info().Binding` is an opaque token for the complete provider,
+transport, and binding identity. Display it when ordinary metadata cannot
+distinguish candidates, and pass it back as an exact filter:
+
+```go
+selected, err := inventory.Select(discover.Selection{Binding: binding})
+```
+
+The binding filter combines with every other nonempty filter. An unknown
+binding returns not-found; it never falls back to another candidate. Do not
+parse the token or assume it survives replugging. An empty `Selection{}`
+deliberately selects the sole candidate and reports ambiguity for several.
+
 An application with a `probe.SWDBackend` can transfer it to a generic owner:
 
 ```go
