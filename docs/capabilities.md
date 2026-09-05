@@ -113,6 +113,11 @@ samples unchanged.
 
 ## CMSIS-DAP v2 USB session
 
+Import `cmsisdap/discovery` to register the existing case-sensitive product
+shortlist with `discover`, or call its `Register` with an explicit registry.
+Classification does not validate the protocol; the selected owner still
+requires a supported v2 interface when SWD is activated.
+
 | Capability | Implemented | Validation and boundary |
 | --- | --- | --- |
 | Candidate shortlist | Yes | Case-sensitive `CMSIS-DAP` match against the host-visible USB product string. The caller enumerates every USB attachment and makes the exact selection; a marker is not proof of protocol support. |

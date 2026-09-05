@@ -1,0 +1,41 @@
+package discovery
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/jon/ostiole/discover"
+	"github.com/jon/ostiole/usb"
+	usbdiscovery "github.com/jon/ostiole/usb/discovery"
+)
+
+func TestProductMarkerCandidates(t *testing.T) {
+	var r discover.Registry
+	if err := r.RegisterTransport(discover.NewTransportProvider(usbdiscovery.ID, func(context.Context) ([]discover.Attachment, error) {
+		return []discover.Attachment{
+			usbdiscovery.NewAttachment(usb.DeviceInfo{Product: "board CMSIS-DAP", Serial: "chosen", Address: 1}),
+			usbdiscovery.NewAttachment(usb.DeviceInfo{Product: "cmsis-dap", Address: 2}),
+		}, nil
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RegisterProbe(provider); err != nil {
+		t.Fatal(err)
+	}
+	i, err := r.Probes(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := i.Select(discover.Selection{})
+	if err != nil || c.Info().Provider != ID || c.Info().Serial != "chosen" {
+		t.Fatalf("selection: %v, %v", c.Info(), err)
+	}
+	var explicit discover.Registry
+	if err := Register(&explicit); err != nil {
+		t.Fatal(err)
+	}
+	if err := Register(&explicit); !errors.Is(err, discover.ErrDuplicateProvider) {
+		t.Fatal(err)
+	}
+}
