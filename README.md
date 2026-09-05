@@ -78,6 +78,14 @@ selects its application interface from the active USB descriptors.
 
 ## Design direction
 
+Probe discovery and ownership are separate. Generic tools can import
+`discover` and blank-import `discover/probes` to enable all bundled providers,
+then call `discover.OpenProbe(ctx, selection)`. A tool needing fewer drivers can
+import their individual discovery packages instead. `probe` owns the selected
+implementation and lends SWD; it does not enumerate hardware or own DAP state.
+The [composition guide](docs/composition.md#select-and-open-hardware-explicitly)
+shows the combined and explicit paths, including cleanup obligations.
+
 Ostiole keeps the major hardware-access layers separate:
 
 ```text

@@ -50,8 +50,9 @@ selection with one open attempt. Typed errors distinguish absence and ambiguity.
 Transport providers can register with `discover`. `Transports` returns a
 repeatable sequence sorted by provider, serial, location, product, and unique
 attachment key. Successful attachments survive independent provider failures;
-the returned error retains each provider's cause. No registrations return
-`ErrNoProviders`; registered providers finding nothing return an empty sequence.
+the returned error retains each provider's cause. With no registered providers,
+discovery returns `ErrNoProviders`. Registered providers that find no hardware
+return an empty sequence.
 
 `probe.New` takes an implementation without I/O. `Probe.SWD` borrows its SWD
 wire; failed activation attempts cleanup and retains failed cleanup for
@@ -155,7 +156,7 @@ packet, ownership, and current bench boundaries.
 | Physical DPIDR read | HIL | Opt-in FTDI test and trivial example on Linux and macOS, plus an opt-in J-Link test on macOS. |
 
 The public `swd.Wire` boundary is implemented by FTDI, J-Link, and CMSIS-DAP
-without a shared probe abstraction.
+and can be borrowed through a generic `probe.Probe` owner.
 The [Serial Wire Debug guide](protocols/swd.md) gives the bit-level protocol,
 specification notes, and current physical observation.
 
