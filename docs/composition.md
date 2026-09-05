@@ -38,6 +38,22 @@ packages are not a reusable library surface.
 
 ## Select and open hardware explicitly
 
+An application with a `probe.SWDBackend` can transfer it to a generic owner:
+
+```go
+opened := probe.New(info, backend)
+defer func() { err = errors.Join(err, opened.Close()) }()
+wire, err := opened.SWD(ctx, probe.SWDConfig{MaxClockHz: 100_000})
+if err != nil {
+    return err
+}
+connection := swd.New(wire)
+```
+
+Use a named error result for this cleanup pattern. Release any SWD or DAP
+state before closing the probe. The caller must stop using the transferred
+backend directly; the borrowed wire has no independent close operation.
+
 Start with `usb.New` and list only the identities accepted by the intended
 driver. Treat the result as a snapshot rather than a live handle.
 
