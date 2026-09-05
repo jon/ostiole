@@ -36,6 +36,10 @@ for the host setup required by physical Linux USB operations.
 
 ## Probe ownership
 
+`discover.Candidate` captures an exact opening callback and copied display
+metadata. `ProbeInventory.Select` requires one match; `Open` combines that
+selection with one open attempt. Typed errors distinguish absence and ambiguity.
+
 Transport providers can register with `discover`. `Transports` returns a
 repeatable sequence sorted by provider, serial, location, product, and unique
 attachment key. Successful attachments survive independent provider failures;
