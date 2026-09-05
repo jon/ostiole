@@ -103,8 +103,10 @@ wires its MPSSE port for debugging.
 | Metadata-only reopen | HIL | A genuine J-Link EDU Mini V2 completed 100 consecutive reopen tests, or 200 fresh sessions, on macOS. Every session returned its full firmware record, 256 capability bits, hardware version, workspace, available interfaces, and current interface. The selected interface remained SWD. No scan or target-control command was sent. |
 | Read-only SWD composition | HIL | At a requested 100 kHz, a genuine J-Link EDU Mini V2 reported a 504-bit scan limit and completed ten full restoration runs against a Cortex-M target. Each run used two fresh sessions, read DPIDR `0x2BA01477`, AP0 IDR `0x24770011`, CPUID `0x410FC241` with part `0xC24`, and DHCSR, and matched DPIDR, CPUID, and DHCSR.S_HALT across reopen. The saved AP0 CSW and TAR values were restored before release. An earlier target returned DPIDR `0x0BB11477`, AP0 IDR `0x04770021`, and Cortex-M0 CPUID `0x410CC200`. |
 
-The J-Link session does not depend on the FTDI adapter and does not
-introduce a shared probe abstraction. The tested EDU Mini returned target-input
+`jlink.Candidates` applies the reviewed product catalog to a detached snapshot.
+Import `jlink/discovery` to register those bindings with `discover`, or call
+its `Register` with an explicit registry. The J-Link session does not depend
+on FTDI. The tested EDU Mini returned target-input
 samples displaced by one clock. The correction is gated to its USB product and
 full firmware record; for other firmware records, the package returns the
 samples unchanged.
