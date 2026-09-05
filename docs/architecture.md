@@ -34,6 +34,7 @@ debugger service.
 | Package | Responsibility |
 | --- | --- |
 | `usb` | Enumerate, open, inspect the active standard configuration, claim, transfer through, and close one host USB attachment, including explicit asynchronous bulk transfers. |
+| `probe` | Own one supplied implementation and lend its supported protocol surfaces; the implementation retains its transport and cleanup obligations. |
 | `ftdi` | Own one explicitly selected FTDI MPSSE port and expose direction-safe SWD bits. |
 | `jlink` | Find one reviewed J-Link USB application interface, own its command session, configure SWD, and adapt scan v3 to direction-explicit SWD bits. |
 | `cmsisdap` | Shortlist CMSIS-DAP product strings, validate one explicitly selected v2 bulk interface, own its command session, configure SWD, and adapt packet-bounded sequence commands to direction-explicit SWD bits. |

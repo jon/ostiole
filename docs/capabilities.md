@@ -34,6 +34,13 @@ Xcode command-line-tool SDK; they do not require libusb or another installed
 USB library. Windows is not supported. See [Linux USB access](linux-usb.md)
 for the host setup required by physical Linux USB operations.
 
+## Probe ownership
+
+`probe.New` takes an implementation without I/O. `Probe.SWD` borrows its SWD
+wire; failed activation attempts cleanup and retains failed cleanup for
+`Probe.Close` to retry. The owner imports no concrete driver or transport.
+It does not own SWD transactions, DAP, or MEM-AP state.
+
 ## FTDI MPSSE
 
 | Capability | Implemented | Validation and boundary |
