@@ -16,6 +16,7 @@ data-register write can write target memory.
 
 | Task | Public API | Executable reference |
 | --- | --- | --- |
+| Discover and select among registered probe drivers | `discover.Probes`, `ProbeInventory.Select`, `Candidate.Open`, or `discover.OpenProbe` | `discover/probes` integration tests |
 | List every host USB attachment | `usb.New`, `usb.AllDevices`, `Enumerator.List` | Package tests |
 | List USB attachments understood by the FTDI driver | `usb.New`, `ftdi.SupportedDevices`, `Enumerator.List` | `ost ftdi list` |
 | Read metadata from one J-Link | `usb.New`, `jlink.SupportedDevices`, `Enumerator.Open`, `jlink.Open`, `Session.Info` | Package tests |
@@ -37,6 +38,19 @@ packages. `ost` adds command parsing and output policy, but its internal
 packages are not a reusable library surface.
 
 ## Select and open hardware explicitly
+
+A generic tool enables the bundled providers with these imports:
+
+```go
+import (
+    "github.com/jon/ostiole/discover"
+    _ "github.com/jon/ostiole/discover/probes"
+)
+```
+
+For a smaller binary, blank-import just `jlink/discovery`, `ftdi/discovery`,
+or `cmsisdap/discovery`. The core `discover` and `probe` packages import no
+USB implementation or concrete driver. Registration performs no hardware I/O.
 
 With providers registered, `discover.OpenProbe(ctx, selection)` combines
 enumeration, classification, unique selection, and opening. It stops on any
@@ -80,13 +94,46 @@ if err != nil {
 for transport := range transports {
     fmt.Println(transport.Info())
 }
+inventory, err := transports.Probes(ctx)
+if err != nil {
+    return err
+}
+selected, err := inventory.Select(discover.Selection{Provider: provider, Serial: serial})
+if err != nil {
+    return err
+}
+opened, err := selected.Open(ctx)
+// Retain opened even when err != nil; its Close may still be needed.
 ```
+
+For a helper which leaves ownership with its caller, return cleanup explicitly:
+
+```go
+func openSelected(ctx context.Context, selection discover.Selection) (_ *probe.Probe, cleanup func() error, err error) {
+    opened, err := discover.OpenProbe(ctx, selection)
+    if opened == nil {
+        return nil, nil, err
+    }
+    return opened, opened.Close, err
+}
+```
+
+Retain a non-nil cleanup function even after an error, and retry failed cleanup.
+Release higher-level SWD, DAP, and MEM-AP state before calling it. Closing the
+probe invalidates every borrowed wire, including when transport cleanup fails.
 
 Providers can instead register on a caller-owned `discover.Registry` with
 `RegisterTransport`. `EnsureTransport` shares an identical provider dependency
 without accepting a different provider under the same ID. Iteration repeats
 the detached snapshot without enumerating again. To use `slices.Collect`,
 convert the named sequence to `iter.Seq[discover.Transport]` explicitly.
+
+Probe order is provider ID, serial, function, location, then product, with
+binding identity breaking final ties. Transport order is provider ID, serial,
+location, product, then attachment identity. Strings compare lexicographically
+and case-sensitively; empty strings sort first. USB uses numeric bus/address and
+VID/PID for its final identity key. Missing or duplicate serials cannot keep
+physical devices in the same order when replugging changes their addresses.
 
 An application with a `probe.SWDBackend` can transfer it to a generic owner:
 
