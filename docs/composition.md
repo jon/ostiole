@@ -38,6 +38,30 @@ packages are not a reusable library surface.
 
 ## Select and open hardware explicitly
 
+A `discover.ProbeInventory` supports direct iteration and exact selection:
+
+```go
+for candidate := range inventory {
+    fmt.Println(candidate.Info())
+}
+selected, err := inventory.Select(discover.Selection{Serial: serial})
+if err != nil {
+    return err
+}
+opened, err := selected.Open(ctx)
+if opened != nil {
+    defer func() { err = errors.Join(err, opened.Close()) }()
+}
+if err != nil {
+    return err
+}
+```
+
+`inventory.Open(ctx, selector)` combines the last two operations. If an opener
+returns an owner with its error, preserve that owner for cleanup. No open path
+tries another candidate after failure. Selection errors return copied matching
+metadata in inventory order.
+
 Transport discovery uses registered providers:
 
 ```go
