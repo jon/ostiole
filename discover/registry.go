@@ -37,6 +37,7 @@ func NewTransportProvider(id ProviderID, enumerate func(context.Context) ([]Atta
 type Registry struct {
 	mu         sync.Mutex
 	transports map[ProviderID]*TransportProvider
+	probes     map[probeKey]*ProbeProvider
 }
 
 var defaultRegistry Registry
@@ -73,7 +74,7 @@ func (r *Registry) addTransport(p *TransportProvider, ensure bool) error {
 	return nil
 }
 
-func (r *Registry) transportSnapshot() []*TransportProvider {
+func (r *Registry) snapshot() ([]*TransportProvider, []*ProbeProvider) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var providers []*TransportProvider
@@ -81,5 +82,15 @@ func (r *Registry) transportSnapshot() []*TransportProvider {
 		providers = append(providers, p)
 	}
 	slices.SortFunc(providers, func(a, b *TransportProvider) int { return compareStrings(string(a.id), string(b.id)) })
-	return providers
+	var probes []*ProbeProvider
+	for _, p := range r.probes {
+		probes = append(probes, p)
+	}
+	slices.SortFunc(probes, func(a, b *ProbeProvider) int {
+		if a.id != b.id {
+			return compareStrings(string(a.id), string(b.id))
+		}
+		return compareStrings(string(a.transport), string(b.transport))
+	})
+	return providers, probes
 }

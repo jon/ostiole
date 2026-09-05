@@ -17,13 +17,14 @@ type CandidateInfo struct {
 
 // Candidate describes one unopened binding. Its zero value cannot open.
 type Candidate struct {
-	info CandidateInfo
-	key  string
-	open func(context.Context) (*probe.Probe, error)
+	info      CandidateInfo
+	key       string
+	transport ProviderID
+	open      func(context.Context) (*probe.Probe, error)
 }
 
 // NewCandidate captures one exact binding without opening it. Key must
-// distinguish bindings with equal metadata within one provider. The callback
+// distinguish bindings within one provider's transport binding. The callback
 // must revalidate the attachment and retain failed cleanup in a returned owner.
 // Registration supplies Provider; info is copied. Empty keys or nil callbacks
 // produce invalid candidates which discovery and Open reject.
