@@ -38,6 +38,14 @@ packages are not a reusable library surface.
 
 ## Select and open hardware explicitly
 
+With providers registered, `discover.OpenProbe(ctx, selection)` combines
+enumeration, classification, unique selection, and opening. It stops on any
+discovery error. `discover.Probes(ctx)` returns a partial inventory alongside
+errors so an application can inspect those errors before deliberately opening
+a surviving candidate. An explicit `discover.Registry` offers the same calls.
+All paths leave the same cleanup obligations on the returned owner, including
+when opening returns both an owner and an error.
+
 A `discover.ProbeInventory` supports direct iteration and exact selection:
 
 ```go
