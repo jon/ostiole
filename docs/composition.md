@@ -39,6 +39,36 @@ packages are not a reusable library surface.
 
 ## Select and open hardware explicitly
 
+`armdebug.Connect` owns the connection from an already-open probe through an
+Arm SW-DP. Pass an explicit port configuration:
+
+```go
+connected, err := armdebug.Connect(ctx, opened, armdebug.Config{
+    Port: armdebug.SWDP(probe.SWDConfig{MaxClockHz: 100_000}),
+})
+if connected != nil {
+    defer func() { err = errors.Join(err, connected.Close()) }()
+}
+if err != nil {
+    return err
+}
+port := connected.Port()
+```
+
+The call takes responsibility for `opened` even on invalid input. Stop using
+the supplied probe directly. Keep any non-nil returned owner, including on an
+error, until `Close` succeeds; the single deferred attempt above reports a
+failure but does not replace an application's bounded retry policy.
+The borrowed port is for serialized operations, not independent `Connect` or
+`Release` calls. Stop using it when owner cleanup begins. A manually acquired
+MEM-AP must be released before closing the owner.
+
+`Close` releases DAP, which releases SWD, before closing the probe. A failed
+release retains the live probe for another attempt. Cleanup uses fresh bounded
+contexts, not the operation's possibly canceled context. There is no forced
+abandonment. `Port()` returns nil once cleanup starts; previously returned
+pointers are governed by the borrowing contract, not forcibly revoked.
+
 A generic tool enables the bundled providers with these imports:
 
 ```go

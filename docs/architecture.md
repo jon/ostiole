@@ -35,6 +35,7 @@ debugger service.
 | --- | --- |
 | `usb` | Enumerate, open, inspect the active standard configuration, claim, transfer through, and close one host USB attachment, including explicit asynchronous bulk transfers. |
 | `probe` | Own one supplied implementation and lend its supported protocol surfaces; the implementation retains its transport and cleanup obligations. |
+| `armdebug` | Own a supplied probe and its connected SW-DP, releasing DAP and SWD state before closing the probe. |
 | `discover` | Enumerate registered transports, classify probe bindings, and select one candidate without owning an open probe. |
 | `discover/probes` | Register all bundled probe providers for generic tools. |
 | `ftdi` | Own one explicitly selected FTDI MPSSE port and expose direction-safe SWD bits. |
