@@ -14,7 +14,24 @@ import (
 
 type observedTarget struct {
 	*dapsim.Target
-	resets int
+	resets      int
+	selected    uint32
+	beforeWrite func(swdsim.Request, uint32, uint32) error
+}
+
+func (t *observedTarget) Write(ctx context.Context, req swdsim.Request, value uint32) error {
+	if t.beforeWrite != nil {
+		if err := t.beforeWrite(req, t.selected, value); err != nil {
+			return err
+		}
+	}
+	if err := t.Target.Write(ctx, req, value); err != nil {
+		return err
+	}
+	if !req.AP && req.Addr == 8 {
+		t.selected = value
+	}
+	return nil
 }
 
 func (t *observedTarget) ObserveLineReset() {
