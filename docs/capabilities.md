@@ -72,6 +72,10 @@ its dependencies for retry. Setup failures return a cleanup-only owner when
 restoration remains outstanding. Behavioral simulation covers setup, single
 SWD entry, cancellation, release ordering, and retryable cleanup.
 
+`armdebug.Open` adds registered discovery and exact selection to that ownership
+path. It refuses incomplete discovery and never tries another candidate after
+failure. Concrete drivers remain opt-in imports.
+
 ## FTDI MPSSE
 
 `ftdi.Candidates` classifies a detached USB snapshot into supported MPSSE

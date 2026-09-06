@@ -82,6 +82,20 @@ For a smaller binary, blank-import just `jlink/discovery`, `ftdi/discovery`,
 or `cmsisdap/discovery`. The core `discover` and `probe` packages import no
 USB implementation or concrete driver. Registration performs no hardware I/O.
 
+For an owned Arm debug connection, `armdebug.Open` combines discovery and
+`Connect`, using the same selection and configuration:
+
+```go
+connected, err := armdebug.Open(ctx, selection, armdebug.Config{
+    Port: armdebug.SWDP(probe.SWDConfig{MaxClockHz: 100_000}),
+})
+```
+
+Handle the returned owner and error as in the `Connect` example above. Invalid
+configuration or incomplete discovery prevents opening. For an explicit
+registry, use `registry.OpenProbe` and then `armdebug.Connect`; if opening
+fails with a probe, close that probe rather than trying to activate it.
+
 With providers registered, `discover.OpenProbe(ctx, selection)` combines
 enumeration, classification, unique selection, and opening. It stops on any
 discovery error. `discover.Probes(ctx)` returns a partial inventory alongside
