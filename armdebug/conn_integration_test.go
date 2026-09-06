@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/jon/ostiole/dap"
 	"github.com/jon/ostiole/discover"
 	_ "github.com/jon/ostiole/discover/probes"
+	"github.com/jon/ostiole/target/cortexm"
 )
 
 func TestHILArmConnection(t *testing.T) {
@@ -27,6 +29,7 @@ func TestHILArmConnection(t *testing.T) {
 	if selection.Provider == "" || selection.Serial == "" {
 		t.Skip("explicit provider and serial required")
 	}
+	ap, inspectMemory := memorySelectionHIL(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	inventory, err := discover.Probes(ctx)
@@ -54,6 +57,43 @@ func TestHILArmConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("provider=%s probe=%+v DPIDR=%#08x requested_clock_hz=100000", selection.Provider, c.Info(), id)
+	if inspectMemory {
+		inspectMemoryHIL(t, ctx, c, ap)
+	}
+}
+
+func memorySelectionHIL(t *testing.T) (dap.APSel, bool) {
+	t.Helper()
+	selected := os.Getenv("OSTIOLE_ARMDEBUG_HIL_AP")
+	if selected == "" {
+		return dap.APSel{}, false
+	}
+	index, err := strconv.ParseUint(selected, 10, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dap.NewAPSel(uint8(index)), true
+}
+
+func inspectMemoryHIL(t *testing.T, ctx context.Context, c *armdebug.Conn, ap dap.APSel) {
+	t.Helper()
+	index, err := ap.Value()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := c.Port().ReadAPIDR(ctx, ap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	memory, err := c.OpenMemAP(ctx, ap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	processor, err := cortexm.Identify(ctx, memory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("AP%d IDR=%#08x CPUID=%#08x", index, id.Raw, processor.Raw)
 }
 
 func closeHIL(t *testing.T, c *armdebug.Conn) {

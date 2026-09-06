@@ -1,4 +1,4 @@
-// Package armdebug owns a probe and its connected Arm debug port.
+// Package armdebug owns a probe, its connected Arm debug port, and acquired MEM-APs.
 // Clients borrowed from a Conn share its lifetime and must be used serially.
 package armdebug
 
@@ -42,15 +42,16 @@ func (c Config) validate(ctx context.Context) error {
 	return nil
 }
 
-// Conn owns a probe and the debug-port state acquired through it. Do not copy
+// Conn owns a probe, debug-port state, and MEM-APs acquired through OpenMemAP. Do not copy
 // it or use its transferred probe directly. Calls and borrowed clients must be
 // serialized. Close owns release; borrowers must not reconnect or release the
 // port themselves and must stop using retained pointers once cleanup begins.
 type Conn struct {
-	probe   *probe.Probe
-	port    *dap.DebugPort
-	info    probe.Info
-	closing bool
+	probe    *probe.Probe
+	port     *dap.DebugPort
+	info     probe.Info
+	closing  bool
+	memories []ownedMemAP
 }
 
 // Connect takes responsibility for opened on entry, even on invalid input.
@@ -101,7 +102,8 @@ func (c *Conn) Port() *dap.DebugPort {
 	return c.port
 }
 
-// Close releases DAP and SWD before closing the probe. It stops on failure,
+// Close releases owned MEM-APs in reverse acquisition order, then DAP and SWD,
+// before closing the probe. It stops on failure,
 // retaining dependencies for retry. Protocol release gets a fresh one-second
 // context; lower-layer recovery and host cleanup have their own bounds.
 // There is no forced abandonment. Closing a nil or already closed Conn does nothing.
@@ -110,6 +112,9 @@ func (c *Conn) Close() error {
 		return nil
 	}
 	c.closing = true
+	if err := c.releaseMemAPs(); err != nil {
+		return err
+	}
 	if c.port != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		err := c.port.Release(ctx)

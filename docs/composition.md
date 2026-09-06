@@ -69,6 +69,36 @@ contexts, not the operation's possibly canceled context. There is no forced
 abandonment. `Port()` returns nil once cleanup starts; previously returned
 pointers are governed by the borrowing contract, not forcibly revoked.
 
+Use the owner's method to acquire a MEM-AP whose cleanup it will track:
+
+```go
+memory, err := connected.OpenMemAP(ctx, dap.NewAPSel(0))
+if err != nil {
+    return err
+}
+processor, err := cortexm.Identify(ctx, memory)
+```
+
+Distinct APs may be acquired and used serially; acquiring the same AP twice
+fails before traffic. Do not call `Release` on these borrowed clients.
+`Close` releases them in reverse acquisition order before releasing DAP/SWD.
+If one release fails, the owner retains that client and all lower dependencies
+for retry. An acquisition error preserves existing clients and ownership;
+the DAP client's state determines which subsequent operations remain possible.
+Clients acquired directly with `dap.OpenMemAP`, rather than this method, are
+not tracked and remain the caller's cleanup responsibility.
+
+The generic `examples/simple/arm-info` program uses this ownership path:
+
+```sh
+go run ./examples/simple/arm-info -provider cmsisdap -serial SERIAL -ap 0
+```
+
+It requests a 100 kHz SW-DP, reads DPIDR, AP IDR, and Cortex-M identity, and
+attempts owner cleanup up to three times. It does not halt, reset, or write
+target memory. Probe filters may be omitted only when selection remains unique;
+the AP argument is required.
+
 A generic tool enables the bundled providers with these imports:
 
 ```go

@@ -23,3 +23,5 @@ an example has been implemented.
   explicitly selected access-port identity.
 - [`simple/cortexm-info`](simple/cortexm-info) reads a Cortex-M processor
   identity through an explicitly selected memory access port.
+- [`simple/arm-info`](simple/arm-info) discovers an opt-in probe provider and
+  reads DPIDR, AP IDR, and Cortex-M identity through one Arm debug owner.

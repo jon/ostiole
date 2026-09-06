@@ -76,6 +76,13 @@ SWD entry, cancellation, release ordering, and retryable cleanup.
 path. It refuses incomplete discovery and never tries another candidate after
 failure. Concrete drivers remain opt-in imports.
 
+`Conn.OpenMemAP` acquires and tracks distinct explicit AP selections, returning
+the existing borrowed memory clients. Duplicate acquisition fails before
+traffic. Close restores clients in reverse acquisition order, stopping at a
+failed AP until retry succeeds. Simulation covers interleaved AP access,
+independent saved-state restoration, and retry without repeating completed
+releases.
+
 ## FTDI MPSSE
 
 `ftdi.Candidates` classifies a detached USB snapshot into supported MPSSE
@@ -230,6 +237,8 @@ Available examples:
 - `examples/trivial/swd-dpidr` reads one raw DPIDR.
 - `examples/simple/ap-id` reports DPIDR and one explicitly selected AP IDR.
 - `examples/simple/cortexm-info` reports DPIDR, AP IDR, and Cortex-M CPUID.
+- `examples/simple/arm-info` reports the same identities through generic probe
+  discovery and one Arm debug owner, with explicit AP selection.
 
 Available `ost` commands:
 

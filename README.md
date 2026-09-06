@@ -86,6 +86,11 @@ implementation and lends SWD; it does not enumerate hardware or own DAP state.
 The [composition guide](docs/composition.md#select-and-open-hardware-explicitly)
 shows the combined and explicit paths, including cleanup obligations.
 
+`armdebug.Open(ctx, selection, config)` owns an Arm debug connection through
+that probe. `Config.Port` selects the explicitly configured SW-DP;
+`Conn.OpenMemAP` acquires selected memory APs whose restoration is included
+in `Conn.Close`. The generic `examples/simple/arm-info` tool demonstrates it.
+
 Ostiole keeps the major hardware-access layers separate:
 
 ```text
