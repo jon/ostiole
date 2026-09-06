@@ -63,6 +63,15 @@ FTDI, J-Link, and CMSIS-DAP expose exact-attachment `OpenProbe` entry points.
 These acquire USB without adapter or target traffic; requesting SWD opens
 the concrete session. FTDI also requires one explicit supported MPSSE port.
 
+## Arm debug ownership
+
+`armdebug.Connect` takes a supplied probe, activates the explicitly configured
+SW-DP, and lends its connected `dap.DebugPort`. One owner releases DAP/SWD
+before closing the probe. Failed cleanup stops at the failed layer and retains
+its dependencies for retry. Setup failures return a cleanup-only owner when
+restoration remains outstanding. Behavioral simulation covers setup, single
+SWD entry, cancellation, release ordering, and retryable cleanup.
+
 ## FTDI MPSSE
 
 `ftdi.Candidates` classifies a detached USB snapshot into supported MPSSE
