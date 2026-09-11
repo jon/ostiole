@@ -23,8 +23,9 @@ var ErrStateUnknown = errors.New("jtag: TAP state is unknown; reset required")
 // wire and serialize all calls. A zero Conn has no wire. Movement may update
 // instructions or data registers; even Reset can affect target debug state.
 type Conn struct {
-	wire  Wire
-	state State
+	wire   Wire
+	state  State
+	serial uint64
 }
 
 // New constructs a connection without traffic. Reset establishes its TAP state.
@@ -115,6 +116,7 @@ func (c *Conn) clock(ctx context.Context, tms, tdi []byte, bits int) ([]byte, er
 			put(di, i, get(tdi, start+i))
 		}
 		do, err := c.wire.JTAGIO(ctx, ms, di, n)
+		c.serial++
 		if err == nil && len(do) != len(di) {
 			err = errors.New("jtag: invalid wire response length")
 		}

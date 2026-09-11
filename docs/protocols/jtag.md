@@ -52,6 +52,57 @@ BYPASS/Idle when the actual length fits the supplied bound (2 through 65,536
 bits). A wrong bound or interrupted transfer can leave other instructions;
 the caller must account for that effect when inspecting an unknown chain.
 
+## Explicit layouts
+
+`NewChain(conn, layout)` copies a nonempty layout in scan-out order (nearest
+TDO first). Build each entry with `IDCODE(irBits, id)` or `Bypass(irBits)`;
+the zero specification is invalid. IR lengths must be 2 through 64 bits.
+IDCODEs match exactly, including revision bits. Bypass entries carry no
+physical identity guarantee, and equal IDCODEs do not identify individual
+devices.
+
+```go
+first, err := jtag.IDCODE(4, firstID)
+if err != nil {
+    return err
+}
+second, err := jtag.IDCODE(12, secondID)
+if err != nil {
+    return err
+}
+chain, err := jtag.NewChain(conn, jtag.Layout{first, second})
+if err != nil {
+    return err
+}
+if err := chain.Connect(ctx); err != nil {
+    return err
+}
+cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+defer cancel()
+return chain.Release(cleanupCtx) // Retain chain and wire if this fails.
+```
+
+Connect resets the chain, validates reset-register observations, measures
+the total IR length, then checks the low `01` capture bits at each supplied
+IR boundary. It leaves the chain in BYPASS/Idle. It uses the supported maximum
+total IR length (65,536 bits) as its measurement bound, so validation clocks
+more than 131,072 cycles even on a short chain. Give its context enough time
+for that work at the selected adapter clock.
+
+This checks the supplied layout, not its provenance: coincidental `01` bits
+can make more than one boundary assignment plausible. Obtain individual IR
+lengths from the device specification, not from IDCODE enumeration. Connect
+does not enable hidden TAPs or perform board-specific configuration.
+
+Release parks the chain in BYPASS/Idle, without restoring inherited
+instructions or closing the wire. After lost state it validates the same
+layout before attempting cleanup. Retain the chain and its wire owner after
+a release error so cleanup can be retried with a fresh bounded context.
+Successful release is idempotent. A failed validation leaves no validated
+chain; the raw connection and wire remain the caller's responsibility.
+
+## Wire transfers
+
 The wire packs the earliest TMS, TDI, and TDO bit into bit zero of byte zero.
 Each call clocks exactly the requested number of cycles. A wire can advertise
 a positive `MaxTransferBits` limit; the connection splits longer movements
