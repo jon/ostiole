@@ -9,6 +9,8 @@ import (
 type wireFake struct {
 	limit, calls, fail int
 	tms, tdi           []bool
+	short              bool
+	cancel             context.CancelFunc
 }
 
 func (w *wireFake) MaxTransferBits() int { return w.limit }
@@ -24,7 +26,37 @@ func (w *wireFake) JTAGIO(_ context.Context, tms, tdi []byte, bits int) ([]byte,
 	if w.calls == w.fail {
 		return nil, errors.New("broken wire")
 	}
+	if w.cancel != nil {
+		w.cancel()
+	}
+	if w.short {
+		return nil, nil
+	}
 	return append([]byte(nil), tdi...), nil
+}
+
+func TestMalformedResponseAndMidTransferCancellation(t *testing.T) {
+	w := &wireFake{limit: 2, short: true}
+	c := New(w)
+	if err := c.Reset(context.Background()); err == nil || c.State() != Unknown {
+		t.Fatal("short reply accepted")
+	}
+	w.short = false
+	if err := c.Reset(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	w.cancel = cancel
+	before := w.calls
+	if err := c.Move(ctx, ShiftIR); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	if w.calls != before+1 {
+		t.Fatal("continued after cancellation")
+	}
+	if c.State() != SelectDR {
+		t.Fatalf("confirmed partial path lost: %v", c.State())
+	}
 }
 
 func TestResetAndMove(t *testing.T) {
