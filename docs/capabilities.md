@@ -182,8 +182,9 @@ specification notes, and current physical observation.
 
 ## JTAG
 
-`jtag.Conn` provides explicit TAP reset and state movement over a supplied
-wire, with bounded transfers and unknown-state recovery after wire failures.
+`jtag.Conn` provides explicit TAP reset, state movement, complete IR/DR scans,
+and idle clocks over a supplied wire, with bounded transfers and
+unknown-state recovery after wire failures.
 Hardware-independent tests cover the state graph, reset sequence, transfer
 limits, and cancellation. No bundled adapter implements `jtag.Wire` yet.
 See [JTAG](protocols/jtag.md) for effects and ownership.
