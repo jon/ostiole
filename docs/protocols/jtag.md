@@ -89,9 +89,9 @@ total IR length (65,536 bits) as its measurement bound, so validation clocks
 more than 131,072 cycles even on a short chain. Give its context enough time
 for that work at the selected adapter clock.
 
-This checks the supplied layout, not its provenance: coincidental `01` bits
-can make more than one boundary assignment plausible. Obtain individual IR
-lengths from the device specification, not from IDCODE enumeration. Connect
+Coincidental `01` bits can satisfy more than one proposed set of IR
+boundaries. Obtain individual IR lengths from the device specification, not
+from IDCODE enumeration. Connect
 does not enable hidden TAPs or perform board-specific configuration.
 
 Release parks the chain in BYPASS/Idle, without restoring inherited
@@ -100,6 +100,37 @@ layout before attempting cleanup. Retain the chain and its wire owner after
 a release error so cleanup can be retried with a fresh bounded context.
 Successful release is idempotent. A failed validation leaves no validated
 chain; the raw connection and wire remain the caller's responsibility.
+
+## Selecting a TAP
+
+After Connect, `chain.TAP(index)` lends a zero-based position. Its ScanIR
+accepts exactly enough bytes for that TAP's instruction length, with unused
+high bits zero, and puts every other TAP in BYPASS. Its ScanDR adds and removes
+the other TAPs' bypass bits. Both return only the selected TAP's capture.
+
+```go
+tap, err := chain.TAP(0)
+if err != nil {
+    return err
+}
+if _, err := tap.ScanIR(ctx, []byte{0x0e}); err != nil {
+    return err
+}
+id, err := tap.ScanDR(ctx, make([]byte, 4), 32)
+```
+
+This fragment reads the IDCODE instruction of an already-validated four-bit
+Arm DAP. The caller still releases the chain using a fresh bounded context,
+joins cleanup and operation errors, and keeps the wire's owner alive for any
+cleanup retry. Do not assume that another device uses the same instruction.
+`tap.Idle` supplies execution clocks without changing instructions.
+
+A new Connect attempt or Release invalidates earlier borrowed TAPs. So does
+a failed chain operation or raw traffic through the underlying Conn.
+Revalidation never revives old TAP values. Selecting an instruction on a
+different TAP requires selecting this TAP's instruction again before its
+next data scan; `ErrInstructionChanged` reports that condition before traffic.
+Keep exclusive use of the Conn and serialize all Chain and TAP calls.
 
 ## Wire transfers
 
