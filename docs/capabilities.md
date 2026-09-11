@@ -187,6 +187,13 @@ and idle clocks over a supplied wire, with bounded transfers and
 unknown-state recovery after wire failures.
 Hardware-independent tests cover the state graph, reset sequence, transfer
 limits, and cancellation. No bundled adapter implements `jtag.Wire` yet.
+Bounded discovery distinguishes IDCODE and bypass entries. IR measurement
+checks total length without inferring individual boundaries. Explicit chain
+layouts validate reset identities, total length, and capture boundaries;
+selected-TAP scans own bypass padding and detect stale instruction selection.
+Behavioral tests cover multiple TAPs, dummy DAPs, invalid lengths, borrowed
+surface invalidation, and retryable release. There is no JTAG-DP implementation
+or physical JTAG validation in this package yet.
 See [JTAG](protocols/jtag.md) for effects and ownership.
 
 ## Debug Access Port and MEM-AP
