@@ -45,6 +45,13 @@ recognizes an all-one terminator. An empty path and TDO stuck high both return
 `ErrNoChain`; an overlong chain and TDO stuck low return `ErrDiscoveryLimit`
 with the observed prefix. A partial inventory is not a validated chain.
 
+`MeasureIR(ctx, maxBits)` measures the total instruction-chain length, not
+the individual TAP lengths. After filling the register with ones, it shifts
+a single zero marker through and measures its delay. It finishes in
+BYPASS/Idle when the actual length fits the supplied bound (2 through 65,536
+bits). A wrong bound or interrupted transfer can leave other instructions;
+the caller must account for that effect when inspecting an unknown chain.
+
 The wire packs the earliest TMS, TDI, and TDO bit into bit zero of byte zero.
 Each call clocks exactly the requested number of cycles. A wire can advertise
 a positive `MaxTransferBits` limit; the connection splits longer movements
