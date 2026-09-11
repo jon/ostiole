@@ -180,6 +180,14 @@ and can be borrowed through a generic `probe.Probe` owner.
 The [Serial Wire Debug guide](protocols/swd.md) gives the bit-level protocol,
 specification notes, and current physical observation.
 
+## JTAG
+
+`jtag.Conn` provides explicit TAP reset and state movement over a supplied
+wire, with bounded transfers and unknown-state recovery after wire failures.
+Hardware-independent tests cover the state graph, reset sequence, transfer
+limits, and cancellation. No bundled adapter implements `jtag.Wire` yet.
+See [JTAG](protocols/jtag.md) for effects and ownership.
+
 ## Debug Access Port and MEM-AP
 
 | Capability | Implemented | Validation and boundary |
@@ -256,7 +264,7 @@ the volatile DAP and MEM-AP state described above.
 
 ## Not currently provided
 
-There is no CMSIS-DAP HID/v1 transport, JTAG protocol layer, automatic probe
+There is no CMSIS-DAP HID/v1 transport, bundled JTAG adapter, automatic probe
 discovery policy, CoreSight or ROM-table discovery,
 multi-core or SoC attachment, general target control, semihosting, trace,
 debugger protocol server, firmware flashing, FPGA programming, or Windows
