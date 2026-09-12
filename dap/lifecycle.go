@@ -24,29 +24,13 @@ const (
 // A cleanup failure is joined to that error; Release may then be retried,
 // while other DP, AP, transaction, and MEM-AP operations remain blocked.
 func (dp *DebugPort) Connect(ctx context.Context) (Identity, error) {
-	if dp == nil || dp.conn == nil {
-		return Identity{}, errors.New("dap: nil SWD connection")
-	}
-	if dp.cleanupTimeout <= 0 {
-		return Identity{}, errors.New("dap: cleanup timeout must be positive")
-	}
-	if dp.state.session == sessionConnected {
-		return Identity{}, errors.New("dap: SW-DP connection is already active")
-	}
-	if dp.state.session == sessionRepairRequired {
-		return Identity{}, errors.New("dap: debug-port cleanup is pending")
-	}
-	if err := ctx.Err(); err != nil {
+	if err := dp.validateConnect(ctx); err != nil {
 		return Identity{}, err
 	}
 	dp.beginConnect()
-	raw, err := dp.conn.Connect(ctx)
+	info, state, err := dp.connectLink(ctx)
 	if err != nil {
-		return Identity{}, dp.failSWDConnect(fmt.Errorf("dap: connect SWD transport: %w", err))
-	}
-	info, state, err := dp.initialize(ctx, raw)
-	if err != nil {
-		return Identity{}, dp.failConnect(err)
+		return Identity{}, err
 	}
 	owned := powerRequests &^ state
 	if owned != 0 {
@@ -60,6 +44,37 @@ func (dp *DebugPort) Connect(ctx context.Context) (Identity, error) {
 	}
 	dp.completeConnect(info)
 	return info, nil
+}
+
+func (dp *DebugPort) validateConnect(ctx context.Context) error {
+	if dp == nil || dp.conn == nil {
+		return errors.New("dap: nil SWD connection")
+	}
+	if dp.cleanupTimeout <= 0 {
+		return errors.New("dap: cleanup timeout must be positive")
+	}
+	if dp.state.session == sessionConnected {
+		return errors.New("dap: SW-DP connection is already active")
+	}
+	if dp.state.session == sessionRepairRequired {
+		return errors.New("dap: debug-port cleanup is pending")
+	}
+	if ctx == nil {
+		return errors.New("dap: nil operation context")
+	}
+	return ctx.Err()
+}
+
+func (dp *DebugPort) connectLink(ctx context.Context) (Identity, uint32, error) {
+	raw, err := dp.conn.Connect(ctx)
+	if err != nil {
+		return Identity{}, 0, dp.failSWDConnect(fmt.Errorf("dap: connect SWD transport: %w", err))
+	}
+	info, state, err := dp.initialize(ctx, raw)
+	if err != nil {
+		return Identity{}, 0, dp.failConnect(err)
+	}
+	return info, state, nil
 }
 
 func (dp *DebugPort) failSWDConnect(cause error) error {
@@ -101,14 +116,14 @@ func (dp *DebugPort) failConnect(cause error) error {
 	defer cancel()
 	if dp.state.response == responseLost || dp.state.ownedPower != 0 {
 		if err := dp.reenter(ctx); err != nil {
-			return errors.Join(cause, fmt.Errorf("dap: repair SWD state after Connect failure: %w", err))
+			return errors.Join(cause, fmt.Errorf("dap: repair protocol state after Connect failure: %w", err))
 		}
 	}
 	if err := dp.releasePower(ctx); err != nil {
 		return errors.Join(cause, fmt.Errorf("dap: roll back power requests: %w", err))
 	}
-	if err := dp.conn.Release(ctx); err != nil {
-		return errors.Join(cause, fmt.Errorf("dap: release SWD transport: %w", err))
+	if err := dp.releaseLink(ctx); err != nil {
+		return errors.Join(cause, err)
 	}
 	dp.completeRelease()
 	return cause
@@ -132,7 +147,7 @@ func (dp *DebugPort) Release(ctx context.Context) error {
 		releaseCtx, cancel = dp.cleanupContext()
 		defer cancel()
 		if err := dp.reenter(releaseCtx); err != nil {
-			return fmt.Errorf("dap: restore SWD protocol state for release: %w", err)
+			return fmt.Errorf("dap: restore protocol state for release: %w", err)
 		}
 	}
 	if err := dp.writeDP(releaseCtx, SELECT, 0); err != nil {
@@ -144,10 +159,17 @@ func (dp *DebugPort) Release(ctx context.Context) error {
 	if err := dp.releasePower(releaseCtx); err != nil {
 		return err
 	}
-	if err := dp.conn.Release(releaseCtx); err != nil {
-		return fmt.Errorf("dap: release SWD transport: %w", err)
+	if err := dp.releaseLink(releaseCtx); err != nil {
+		return err
 	}
 	dp.completeRelease()
+	return nil
+}
+
+func (dp *DebugPort) releaseLink(ctx context.Context) error {
+	if err := dp.conn.Release(ctx); err != nil {
+		return fmt.Errorf("dap: release SWD transport: %w", err)
+	}
 	return nil
 }
 
