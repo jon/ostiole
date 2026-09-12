@@ -96,7 +96,7 @@ func TestWriteMEMAPBlocksOverFTDI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expectedDPIDR = identity.Raw
+	expectedDPIDR = swdIdentity(t, identity).Raw
 	apIdentity, err := dp.ReadAPIDR(ctx, hardwareAP)
 	if err != nil {
 		t.Fatal(err)

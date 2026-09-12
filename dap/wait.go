@@ -252,10 +252,10 @@ func (dp *DebugPort) clearFaultState(ctx context.Context, fault *FaultError, min
 
 func (dp *DebugPort) faultIdentityMinimal(state uint32) bool {
 	if dp.reentryKnown {
-		return dp.reentryID.Minimal
+		return dp.reentryID.dpidr.Minimal
 	}
 	if dp.identified {
-		return dp.identity.Minimal
+		return dp.identity.dpidr.Minimal
 	}
 	return state&stickyCompare == 0
 }
@@ -344,7 +344,7 @@ func (dp *DebugPort) restoreAfterAbort(ctx context.Context) error {
 		return fmt.Errorf("dap: read sticky state after DAP abort: %w", err)
 	}
 	dp.confirmResponse(state)
-	clear := stickyClearForState(state, dp.identity.Minimal)
+	clear := stickyClearForState(state, dp.identity.dpidr.Minimal)
 	if clear != 0 {
 		if _, err := dp.transferOnce(ctx, dpTransferRequest(ABORT, false), clear); err != nil {
 			return fmt.Errorf("dap: clear sticky state after DAP abort: %w", err)

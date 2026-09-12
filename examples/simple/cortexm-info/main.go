@@ -61,7 +61,7 @@ func readIdentity(ctx context.Context) (_ identity, err error) {
 		err = errors.Join(err, dp.Release(cleanupCtx), ch.Close())
 	}()
 
-	dpidr, err := dp.Connect(ctx)
+	portID, err := dp.Connect(ctx)
 	if err != nil {
 		return identity{}, err
 	}
@@ -77,6 +77,7 @@ func readIdentity(ctx context.Context) (_ identity, err error) {
 	if err != nil {
 		return identity{}, err
 	}
+	dpidr, _ := portID.DPIDR()
 	return identity{dpidr: dpidr, apidr: apidr, processor: processor}, nil
 }
 

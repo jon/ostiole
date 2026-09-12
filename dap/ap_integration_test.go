@@ -67,7 +67,7 @@ func TestAccessAPOverFTDI(t *testing.T) {
 	if gotCSW != savedCSW {
 		t.Fatalf("AP0 CSW = %#08x after unchanged write, want %#08x", gotCSW, savedCSW)
 	}
-	t.Logf("DPIDR=%#08x AP0_IDR=%#08x AP0_CSW=%#08x", info.Raw, idr.Raw, gotCSW)
+	t.Logf("DPIDR=%#08x AP0_IDR=%#08x AP0_CSW=%#08x", swdIdentity(t, info).Raw, idr.Raw, gotCSW)
 }
 
 func TestTransactionOverFTDI(t *testing.T) {

@@ -56,7 +56,7 @@ func TestWriteMEMAPScalarsOverFTDI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expectedDPIDR = identity.Raw
+	expectedDPIDR = swdIdentity(t, identity).Raw
 	apIdentity, err := dp.ReadAPIDR(ctx, hardwareAP)
 	if err != nil {
 		t.Fatal(err)
@@ -146,8 +146,9 @@ func restoreHardwareScratch(ctx context.Context, dp *dap.DebugPort, mem **dap.Me
 				}
 				continue
 			}
-			if identity.Raw != expectedDPIDR {
-				return errors.Join(attemptErr, fmt.Errorf("reconnected DPIDR = %#08x, want %#08x", identity.Raw, expectedDPIDR))
+			dpidr, ok := identity.DPIDR()
+			if !ok || dpidr.Raw != expectedDPIDR {
+				return errors.Join(attemptErr, fmt.Errorf("reconnected DPIDR = %#08x, want %#08x", dpidr.Raw, expectedDPIDR))
 			}
 			apIdentity, err := dp.ReadAPIDR(ctx, hardwareAP)
 			if err != nil {

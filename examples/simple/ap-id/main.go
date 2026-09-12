@@ -73,7 +73,7 @@ func readIdentity(ctx context.Context) (_ identity, err error) {
 		err = errors.Join(err, dp.Release(cleanupCtx), ch.Close())
 	}()
 
-	dpidr, err := dp.Connect(ctx)
+	portID, err := dp.Connect(ctx)
 	if err != nil {
 		return identity{}, err
 	}
@@ -84,6 +84,7 @@ func readIdentity(ctx context.Context) (_ identity, err error) {
 	if apidr.Raw == 0 {
 		return identity{}, errors.New("ostiole: AP0 is absent")
 	}
+	dpidr, _ := portID.DPIDR()
 	return identity{dpidr: dpidr, apidr: apidr}, nil
 }
 

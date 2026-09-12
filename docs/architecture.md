@@ -205,8 +205,11 @@ abandoned suffix. See
 [Serial Wire Debug](protocols/swd.md) for the wire protocol and current bench
 notes.
 
-`dap.DebugPort.Connect` asks the SWD connection to enter and establish framing
-before applying ADIv5 policy. Public DP, AP, transaction, and MEM-AP operations
+`dap.DebugPort.Connect` returns a `dap.Identity`, whose accessors distinguish
+DPIDR from IDCODE without treating their encodings as interchangeable. The
+current SW-DP connection establishes only DPIDR. The debug port asks the SWD
+connection to enter and establish framing before applying ADIv5 policy.
+Public DP, AP, transaction, and MEM-AP operations
 remain blocked until that connection is active. The debug port validates
 DPIDR, gives each logical DP register its architectural direction and bank,
 preserves the AP fields while changing DPBANKSEL, and requests acknowledged

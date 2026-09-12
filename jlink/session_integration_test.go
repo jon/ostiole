@@ -128,9 +128,13 @@ func observeJLinkTarget(t *testing.T, ctx context.Context, readyOnOpen bool) tar
 	debugPort := dap.NewDebugPort(swd.New(recorder))
 	cleanup.retain("debug port", true, debugPort.Release)
 
-	dpidr, err := debugPort.Connect(ctx)
+	identity, err := debugPort.Connect(ctx)
 	if err != nil {
 		t.Fatal(err)
+	}
+	dpidr, ok := identity.DPIDR()
+	if !ok {
+		t.Fatal("SW-DP identity has no DPIDR")
 	}
 	transaction := debugPort.NewTxn()
 	dpidrResult := transaction.ReadDP(dap.DPIDR)

@@ -75,10 +75,11 @@ func openDAP(ctx context.Context) (*dapSession, error) {
 		return nil, err
 	}
 	session := &dapSession{wire: wire, port: dap.NewDebugPort(wire.connection)}
-	session.identity, err = session.port.Connect(ctx)
+	identity, err := session.port.Connect(ctx)
 	if err != nil {
 		return nil, errors.Join(err, session.close())
 	}
+	session.identity, _ = identity.DPIDR()
 	return session, nil
 }
 
