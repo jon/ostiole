@@ -65,7 +65,8 @@ The borrowed port is for serialized operations, not independent `Connect` or
 `Release` calls. Stop using it when owner cleanup begins. A manually acquired
 MEM-AP must be released before closing the owner.
 
-`Close` releases DAP, which releases SWD, before closing the probe. A failed
+`Close` releases DAP, which releases SWD or the JTAG chain, before closing the
+probe. A failed
 release retains the live probe for another attempt. Cleanup uses fresh bounded
 contexts, not the operation's possibly canceled context. There is no forced
 abandonment. `Port()` returns nil once cleanup starts; previously returned
@@ -531,6 +532,60 @@ interface's current alternate setting; a new claim does not imply alternate
 zero. If alternate selection fails, the next endpoint lookup reads the host
 state again instead of retaining descriptors for the previous alternate.
 
+## Managed JTAG-DP
+
+Select JTAG-DP through the same `Open` or `Connect` calls. The configuration
+contains a complete expected layout, a zero-based TDO-first TAP index, and
+the probe's clock ceiling:
+
+```go
+arm, err := jtag.IDCODE(4, 0x5ba00477)
+if err != nil {
+    return err
+}
+xilinx, err := jtag.IDCODE(12, 0x14730093)
+if err != nil {
+    return err
+}
+config := armdebug.Config{
+    Port: armdebug.JTAGDP(
+        probe.JTAGConfig{MaxClockHz: 100_000},
+        jtag.Layout{arm, xilinx}, 0,
+    ),
+    CleanupTimeout: 30 * time.Second,
+    DAPOptions: []dap.Option{dap.WithMaxWaits(100)},
+}
+connected, err := armdebug.Open(ctx, selection, config)
+```
+
+Store any non-nil `connected` owner before handling `err`, including when
+setup failed. For an already-open probe, call
+`armdebug.Connect(ctx, opened, config)` instead; ownership of `opened`
+transfers even on error. Close any returned owner and retain it until cleanup
+succeeds. These are the same ownership rules as the SW-DP path.
+
+The configuration copies the layout without traffic. Static layout, selected
+TAP, clock, and cleanup-timeout validation precede discovery or activation.
+The selected TAP must have an IDCODE and a four- or eight-bit IR. DAP then
+validates the exact physical chain and enters baseline ADIv5 JTAG-DP.
+Board-specific routing must already be enabled; the owner does not infer a
+layout or activate a hidden DAP. DAP options are checked after probe activation.
+
+The borrowed `connected.Port()` supplies IDCODE through its cached
+`Identity`, and the existing AP and transaction APIs. Acquire memory separately
+with `connected.OpenMemAP(ctx, dap.NewAPSel(1))`; the owner tracks that
+MEM-AP's restoration. Do not release or reconnect borrowed clients yourself.
+`Close` restores owned MEM-APs in reverse acquisition order, releases DAP and
+the chain to BYPASS/Idle, then closes the probe. A failure retains the current
+owner and its dependencies, and completed releases are not repeated.
+
+`CleanupTimeout` bounds each owned release attempt. Zero chooses one second
+for SWD or thirty seconds for JTAG; a negative value is invalid. Each attempt
+uses a fresh context, independent of the operation context. DAP's own recovery
+attempts, including chain revalidation, have separate bounds configured with
+`dap.WithCleanupTimeout` in `DAPOptions`; host cleanup also keeps its own
+limits. `CleanupTimeout` is not a total deadline for `Close`.
+
 ## Choose between raw SWD and DAP
 
 Use `swd.Conn` when the application needs one explicit wire-protocol
@@ -590,8 +645,8 @@ disables inherited ORUNDETECT and restores it during release. Release MEM-APs,
 then DAP and its chain, before closing the probe. Independent recovery defaults
 to thirty seconds for JTAG, versus one second for SWD; use
 `dap.WithCleanupTimeout` for slower clocks. The [DAP guide](ports/dap.md)
-shows the binding and the read-only FTDI bench procedure. `armdebug` continues
-to compose SWD only.
+shows the binding and the read-only FTDI bench procedure. `armdebug.JTAGDP`
+composes these same owners through the managed path above.
 
 The SWD connection reads DPIDR, clears supported sticky conditions with ABORT,
 establishes bank zero through RDBUFF, and establishes its response grammar

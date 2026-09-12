@@ -87,7 +87,7 @@ The [composition guide](docs/composition.md#select-and-open-hardware-explicitly)
 shows the combined and explicit paths, including cleanup obligations.
 
 `armdebug.Open(ctx, selection, config)` owns an Arm debug connection through
-that probe. `Config.Port` selects the explicitly configured SW-DP;
+that probe. `Config.Port` selects an SW-DP or an explicit JTAG-DP chain/TAP;
 `Conn.OpenMemAP` acquires selected memory APs whose restoration is included
 in `Conn.Close`. The generic `examples/simple/arm-info` tool demonstrates it.
 

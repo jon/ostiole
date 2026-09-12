@@ -8,7 +8,9 @@ import (
 
 // Open discovers and opens exactly one selected probe, then connects its Arm
 // debug port. Applications opt into providers through registration imports.
-// Invalid configuration and any discovery error prevent opening. There is no
+// Invalid port configuration or cleanup timeouts are rejected before discovery.
+// Any discovery error prevents opening.
+// DAP options are validated after activation by DAP. There is no
 // fallback. Retain any non-nil returned owner for cleanup, even with an error.
 func Open(ctx context.Context, selection discover.Selection, config Config) (*Conn, error) {
 	if err := config.validate(ctx); err != nil {

@@ -73,11 +73,21 @@ port.
 ## Arm debug ownership
 
 `armdebug.Connect` takes a supplied probe, activates the explicitly configured
-SW-DP, and lends its connected `dap.DebugPort`. One owner releases DAP/SWD
+SW-DP or baseline JTAG-DP, and lends its connected `dap.DebugPort`.
+One owner releases DAP and its connection or chain
 before closing the probe. Failed cleanup stops at the failed layer and retains
 its dependencies for retry. Setup failures return a cleanup-only owner when
 restoration remains outstanding. Behavioral simulation covers setup, single
-SWD entry, cancellation, release ordering, and retryable cleanup.
+SWD entry, explicit JTAG chain/TAP selection, cancellation, release ordering,
+and retryable cleanup.
+
+`armdebug.JTAGDP` copies a complete `jtag.Layout` and selects a zero-based,
+TDO-first TAP with an IDCODE and a four- or eight-bit IR. Invalid static configuration is
+rejected before discovery or activation; connection setup validates the exact
+physical chain. Board-specific chain routing remains external.
+`Config.CleanupTimeout` bounds each owned release attempt, defaulting to one
+second for SWD and thirty seconds for JTAG. DAP's independent recovery attempts
+remain separately configurable through `DAPOptions`.
 
 `armdebug.Open` adds registered discovery and exact selection to that ownership
 path. It refuses incomplete discovery and never tries another candidate after
@@ -237,7 +247,7 @@ See [JTAG](protocols/jtag.md) for effects and ownership.
 | Managed target-memory writes | Yes | `WriteScalar` and `WriteBlock` are effectful. The caller selects the address; the API checks alignment and range, not whether that address is safe to modify. `WriteRawAP` remains an unmanaged escape hatch. |
 | Block reads | Yes | Accepts empty, unaligned, and mixed-width ranges. No auto-incrementing word run crosses a 1 KiB TAR boundary. If the MEM-AP does not accept single address increment, the reader writes TAR before each word. It uses the ordinary DAP WAIT policy. If selection, framing, or cleanup becomes uncertain, repair is required. A FAULT returns only the confirmed prefix. Cancellation and transport or protocol failures can also interrupt the read. Unread destination bytes remain untouched. |
 | Block writes | Yes | Uses the block-read geometry, bounded chunks, and the binding's WAIT policy. If single address increment is unavailable, `WriteBlock` writes TAR before each word. Accepted writes are never replayed. SWD confirms buffered chunks through RDBUFF; sequential JTAG checks CTRL/STAT after each write and can return a confirmed prefix within a chunk. An uncertain write reports `ErrIndeterminate` and invalidates the MEM-AP without replay. |
-| Later JTAG-DP versions and ADIv6 | No | JTAG uses the original ADIv5 register set, without version detection or banked DP registers. `armdebug` remains SWD-only. |
+| Later JTAG-DP versions and ADIv6 | No | JTAG uses the original ADIv5 register set, without version detection or banked DP registers. |
 | Behavioral simulation | Yes | DP identity/power, posted AP access, and byte-addressed MEM-AP reads and writes in either target byte order. AP fixtures take `dap.APSel` values and reject duplicate selectors, zero APIDRs, non-MEM-AP identities passed to `AddMEMAP`, and unaligned target-word addresses. |
 | DAP-composed SWD entry | HIL | The FT232H/Cortex-M AP, transaction, and MEM-AP tests each counted one SWD connection performed by `DebugPort.Connect`; the reconnect test counted two. |
 | JTAG-DP and AP1 memory identity | HIL | On Nostalgia, FT4232H `01691`/A at 100 kHz with Arm `0x5ba00477`/IR4 and Xilinx `0x14730093`/IR12: two fresh direct-driver sessions and two fresh discovered-probe sessions passed. AP1 IDR was `0x44770002`; component words at `0x80410ff0` through `0x80410ffc` were `0x0d`, `0x90`, `0x05`, `0xb1`. Every session restored CSW/TAR and owned power state, released the chain, and closed the probe; fresh sessions found the same inherited power/control state. Board activation was external; no halt, target reset, or target-memory write was exercised. See the [DAP bench procedure](ports/dap.md#ftdi-jtag-dp-bench). |
