@@ -586,6 +586,22 @@ attempts, including chain revalidation, have separate bounds configured with
 `dap.WithCleanupTimeout` in `DAPOptions`; host cleanup also keeps its own
 limits. `CleanupTimeout` is not a total deadline for `Close`.
 
+The opt-in managed JTAG bench test is:
+
+```sh
+OSTIOLE_ARMDEBUG_JTAG_HIL=1 go test -tags=integration ./armdebug -run '^TestHILArmJTAGOwnership$' -count=1 -v
+```
+
+On Nostalgia, FT4232H `01691`/A at 100 kHz completed two fresh `Connect`
+sessions and two fresh `Open` sessions against the externally activated
+Arm `0x5ba00477`/IR4 and Xilinx `0x14730093`/IR12 chain. AP1 IDR was
+`0x44770002`; component words at `0x80410ff0` through `0x80410ffc` were
+`0x0d`, `0x90`, `0x05`, and `0xb1`. Each owner closed successfully. Fresh
+sessions found the same initial AP1 CSW/TAR (`0x80000042`/`0`) and connected
+CTRL/STAT (`0xf0000000`). This exercises managed cleanup and repeated-session
+AP restoration; it does not independently measure power after closing the
+probe. No halt, target reset, or target-memory write was performed.
+
 ## Choose between raw SWD and DAP
 
 Use `swd.Conn` when the application needs one explicit wire-protocol
