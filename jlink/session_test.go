@@ -45,6 +45,7 @@ type peerUSBDevice struct {
 	closeErr          error
 	afterWrite        func()
 	afterReadWait     func()
+	handleWrite       func([]byte) (int, error)
 }
 
 type peerUSBClaim struct{ device *peerUSBDevice }
@@ -295,6 +296,9 @@ func (d *peerUSBDevice) write(data []byte) (int, error) {
 	d.writes++
 	if d.writeErr != nil {
 		return 0, d.writeErr
+	}
+	if d.handleWrite != nil {
+		return d.handleWrite(data)
 	}
 	if len(d.operations) == 0 {
 		d.t.Fatalf("unexpected bulk write %x", data)

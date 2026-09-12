@@ -24,6 +24,7 @@ data-register write can write target memory.
 | Open one FTDI MPSSE SWD port | `Enumerator.Open`, `ftdi.Open` | `examples/trivial/swd-dpidr` |
 | Use an FTDI JTAG chain | `ftdi.Open` or `Probe.JTAG`, then `jtag.New` and `jtag.NewChain` | FTDI integration tests |
 | Open one J-Link SWD session | `Enumerator.Open`, `jlink.Open`, `jlink.WithSWD` | Package tests |
+| Use a J-Link JTAG chain | `jlink.Open` with `WithJTAG` or `Probe.JTAG`, then `jtag.New` and `jtag.NewChain` | J-Link integration tests |
 | Open one CMSIS-DAP SWD session | `Enumerator.Open`, `cmsisdap.Open`, `cmsisdap.WithSWD` | Package tests |
 | Connect SWD or transfer DP/AP registers | `swd.New`, `Conn.Connect`, `Conn.ReadDP`, `Conn.WriteDP`, `Conn.ReadAP`, `Conn.WriteAP`, `Conn.NewBatch`, `Conn.Release` | `examples/trivial/swd-dpidr` |
 | Enter SWD, decode a DPIDR, and manage SW-DP power | `dap.NewDebugPort`, `DebugPort.Connect`, `DebugPort.Release` | `ost dap dp id` |
@@ -239,7 +240,7 @@ Use a named error result for this cleanup pattern. Release any SWD or DAP
 state before closing the probe. The caller must stop using the transferred
 backend directly; the borrowed wire has no independent close operation.
 
-FTDI owners can instead lend JTAG with
+FTDI and J-Link owners can instead lend JTAG with
 `opened.JTAG(ctx, probe.JTAGConfig{MaxClockHz: 100_000})`. Pass the wire to
 `jtag.New`, supply an explicit layout, and release the chain before closing
 the probe. Retain both after a failed release so cleanup can be retried.
