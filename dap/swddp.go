@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jon/ostiole/swd"
 )
@@ -17,7 +18,17 @@ type Option struct {
 }
 
 type debugPortOptions struct {
-	maxWaits uint
+	maxWaits       uint
+	cleanupTimeout time.Duration
+}
+
+// WithCleanupTimeout sets the independent budget for each recovery attempt.
+// The default is one second. Connect rejects nonpositive durations before
+// traffic. Ordinary operations remain bounded by their caller's context.
+func WithCleanupTimeout(timeout time.Duration) Option {
+	return Option{apply: func(options *debugPortOptions) {
+		options.cleanupTimeout = timeout
+	}}
 }
 
 // WithMaxWaits limits clean WAIT responses for one physical request without
@@ -40,13 +51,14 @@ func WithMaxWaits(maxWaits uint) Option {
 // reports the context error and the original WAIT is not retained as
 // swd.ErrWait. Independently joined cleanup failures remain visible.
 type DebugPort struct {
-	conn         *swdExecutor
-	maxWaits     uint
-	identity     Identity
-	identified   bool
-	reentryID    Identity
-	reentryKnown bool
-	state        debugPortState
+	conn           *swdExecutor
+	maxWaits       uint
+	cleanupTimeout time.Duration
+	identity       Identity
+	identified     bool
+	reentryID      Identity
+	reentryKnown   bool
+	state          debugPortState
 }
 
 // NewDebugPort returns a debug-port client over conn. The one-argument form
@@ -58,13 +70,17 @@ type DebugPort struct {
 // using the DebugPort; doing so can invalidate its cached register selection
 // and response state.
 func NewDebugPort(conn *swd.Conn, options ...Option) *DebugPort {
-	config := debugPortOptions{}
+	config := debugPortOptions{cleanupTimeout: time.Second}
 	for _, option := range options {
 		if option.apply != nil {
 			option.apply(&config)
 		}
 	}
-	return &DebugPort{conn: newSWDExecutor(conn), maxWaits: config.maxWaits}
+	return &DebugPort{conn: newSWDExecutor(conn), maxWaits: config.maxWaits, cleanupTimeout: config.cleanupTimeout}
+}
+
+func (dp *DebugPort) cleanupContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), dp.cleanupTimeout)
 }
 
 // SetMaxWaits changes the clean WAIT response limit while the debug port is

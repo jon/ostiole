@@ -41,6 +41,12 @@ without naming a wire protocol; an SWD fault still matches `swd.ErrFault`.
 If cancellation stops WAIT retries, the result remains a context error.
 Independently joined cleanup failures remain visible.
 
+`dap.WithCleanupTimeout(3 * time.Second)` gives each independent recovery
+attempt three seconds instead of the default one second. Recovery does not
+reuse a canceled operation context. The option does not change the deadline
+for ordinary operations, and `Connect` rejects nonpositive durations before
+sending traffic.
+
 ## The SW-DP register window
 
 IHI 0031H sections B2.1-B2.2 and C1.2 define DP and AP addressing. These are

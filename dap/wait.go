@@ -4,14 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/jon/ostiole/swd"
 )
 
 const (
-	waitRecoveryTimeout = time.Second
-
 	dapAbort = uint32(1 << 0)
 
 	clearStickyCompare  = uint32(1 << 1)
@@ -190,7 +187,7 @@ func (dp *DebugPort) handleFault(req transferRequest, apWork bool) error {
 		return errors.Join(fault, errors.New("dap: cannot read CTRL/STAT after FAULT without a known response grammar and bank-zero selection"))
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), waitRecoveryTimeout)
+	ctx, cancel := dp.cleanupContext()
 	defer cancel()
 	state, err := dp.transferOnce(ctx, dpTransferRequest(CTRLSTAT, true), 0)
 	if err != nil {
@@ -315,7 +312,7 @@ func waitMayAffectAP(req transferRequest) bool {
 
 func (dp *DebugPort) abortWait(cause error) error {
 	dp.state.invalidateAP()
-	ctx, cancel := context.WithTimeout(context.Background(), waitRecoveryTimeout)
+	ctx, cancel := dp.cleanupContext()
 	defer cancel()
 
 	_, err := dp.transferOnce(ctx, dpTransferRequest(ABORT, false), dapAbort)
