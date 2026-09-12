@@ -155,6 +155,9 @@ func (dp *DebugPort) Release(ctx context.Context) error {
 	if dp.state.session == sessionIdle {
 		return nil
 	}
+	if ctx == nil {
+		return errors.New("dap: nil context")
+	}
 	dp.state.beginRepair()
 	releaseCtx := ctx
 	if !dp.state.responseKnown() {

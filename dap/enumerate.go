@@ -14,7 +14,7 @@ type APInfo struct {
 // scan does not assume that implemented access ports are contiguous. On
 // failure it returns the discoveries confirmed before the failing access.
 func (dp *DebugPort) EnumerateAPs(ctx context.Context) ([]APInfo, error) {
-	if err := dp.requireConnected(); err != nil {
+	if err := dp.requireConnected(ctx); err != nil {
 		return nil, err
 	}
 	var found []APInfo
