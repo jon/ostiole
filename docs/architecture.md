@@ -71,8 +71,8 @@ ordering ties by numeric bus/address and VID/PID; missing or duplicate serials
 cannot keep physical-device ordering stable when replugging changes addresses.
 
 Each concrete driver exposes `OpenProbe` to acquire an exact USB attachment
-under a generic `probe.Probe`. Interface claim and channel setup happen
-when the owner lends SWD. The concrete adapters share the USB-to-session
+under a generic `probe.Probe`. Interface claim and protocol configuration happen
+when the owner lends SWD, or JTAG for FTDI. The concrete adapters share the USB-to-session
 ownership transition and retain either the attachment or returned session
 after failed activation, so the generic owner can retry cleanup.
 FTDI's ownership adapter retains its channel after failed setup so a later

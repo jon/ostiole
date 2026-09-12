@@ -10,7 +10,7 @@ import (
 )
 
 // OpenProbe opens one exact USB attachment for a supported MPSSE port. SWD
-// activation is deferred until the returned owner's SWD method is called.
+// or JTAG activation is deferred until the corresponding owner method is called.
 func OpenProbe(ctx context.Context, identity usb.DeviceInfo, port Port) (*probe.Probe, error) {
 	if !supportedDevice(identity) || (port != PortA && port != PortB) || (identity.PID == PIDFT232H && port != PortA) {
 		return nil, errors.New("ftdi: unsupported probe binding")
@@ -19,13 +19,21 @@ func OpenProbe(ctx context.Context, identity usb.DeviceInfo, port Port) (*probe.
 	if port == PortB {
 		function = "B"
 	}
-	return probeusb.Open(ctx, identity, function, func(ctx context.Context, device *usb.Device, config probe.SWDConfig) (probeusb.Session, error) {
+	swd := func(ctx context.Context, device *usb.Device, config probe.SWDConfig) (probeusb.Session, error) {
 		session, err := Open(ctx, device, Config{Port: port, MaxClockHz: config.MaxClockHz})
 		if session == nil {
 			return nil, err
 		}
 		return session, err
-	})
+	}
+	jtag := func(ctx context.Context, device *usb.Device, config probe.JTAGConfig) (probeusb.JTAGSession, error) {
+		session, err := Open(ctx, device, Config{Port: port, MaxClockHz: config.MaxClockHz})
+		if session == nil {
+			return nil, err
+		}
+		return session, err
+	}
+	return probeusb.OpenProtocols(ctx, identity, function, swd, jtag)
 }
 
 func supportedDevice(info usb.DeviceInfo) bool {

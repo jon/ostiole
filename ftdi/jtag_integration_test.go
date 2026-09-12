@@ -4,14 +4,66 @@ package ftdi_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/jon/ostiole/discover"
 	"github.com/jon/ostiole/ftdi"
+	ftdidiscovery "github.com/jon/ostiole/ftdi/discovery"
 	"github.com/jon/ostiole/jtag"
+	"github.com/jon/ostiole/probe"
 	"github.com/jon/ostiole/usb"
 )
+
+func TestHILFT4232HProbeJTAG(t *testing.T) {
+	serial := os.Getenv("OSTIOLE_JTAG_SERIAL")
+	if serial == "" || os.Getenv("OSTIOLE_ZCU104_JTAG_HIL") != "1" {
+		t.Skip("set OSTIOLE_ZCU104_JTAG_HIL=1 and OSTIOLE_JTAG_SERIAL")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	var registry discover.Registry
+	if err := ftdidiscovery.Register(&registry); err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := registry.Probes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := inventory.Select(discover.Selection{Provider: ftdidiscovery.ID, Serial: serial, Function: "A"})
+	if errors.Is(err, discover.ErrCandidateNotFound) || errors.Is(err, discover.ErrCandidateAmbiguous) {
+		t.Skip(err)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := candidate.Open(ctx)
+	released := true
+	if owner != nil {
+		defer func() {
+			if !released {
+				t.Error("retaining probe after failed chain cleanup")
+				return
+			}
+			for range 3 {
+				if err = owner.Close(); err == nil {
+					return
+				}
+			}
+			t.Errorf("close probe: %v", err)
+		}()
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire, err := owner.JTAG(ctx, probe.JTAGConfig{MaxClockHz: 100_000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exerciseJTAGChain(t, ctx, wire, &released)
+}
 
 // TestHILFT4232HJTAG clocks the explicitly enabled ZCU104 chain. Board-specific
 // DAP activation must already be complete; this test does not configure it.
