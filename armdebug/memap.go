@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/jon/ostiole/dap"
 )
@@ -49,7 +48,7 @@ func (c *Conn) OpenMemAP(ctx context.Context, ap dap.APSel) (*dap.MemAP, error) 
 func (c *Conn) releaseMemAPs() error {
 	for len(c.memories) != 0 {
 		last := len(c.memories) - 1
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		ctx, cancel := c.cleanupContext()
 		err := c.memories[last].client.Release(ctx)
 		cancel()
 		if err != nil {

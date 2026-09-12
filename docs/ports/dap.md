@@ -69,8 +69,9 @@ MEM-AP. After use or an error, release the MEM-AP if one was returned, then
 release `dp`, then close the probe. Stop at the first cleanup failure and keep
 that owner and its dependencies for retry. Each cleanup attempt needs a fresh,
 independent, bounded context. A failed restoration can be retried without
-repeating successful restoration steps. `armdebug` remains SWD-only; the JTAG
-path composes these owners explicitly.
+repeating successful restoration steps. For managed ownership of this sequence,
+use `armdebug.Open` or `armdebug.Connect` with `armdebug.JTAGDP`; see the
+[composition guide](../composition.md#managed-jtag-dp).
 
 ## Connection identity
 

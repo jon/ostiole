@@ -45,6 +45,7 @@ type bench struct {
 	activations, closes, transfers   int
 	activationErr, closeErr, wireErr error
 	beforeClose                      func()
+	beforeTransfer                   func(context.Context)
 }
 
 func newBench() *bench {
@@ -58,6 +59,9 @@ func (b *bench) SWD(context.Context, probe.SWDConfig) (probe.Wire, error) {
 }
 
 func (b *bench) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
+	if b.beforeTransfer != nil {
+		b.beforeTransfer(ctx)
+	}
 	b.transfers++
 	if b.wireErr != nil {
 		return nil, b.wireErr
