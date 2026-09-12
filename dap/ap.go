@@ -190,6 +190,9 @@ func validateRawAPAddress(addr uint8, write bool) error {
 }
 
 func (dp *DebugPort) requireConnected() error {
+	if dp != nil && dp.jtag != nil {
+		return errors.New("dap: JTAG-DP AP access is unavailable")
+	}
 	if dp == nil || dp.conn == nil || dp.state.session == sessionIdle {
 		return errors.New("dap: SW-DP is not connected")
 	}

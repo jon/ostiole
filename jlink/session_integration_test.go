@@ -125,7 +125,7 @@ func observeJLinkTarget(t *testing.T, ctx context.Context, readyOnOpen bool) tar
 		}
 	}
 	recorder := &recordingWire{inner: session}
-	debugPort := dap.NewDebugPort(swd.New(recorder))
+	debugPort := dap.NewDebugPort(dap.SWDP(swd.New(recorder)))
 	cleanup.retain("debug port", true, debugPort.Release)
 
 	identity, err := debugPort.Connect(ctx)

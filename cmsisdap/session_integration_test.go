@@ -112,7 +112,7 @@ func observeCMSISDAPTarget(t *testing.T, ctx context.Context, readyOnOpen bool) 
 		}
 	}
 	wire := &cmsisdapRecordingWire{inner: session}
-	debugPort := dap.NewDebugPort(swd.New(wire))
+	debugPort := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
 	cleanup.retain("debug port", debugPort.Release)
 
 	identity, err := debugPort.Connect(ctx)

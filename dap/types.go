@@ -18,6 +18,7 @@ const (
 	SELECT
 	RESEND
 	RDBUFF
+	IDCODE
 )
 
 type dpRegisterInfo struct {
@@ -32,12 +33,27 @@ type dpRegisterInfo struct {
 
 func describeDPRegister(reg DPRegister) (dpRegisterInfo, bool) {
 	switch reg {
+	case IDCODE:
+		return dpRegisterInfo{name: "IDCODE", bankIndependent: true, readable: true}, true
 	case DPIDR:
 		return dpRegisterInfo{name: "DPIDR", offset: 0x00, bankIndependent: true, readable: true}, true
 	case ABORT:
 		return dpRegisterInfo{name: "ABORT", offset: 0x00, bankIndependent: true, writable: true}, true
 	case CTRLSTAT:
 		return dpRegisterInfo{name: "CTRL/STAT", offset: 0x04, readable: true, writable: true}, true
+	case SELECT:
+		return dpRegisterInfo{name: "SELECT", offset: 0x08, bankIndependent: true, writable: true}, true
+	case RESEND:
+		return dpRegisterInfo{name: "RESEND", offset: 0x08, bankIndependent: true, readable: true}, true
+	case RDBUFF:
+		return dpRegisterInfo{name: "RDBUFF", offset: 0x0c, bankIndependent: true, readable: true}, true
+	default:
+		return describeBankedDPRegister(reg)
+	}
+}
+
+func describeBankedDPRegister(reg DPRegister) (dpRegisterInfo, bool) {
+	switch reg {
 	case DLCR:
 		return dpRegisterInfo{name: "DLCR", offset: 0x04, bank: 1, readable: true, writable: true, minVersion: 1}, true
 	case TARGETID:
@@ -46,12 +62,6 @@ func describeDPRegister(reg DPRegister) (dpRegisterInfo, bool) {
 		return dpRegisterInfo{name: "DLPIDR", offset: 0x04, bank: 3, readable: true, minVersion: 2}, true
 	case EVENTSTAT:
 		return dpRegisterInfo{name: "EVENTSTAT", offset: 0x04, bank: 4, readable: true, minVersion: 2}, true
-	case SELECT:
-		return dpRegisterInfo{name: "SELECT", offset: 0x08, bankIndependent: true, writable: true}, true
-	case RESEND:
-		return dpRegisterInfo{name: "RESEND", offset: 0x08, bankIndependent: true, readable: true}, true
-	case RDBUFF:
-		return dpRegisterInfo{name: "RDBUFF", offset: 0x0c, bankIndependent: true, readable: true}, true
 	default:
 		return dpRegisterInfo{}, false
 	}

@@ -393,7 +393,7 @@ func sizeBytes(size TransferSize) (int, error) {
 
 func (m *MemAP) prepareRelease(ctx context.Context) (context.Context, context.CancelFunc, error) {
 	if m.dp.state.session == sessionIdle {
-		return nil, nil, errors.New("dap: SW-DP is not connected")
+		return nil, nil, errors.New("dap: debug port is not connected")
 	}
 	if m.dp.state.responseKnown() {
 		return ctx, func() {}, nil
@@ -401,7 +401,7 @@ func (m *MemAP) prepareRelease(ctx context.Context) (context.Context, context.Ca
 	releaseCtx, cancel := m.dp.cleanupContext()
 	if err := m.dp.reenter(releaseCtx); err != nil {
 		cancel()
-		return nil, nil, fmt.Errorf("dap: restore SWD protocol state for MEM-AP release: %w", err)
+		return nil, nil, fmt.Errorf("dap: restore protocol state for MEM-AP release: %w", err)
 	}
 	return releaseCtx, cancel, nil
 }

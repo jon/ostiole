@@ -17,9 +17,9 @@ const (
 	powerRequests = debugPowerRequest | systemPowerRequest
 )
 
-// Connect enters SWD, validates the SW-DP, and acquires its debug power
-// requests. The underlying SWD connection establishes its response grammar
-// and restores any ORUNDETECT change during Release. If connection setup
+// Connect enters the bound protocol, validates the debug port, and acquires
+// only power requests not already asserted. The binding owns the response
+// mode and restores its ORUNDETECT change during Release. If connection setup
 // fails, Connect attempts bounded cleanup before returning the original error.
 // A cleanup failure is joined to that error; Release may then be retried,
 // while other DP, AP, transaction, and MEM-AP operations remain blocked.
@@ -47,14 +47,14 @@ func (dp *DebugPort) Connect(ctx context.Context) (Identity, error) {
 }
 
 func (dp *DebugPort) validateConnect(ctx context.Context) error {
-	if dp == nil || dp.conn == nil {
-		return errors.New("dap: nil SWD connection")
+	if !dp.bound() {
+		return errors.New("dap: invalid port binding")
 	}
 	if dp.cleanupTimeout <= 0 {
 		return errors.New("dap: cleanup timeout must be positive")
 	}
 	if dp.state.session == sessionConnected {
-		return errors.New("dap: SW-DP connection is already active")
+		return errors.New("dap: debug-port connection is already active")
 	}
 	if dp.state.session == sessionRepairRequired {
 		return errors.New("dap: debug-port cleanup is pending")
@@ -62,10 +62,25 @@ func (dp *DebugPort) validateConnect(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("dap: nil operation context")
 	}
+	if dp.jtag != nil {
+		if err := dp.jtag.validate(); err != nil {
+			return err
+		}
+	}
 	return ctx.Err()
 }
 
 func (dp *DebugPort) connectLink(ctx context.Context) (Identity, uint32, error) {
+	if dp.jtag != nil {
+		if err := dp.jtag.enter(ctx); err != nil {
+			return Identity{}, 0, dp.failConnect(err)
+		}
+		state, err := dp.jtag.configure(ctx)
+		if err != nil {
+			return Identity{}, 0, dp.failConnect(err)
+		}
+		return dp.reentryID, state, nil
+	}
 	raw, err := dp.conn.Connect(ctx)
 	if err != nil {
 		return Identity{}, 0, dp.failSWDConnect(fmt.Errorf("dap: connect SWD transport: %w", err))
@@ -134,7 +149,7 @@ func (dp *DebugPort) failConnect(cause error) error {
 // Release may be retried. Once an attempt starts, other DP and AP operations
 // remain blocked until Release succeeds.
 func (dp *DebugPort) Release(ctx context.Context) error {
-	if dp == nil || dp.conn == nil {
+	if !dp.bound() {
 		return nil
 	}
 	if dp.state.session == sessionIdle {
@@ -167,6 +182,9 @@ func (dp *DebugPort) Release(ctx context.Context) error {
 }
 
 func (dp *DebugPort) releaseLink(ctx context.Context) error {
+	if dp.jtag != nil {
+		return dp.jtag.release(ctx)
+	}
 	if err := dp.conn.Release(ctx); err != nil {
 		return fmt.Errorf("dap: release SWD transport: %w", err)
 	}
@@ -174,6 +192,9 @@ func (dp *DebugPort) releaseLink(ctx context.Context) error {
 }
 
 func (dp *DebugPort) reenter(ctx context.Context) error {
+	if dp.jtag != nil {
+		return dp.jtag.enter(ctx)
+	}
 	dp.state.beginProtocolEntry()
 	raw, err := dp.conn.Connect(ctx)
 	if err != nil {

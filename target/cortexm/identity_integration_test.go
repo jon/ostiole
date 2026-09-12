@@ -44,7 +44,7 @@ func TestIdentifyCortexMOverFTDI(t *testing.T) {
 		t.Fatal(errors.Join(err, closeOwner()))
 	}
 	connection := swd.New(channel)
-	debugPort := dap.NewDebugPort(connection)
+	debugPort := dap.NewDebugPort(dap.SWDP(connection))
 	var memory *dap.MemAP
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Second)

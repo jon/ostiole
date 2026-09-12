@@ -98,7 +98,7 @@ func TestMEMAPModelsTargetWrites(t *testing.T) {
 func enteredDAP(t *testing.T, target *dapsim.Target) *dap.DebugPort {
 	t.Helper()
 	conn := swd.New(swdsim.New(target))
-	dp := dap.NewDebugPort(conn)
+	dp := dap.NewDebugPort(dap.SWDP(conn))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}

@@ -70,7 +70,7 @@ func Connect(ctx context.Context, opened *probe.Probe, config Config) (*Conn, er
 	if err != nil {
 		return c.fail(err)
 	}
-	c.port = dap.NewDebugPort(swd.New(wire), config.DAPOptions...)
+	c.port = dap.NewDebugPort(dap.SWDP(swd.New(wire)), config.DAPOptions...)
 	if _, err := c.port.Connect(ctx); err != nil {
 		return c.fail(err)
 	}

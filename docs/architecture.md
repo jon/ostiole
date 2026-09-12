@@ -144,7 +144,7 @@ up and released in reverse order.
 | `*jlink.Session` | Takes ownership of the USB device after `jlink.Open` succeeds. Metadata-only open claims the descriptor-selected application interface, resolves its active endpoint properties, and leaves target configuration unchanged. SWD or JTAG configuration selects that interface and sets volatile probe clock state; `Close` does not restore an unknown prior interface or clock. A complete nonzero scan status requires explicit reconfiguration. An ambiguous bulk exchange or abandoned response poisons the session, and later commands require closing it and explicitly reopening the device. Starting Close blocks configuration and scans; a failed interface release leaves cleanup retryable. Device close runs once, and later calls return its cached result. |
 | `*cmsisdap.Session` | Takes ownership of the USB device after `cmsisdap.Open` succeeds. It claims one descriptor-selected v2 command interface and uses the probe's negotiated packet size, with one full response IN request submitted before each command OUT request. Metadata-only open sends no target-port command. `WithSWD` or `ConfigureSWD` connects the SWD port and requests a maximum clock. After failed SWD configuration, `Open` makes a bounded cleanup attempt; if a synchronized disconnect remains pending, it returns the session with the error. After a poisoned exchange, `Close` reports the abandoned port and continues USB cleanup without sending another command. Device close runs once, and later calls return its cached result. |
 | `*swd.Conn` | Owns one logical SWD transaction stream and the ORUNDETECT bit it adds. `Connect` establishes the target's response grammar and `Release` restores the inherited setting. It does not own a separate host resource. Calls must be serialized. |
-| `*dap.DebugPort` | Requires exclusive use of its SWD connection and owns only the debug and system power requests it adds. It records newly requested power bits before writing them so bounded cleanup can attempt to clear them even when the write's result is ambiguous. `Release` settles its final SELECT write through RDBUFF, releases power, then releases the SWD connection. |
+| `*dap.DebugPort` | Requires exclusive use of its SWD connection or JTAG chain. It owns only the power requests it adds; JTAG also owns its temporary change to inherited ORUNDETECT. It records newly requested power bits before writing them so bounded cleanup can attempt to clear them even when the write's result is ambiguous. `Release` settles outstanding requests, restores owned power/control state, then releases the connection or chain without closing the probe. |
 | `*dap.MemAP` | `OpenMemAP` validates the selected AP and saves its CSW, TAR, and optional TARHI. `Release` retries failed restoration; if DAPABORT interrupts cleanup, the next `Release` retries every saved value. Calls sharing the MEM-AP or its debug port must be serialized. |
 
 An application that reaches the MEM-AP layer releases the MEM-AP before the
@@ -154,8 +154,8 @@ errors remain meaningful and should be joined with the operation error rather
 than discarded.
 
 `dap.DebugPort` caches register-selection and AP state. Direct transfers
-on its `swd.Conn` can make that cached state stale, so do not share the
-connection with another transaction owner while the debug port remains in
+on its SWD connection or JTAG chain can make that cached state stale, so do not
+share either with another transaction owner while the debug port remains in
 use. No layer adds a mutex; serialization belongs to the composition.
 
 Constructors and open operations attempt to clean up resources acquired before
@@ -234,6 +234,16 @@ their original causes.
 Connection setup validates the context and options before protocol entry.
 Power acquisition starts only after entry establishes the identity and
 control state; failed setup and ordinary release use the same link cleanup.
+
+`dap.SWDP(conn)` and `dap.JTAGDP(chain, index)` construct opaque bindings for
+`NewDebugPort` without traffic. JTAG-DP register access requires an explicit
+chain and TDO-first TAP index with a four- or eight-bit IR. Its private executor
+owns 35-bit framing and delayed responses, polls accepted requests without
+replay, and restores acquired power and inherited ORUNDETECT before chain
+release. After losing scan state, `DebugPort` revalidates the exact chain before
+restoring state.
+JTAG's independent cleanup budget defaults to thirty seconds. AP, transaction,
+and MEM-AP access require SWD.
 `NewAPSel` constructs an AP selector whose zero value is invalid.
 `APSel.Address` combines it with a
 complete eight-bit register address; the resulting `APAddress` also has an

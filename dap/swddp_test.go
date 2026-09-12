@@ -14,7 +14,7 @@ func TestImmediateDebugPortAccess(t *testing.T) {
 	ctx := context.Background()
 	target := sim.New(0x2ba01477)
 	conn := swd.New(swdsim.New(target))
-	dp := dap.NewDebugPort(conn)
+	dp := dap.NewDebugPort(dap.SWDP(conn))
 	if _, err := dp.Connect(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestImmediateDebugPortAccess(t *testing.T) {
 func TestDebugPortOperationsRequireConnect(t *testing.T) {
 	target := newWaitTarget()
 	wire := &entryFailureWire{inner: swdsim.New(target)}
-	dp := dap.NewDebugPort(swd.New(wire))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
 	before := wire.calls
 	if _, err := dp.ReadDP(t.Context(), dap.DPIDR); err == nil {
 		t.Fatal("ReadDP() succeeded before Connect()")
@@ -61,7 +61,7 @@ func TestDebugPortOperationsRequireConnect(t *testing.T) {
 }
 
 func TestNilDebugPortAccess(t *testing.T) {
-	dp := dap.NewDebugPort(nil)
+	dp := dap.NewDebugPort(dap.SWDP(nil))
 	if _, err := dp.ReadDP(context.Background(), dap.DPIDR); err == nil {
 		t.Fatal("ReadDP() succeeded without an SWD connection")
 	}

@@ -1,4 +1,17 @@
-// Package dap manages an Arm Debug Access Port over SWD.
+// Package dap manages an Arm Debug Access Port over SWD or baseline ADIv5 JTAG-DP.
+//
+// Construct a Port with SWDP or JTAGDP and pass it to NewDebugPort. Construction
+// sends no traffic; Connect validates the binding and enters the protocol.
+// JTAG requires an explicit chain and zero-based, TDO-first TAP index with a
+// four- or eight-bit IR. It supports IDCODE, CTRL/STAT, SELECT, RDBUFF, and ABORT;
+// AP, transaction, and MEM-AP access require SWD. JTAG temporarily disables
+// inherited ORUNDETECT, rejects pushed operations and transaction counting,
+// and restores its changes during Release before returning the chain to BYPASS.
+// JTAG recovery revalidates the exact chain before restoration; its default
+// independent cleanup budget is thirty seconds, configurable with
+// WithCleanupTimeout. The debug port never closes the probe.
+//
+// For SWD access:
 //
 // A DebugPort enters SWD and acquires volatile debug-port state with Connect.
 // OpenMemAP validates one access port and snapshots the register values it will

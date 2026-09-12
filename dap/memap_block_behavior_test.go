@@ -269,7 +269,7 @@ func TestMEMAPReadBlockInvalidatesStateAfterCanceledPostedRead(t *testing.T) {
 	target := &cancelAPTarget{waitTarget: newWaitTarget(), req: apRead(0x0c)}
 	addMEMAP(t, target, 0, 0x00010001, nil)
 	wire := &packedTxnWire{inner: swdsim.New(target), limit: 54}
-	dp := dap.NewDebugPort(swd.New(wire))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +297,7 @@ func TestMEMAPReadBlockInvalidatesStateAfterPostedReadParityError(t *testing.T) 
 	target := newWaitTarget()
 	addMEMAP(t, target, 0, 0x00010001, nil)
 	wire := &blockReadParityWire{inner: swdsim.New(target)}
-	dp := dap.NewDebugPort(swd.New(wire))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +330,7 @@ func TestMEMAPReadBlockRetainsConfirmedPrefixAfterTransportFailure(t *testing.T)
 	target := &failingBlockReadTarget{waitTarget: newWaitTarget()}
 	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 0x03020100, 4: 0x07060504, 8: 0x0b0a0908, 12: 0x0f0e0d0c})
 	wire := &packedTxnWire{inner: swdsim.New(target), limit: 54}
-	dp := dap.NewDebugPort(swd.New(wire))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -541,7 +541,7 @@ func TestMEMAPReadBlockStopsAtConfiguredWAITLimit(t *testing.T) {
 	target := newWaitTarget()
 	addMEMAP(t, target, 0, 0x00010001, nil)
 	wire := &packedTxnWire{inner: swdsim.New(target), limit: 54}
-	dp := dap.NewDebugPort(swd.New(wire), dap.WithMaxWaits(3))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)), dap.WithMaxWaits(3))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}

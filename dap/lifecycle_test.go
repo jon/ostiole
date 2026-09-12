@@ -62,7 +62,7 @@ func (w *entryGuardWire) SWDIO(ctx context.Context, direction, output []byte, bi
 func TestConnectEntersSWDBeforeDebugPortTraffic(t *testing.T) {
 	target := sim.New(0x2ba01477)
 	wire := &entryGuardWire{inner: swdsim.New(target)}
-	dp := dap.NewDebugPort(swd.New(wire))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestConnectEntersSWDBeforeDebugPortTraffic(t *testing.T) {
 
 func TestNewDebugPortIgnoresZeroOption(t *testing.T) {
 	var option dap.Option
-	dp := dap.NewDebugPort(swd.New(swdsim.New(sim.New(0x2ba01477))), option)
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(swdsim.New(sim.New(0x2ba01477)))), option)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestNewDebugPortIgnoresZeroOption(t *testing.T) {
 func TestConnectRepairsFailedInitialProtocolEntry(t *testing.T) {
 	entryErr := errors.New("injected protocol-entry failure")
 	wire := &entryFailureWire{inner: swdsim.New(sim.New(0x2ba01477)), entryErrors: []error{entryErr}}
-	dp := dap.NewDebugPort(swd.New(wire))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
 	if _, err := dp.Connect(t.Context()); !errors.Is(err, entryErr) {
 		t.Fatalf("Connect() error = %v, want %v", err, entryErr)
 	}
@@ -102,7 +102,7 @@ func TestConnectRepairsFailedInitialProtocolEntry(t *testing.T) {
 
 func TestCanceledConnectSendsNoTraffic(t *testing.T) {
 	wire := &entryFailureWire{inner: swdsim.New(sim.New(0x2ba01477))}
-	dp := dap.NewDebugPort(swd.New(wire))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if _, err := dp.Connect(ctx); !errors.Is(err, context.Canceled) {
@@ -117,7 +117,7 @@ func TestFailedInitialEntryRepairLeavesCleanupPending(t *testing.T) {
 	entryErr := errors.New("injected protocol-entry failure")
 	repairErr := errors.New("injected protocol-entry repair failure")
 	wire := &entryFailureWire{inner: swdsim.New(sim.New(0x2ba01477)), entryErrors: []error{entryErr, repairErr}}
-	dp := dap.NewDebugPort(swd.New(wire))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
 	if _, err := dp.Connect(t.Context()); !errors.Is(err, entryErr) || !errors.Is(err, repairErr) {
 		t.Fatalf("Connect() error = %v, want entry and repair failures", err)
 	}
@@ -332,7 +332,7 @@ func TestDebugPortRejectsOverrunChangesBeforeTraffic(t *testing.T) {
 func newDebugPort(t *testing.T, target swdsim.Target) *dap.DebugPort {
 	t.Helper()
 	conn := swd.New(swdsim.New(target))
-	return dap.NewDebugPort(conn)
+	return dap.NewDebugPort(dap.SWDP(conn))
 }
 
 func assertPower(t *testing.T, dp *dap.DebugPort, want uint32) {

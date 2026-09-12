@@ -256,7 +256,7 @@ func testInterruptedSize64Cleanup(t *testing.T, test interruptedSize64Case) {
 		t.Fatal(err)
 	}
 	wire := &packedTxnWire{inner: swdsim.New(target), limit: 54}
-	dp := dap.NewDebugPort(swd.New(wire))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}

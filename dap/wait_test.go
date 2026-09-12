@@ -461,7 +461,7 @@ func TestDebugPortStopsAtConfiguredWAITLimit(t *testing.T) {
 			if grammar.simple {
 				wireTarget = &simpleBlockTarget{waitTarget: target}
 			}
-			dp := dap.NewDebugPort(swd.New(swdsim.New(wireTarget)), dap.WithMaxWaits(3))
+			dp := dap.NewDebugPort(dap.SWDP(swd.New(swdsim.New(wireTarget))), dap.WithMaxWaits(3))
 			if _, err := dp.Connect(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -485,7 +485,7 @@ func TestDebugPortStopsAtConfiguredWAITLimit(t *testing.T) {
 
 func TestDebugPortConfiguredWAITLimitDoesNotAbortDPWork(t *testing.T) {
 	target := newWaitTarget()
-	dp := dap.NewDebugPort(swd.New(swdsim.New(target)), dap.WithMaxWaits(1))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(swdsim.New(target))), dap.WithMaxWaits(1))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -512,7 +512,7 @@ func TestDebugPortConfiguredWAITLimitDoesNotAbortDPWork(t *testing.T) {
 
 func TestDebugPortOptionsApplyInOrder(t *testing.T) {
 	target := newWaitTarget()
-	dp := dap.NewDebugPort(swd.New(swdsim.New(target)), dap.WithMaxWaits(3), dap.WithMaxWaits(1))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(swdsim.New(target))), dap.WithMaxWaits(3), dap.WithMaxWaits(1))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -532,7 +532,7 @@ func TestDebugPortOptionsApplyInOrder(t *testing.T) {
 func TestDebugPortMaxWaitsCanChangeOnlyWhileIdle(t *testing.T) {
 	target := newWaitTarget()
 	addAP(t, target, 0, 0x24770011)
-	dp := dap.NewDebugPort(swd.New(swdsim.New(target)), dap.WithMaxWaits(1))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(swdsim.New(target))), dap.WithMaxWaits(1))
 	if err := dp.SetMaxWaits(3); err != nil {
 		t.Fatalf("SetMaxWaits() before Connect: %v", err)
 	}
@@ -745,7 +745,7 @@ func TestConnectRepairsRejectedBootstrapByReenteringSWD(t *testing.T) {
 			target := newWaitTarget()
 			wire := &reentryFailWire{inner: swdsim.New(target)}
 			conn := swd.New(wire)
-			dp := dap.NewDebugPort(conn)
+			dp := dap.NewDebugPort(dap.SWDP(conn))
 			req := dpWrite(0x08)
 			test.arm(target, req)
 
@@ -812,7 +812,7 @@ func TestFailedConnectRepairBlocksOperations(t *testing.T) {
 	repairErr := errors.New("injected protocol re-entry failure")
 	wire := &reentryFailWire{inner: swdsim.New(target), reentryErr: repairErr}
 	conn := swd.New(wire)
-	dp := dap.NewDebugPort(conn)
+	dp := dap.NewDebugPort(dap.SWDP(conn))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -986,7 +986,7 @@ func TestDebugPortAbortsWAITWhenContextEndsAndClearsAbandonedWrite(t *testing.T)
 	base := newWaitTarget()
 	target := &cancelAfterOverrunClearTarget{waitTarget: base}
 	addAP(t, target, 0, 0x24770011)
-	dp := dap.NewDebugPort(swd.New(swdsim.New(target)), dap.WithMaxWaits(3))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(swdsim.New(target))), dap.WithMaxWaits(3))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -1026,7 +1026,7 @@ func TestDebugPortDoesNotAbortDPWAITWhenContextEnds(t *testing.T) {
 	base := newWaitTarget()
 	target := &cancelAfterOverrunClearTarget{waitTarget: base}
 	addAP(t, target, 0, 0x24770011)
-	dp := dap.NewDebugPort(swd.New(swdsim.New(target)), dap.WithMaxWaits(3))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(swdsim.New(target))), dap.WithMaxWaits(3))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -1049,7 +1049,7 @@ func TestDebugPortDropsOriginalWAITWhenRetryIsCanceledInFlight(t *testing.T) {
 	base := newWaitTarget()
 	target := &cancelInFlightRetryTarget{waitTarget: base}
 	addAP(t, target, 0, 0x24770011)
-	dp := dap.NewDebugPort(swd.New(swdsim.New(target)))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(swdsim.New(target))))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -1250,7 +1250,7 @@ func TestConnectRepairsFailedRDBUFFConfirmation(t *testing.T) {
 			target := newWaitTarget()
 			wire := &reentryFailWire{inner: swdsim.New(target)}
 			conn := swd.New(wire)
-			dp := dap.NewDebugPort(conn)
+			dp := dap.NewDebugPort(dap.SWDP(conn))
 			rdbuff := dpRead(0x0c)
 			test.arm(target, rdbuff)
 
@@ -1480,7 +1480,7 @@ func TestDebugPortDoesNotReplayAfterWAITCleanupFailure(t *testing.T) {
 	cleanupErr := errors.New("injected WAIT cleanup failure")
 	wire := &cleanupFailWire{inner: swdsim.New(target), err: cleanupErr}
 	conn := swd.New(wire)
-	dp := dap.NewDebugPort(conn)
+	dp := dap.NewDebugPort(dap.SWDP(conn))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -1518,7 +1518,7 @@ func TestMEMAPReleaseReentersAfterDPWAITCleanupFailure(t *testing.T) {
 	cleanupErr := errors.New("injected WAIT cleanup failure")
 	wire := &cleanupFailWire{inner: swdsim.New(target), err: cleanupErr}
 	conn := swd.New(wire)
-	dp := dap.NewDebugPort(conn)
+	dp := dap.NewDebugPort(dap.SWDP(conn))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -1669,7 +1669,7 @@ func TestDebugPortStopsRecoveryAfterStickyStateReadFailure(t *testing.T) {
 func TestConnectRollsBackAmbiguousPowerRequestWrite(t *testing.T) {
 	target := newWaitTarget()
 	conn := swd.New(swdsim.New(target))
-	dp := dap.NewDebugPort(conn)
+	dp := dap.NewDebugPort(dap.SWDP(conn))
 
 	req := dpWrite(0x04)
 	writeErr := errors.New("injected failure after power-request write was accepted")
@@ -1733,7 +1733,7 @@ func TestConnectRepairsBeforeIdentifyingReplacementTarget(t *testing.T) {
 	readErr := errors.New("injected DPIDR transfer failure")
 	wire := &cleanupFailWire{inner: swdsim.New(target), err: readErr, failBits: 42}
 	conn := swd.New(wire)
-	dp := dap.NewDebugPort(conn)
+	dp := dap.NewDebugPort(dap.SWDP(conn))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -1774,7 +1774,7 @@ func TestConnectRetainsAmbiguousPowerAfterFailedRollback(t *testing.T) {
 	repairErr := errors.New("injected protocol re-entry failure")
 	wire := &reentryFailWire{inner: swdsim.New(target), reentryErr: repairErr}
 	conn := swd.New(wire)
-	dp := dap.NewDebugPort(conn)
+	dp := dap.NewDebugPort(dap.SWDP(conn))
 
 	req := dpWrite(0x04)
 	writeErr := errors.New("injected accepted power-request write failure")
@@ -1889,7 +1889,7 @@ func TestReentryRejectsChangedDebugPort(t *testing.T) {
 	cleanupErr := errors.New("injected WAIT cleanup failure")
 	wire := &cleanupFailWire{inner: swdsim.New(target), err: cleanupErr}
 	conn := swd.New(wire)
-	dp := dap.NewDebugPort(conn)
+	dp := dap.NewDebugPort(dap.SWDP(conn))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -1953,7 +1953,7 @@ func TestDebugPortAbortsWAITAfterContextCancellation(t *testing.T) {
 	addAP(t, target, 0, 0x24770011)
 	wire := &cleanupFailWire{inner: swdsim.New(target)}
 	conn := swd.New(wire)
-	dp := dap.NewDebugPort(conn)
+	dp := dap.NewDebugPort(dap.SWDP(conn))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}

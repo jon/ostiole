@@ -393,7 +393,7 @@ func TestMEMAPWriteBlockStopsRetryingCompletionWhenContextEnds(t *testing.T) {
 	addMEMAP(t, target, 0, 0x00010001, nil)
 	wireTarget := &stagedCancelBlockWriteTarget{simpleObservedBlockWriteTarget: &simpleObservedBlockWriteTarget{observedBlockWriteTarget: target}, ctx: ctx, after: 101}
 	wire := &packedTxnWire{inner: swdsim.New(wireTarget), limit: 54}
-	dp := dap.NewDebugPort(swd.New(wire))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -420,7 +420,7 @@ func TestMEMAPWriteBlockStopsAtConfiguredWAITLimit(t *testing.T) {
 	target := &observedBlockWriteTarget{waitTarget: newWaitTarget(), waitAfter: 4, waitCount: -1}
 	addMEMAP(t, target, 0, 0x00010001, nil)
 	wire := &packedTxnWire{inner: swdsim.New(target), limit: 54}
-	dp := dap.NewDebugPort(swd.New(wire), dap.WithMaxWaits(3))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)), dap.WithMaxWaits(3))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -451,7 +451,7 @@ func TestMEMAPWriteBlockCountsWAITsPerPhysicalWrite(t *testing.T) {
 	target := &waitOncePerDRWWriteTarget{waitTarget: newWaitTarget(), waitNext: true}
 	addMEMAP(t, target, 0, 0x00010001, nil)
 	wire := &packedTxnWire{inner: swdsim.New(target), limit: 54}
-	dp := dap.NewDebugPort(swd.New(wire), dap.WithMaxWaits(2))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)), dap.WithMaxWaits(2))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -476,7 +476,7 @@ func openObservedBlockWriteMEMAP(t *testing.T, target *observedBlockWriteTarget)
 	t.Helper()
 	addMEMAP(t, target, 0, 0x00010001, nil)
 	wire := &packedTxnWire{inner: swdsim.New(target), limit: 54}
-	dp := dap.NewDebugPort(swd.New(wire))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -531,7 +531,7 @@ func TestMEMAPWriteBlockCountsCompletedChunkWhenBarrierDataParityFails(t *testin
 	addMEMAP(t, target, 0, 0x00010001, nil)
 	wire := &readParityWire{inner: swdsim.New(target)}
 	target.wire = wire
-	dp := dap.NewDebugPort(swd.New(wire))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}

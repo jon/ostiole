@@ -179,7 +179,7 @@ func TestDebugPortTransactionPacksRawSWDRequests(t *testing.T) {
 	target := newWaitTarget()
 	addAP(t, target, 0, 0x24770011)
 	wire := &packedTxnWire{inner: swdsim.New(target), limit: 16_384}
-	dp := dap.NewDebugPort(swd.New(wire))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestDebugPortTransactionKeepsPrefixWhenContextIsCanceledBeforeNextBatch(t *
 	target := newWaitTarget()
 	addAP(t, target, 0, 0x24770011)
 	wire := &packedTxnWire{inner: swdsim.New(target), limit: 16_384}
-	dp := dap.NewDebugPort(swd.New(wire))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestDebugPortTransactionMarksPostedReadIndeterminateWhenCancellationStopsBa
 	target := newWaitTarget()
 	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 1})
 	wire := &packedTxnWire{inner: swdsim.New(target), limit: 54}
-	dp := dap.NewDebugPort(swd.New(wire))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ func TestDebugPortTransactionRetriesPackedWAITAndAbandonedSuffix(t *testing.T) {
 	target := newWaitTarget()
 	addAP(t, target, 0, 0x24770011)
 	wire := &packedTxnWire{inner: swdsim.New(target), limit: 16_384}
-	dp := dap.NewDebugPort(swd.New(wire))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +333,7 @@ func TestDebugPortTransactionRetriesWAITedRequestUntilTargetResponds(t *testing.
 func TestDebugPortTransactionStopsAtConfiguredWAITLimit(t *testing.T) {
 	target := newWaitTarget()
 	addAP(t, target, 0, 0x24770011)
-	dp := dap.NewDebugPort(swd.New(swdsim.New(target)), dap.WithMaxWaits(3))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(swdsim.New(target))), dap.WithMaxWaits(3))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +367,7 @@ func TestDebugPortTransactionLosesFramingWhenPackedWAITCleanupFails(t *testing.T
 	target := newWaitTarget()
 	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 1})
 	wire := &packedTxnWire{inner: swdsim.New(target), limit: 16_384, err: cleanupErr}
-	dp := dap.NewDebugPort(swd.New(wire))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +402,7 @@ func TestDebugPortTransactionLosesFramingWhenPackedWAITCleanupABORTReturnsWAIT(t
 	target := newWaitTarget()
 	addMEMAP(t, target, 0, 0x00010001, map[uint32]uint32{0: 1})
 	wire := &cleanupWAITWire{inner: swdsim.New(target)}
-	dp := dap.NewDebugPort(swd.New(wire))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -468,7 +468,7 @@ func TestDebugPortTransactionRejectsAcceptedPackedWAITSuffix(t *testing.T) {
 	target := newWaitTarget()
 	addAP(t, target, 0, 0x24770011)
 	wire := &acceptedBatchSuffixWire{inner: swdsim.New(target)}
-	dp := dap.NewDebugPort(swd.New(wire))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -495,7 +495,7 @@ func TestDebugPortTransactionAttributesFailedPackedChunk(t *testing.T) {
 	target := newWaitTarget()
 	addAP(t, target, 0, 0x24770011)
 	wire := &packedTxnWire{inner: swdsim.New(target), limit: 108, err: transferErr}
-	dp := dap.NewDebugPort(swd.New(wire))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -929,7 +929,7 @@ func TestDebugPortTransactionRejectsOverrunChangeBeforeTargetFailure(t *testing.
 func TestDebugPortTransactionRejectsOverrunChangeBeforeWireTraffic(t *testing.T) {
 	target := newWaitTarget()
 	wire := &readParityWire{inner: swdsim.New(target)}
-	dp := dap.NewDebugPort(swd.New(wire))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -1076,7 +1076,7 @@ func TestDebugPortTransactionJoinsContextCancellationAndDAPABORTFailure(t *testi
 	base := newWaitTarget()
 	target := &cancelAfterOverrunClearTarget{waitTarget: base}
 	addAP(t, target, 0, 0x24770011)
-	dp := dap.NewDebugPort(swd.New(swdsim.New(target)), dap.WithMaxWaits(3))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(swdsim.New(target))), dap.WithMaxWaits(3))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -1352,7 +1352,7 @@ func TestDebugPortTransactionInvalidatesAPWhenDAPABORTBarrierDataParityFails(t *
 	addMEMAP(t, target, 0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
 	wire := &readParityWire{inner: swdsim.New(target)}
 	conn := swd.New(wire)
-	dp := dap.NewDebugPort(conn)
+	dp := dap.NewDebugPort(dap.SWDP(conn))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -1377,7 +1377,7 @@ func TestDebugPortTransactionSettlesDPWriteWhenBarrierDataParityFails(t *testing
 	target := newWaitTarget()
 	wire := &readParityWire{inner: swdsim.New(target)}
 	conn := swd.New(wire)
-	dp := dap.NewDebugPort(conn)
+	dp := dap.NewDebugPort(dap.SWDP(conn))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -1409,7 +1409,7 @@ func TestDebugPortTransactionTreatsSELECTBarrierDataParityAsDeterminate(t *testi
 	target := newWaitTarget()
 	wire := &readParityWire{inner: swdsim.New(target)}
 	conn := swd.New(wire)
-	dp := dap.NewDebugPort(conn)
+	dp := dap.NewDebugPort(dap.SWDP(conn))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -1441,7 +1441,7 @@ func TestDebugPortTransactionSettlesPreviousDPWriteWhenBarrierDataParityFails(t 
 	target := newWaitTarget()
 	wire := &readParityWire{inner: swdsim.New(target)}
 	conn := swd.New(wire)
-	dp := dap.NewDebugPort(conn)
+	dp := dap.NewDebugPort(dap.SWDP(conn))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -1476,7 +1476,7 @@ func TestDebugPortImmediateRDBUFFSettlesDPWriteWhenDataParityFails(t *testing.T)
 	target := newWaitTarget()
 	wire := &readParityWire{inner: swdsim.New(target)}
 	conn := swd.New(wire)
-	dp := dap.NewDebugPort(conn)
+	dp := dap.NewDebugPort(dap.SWDP(conn))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -1507,7 +1507,7 @@ func TestDebugPortTransactionCompletesAPWriteWhenBarrierDataParityFails(t *testi
 	addAP(t, target, 0, 0x24770011)
 	wire := &readParityWire{inner: swdsim.New(target)}
 	conn := swd.New(wire)
-	dp := dap.NewDebugPort(conn)
+	dp := dap.NewDebugPort(dap.SWDP(conn))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -1596,7 +1596,7 @@ func TestDebugPortTransactionMarksAmbiguousOperation(t *testing.T) {
 	transferErr := errors.New("injected transaction transport failure")
 	wire := &cleanupFailWire{inner: swdsim.New(target), err: transferErr, failBits: 54}
 	conn := swd.New(wire)
-	dp := dap.NewDebugPort(conn)
+	dp := dap.NewDebugPort(dap.SWDP(conn))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}

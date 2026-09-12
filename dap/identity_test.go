@@ -26,7 +26,7 @@ func TestIdentityDistinguishesAbsentRegisters(t *testing.T) {
 	if value, ok := zero.IDCODE(); ok || value != 0 {
 		t.Fatalf("zero IDCODE: %#x, %t", value, ok)
 	}
-	dp := dap.NewDebugPort(swd.New(swdsim.New(sim.New(0x2ba01477))))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(swdsim.New(sim.New(0x2ba01477)))))
 	if _, ok := dp.Identity(); ok {
 		t.Fatal("identity known before Connect")
 	}

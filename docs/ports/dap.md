@@ -42,10 +42,47 @@ If cancellation stops WAIT retries, the result remains a context error.
 Independently joined cleanup failures remain visible.
 
 `dap.WithCleanupTimeout(3 * time.Second)` gives each independent recovery
-attempt three seconds instead of the default one second. Recovery does not
+attempt three seconds instead of SWD's default one second. Recovery does not
 reuse a canceled operation context. The option does not change the deadline
 for ordinary operations, and `Connect` rejects nonpositive durations before
 sending traffic.
+
+## Explicit port bindings
+
+Wrap an SWD connection in `dap.SWDP(swdConn)` before passing it to
+`dap.NewDebugPort`. For baseline JTAG-DP, supply an explicit chain and its
+zero-based, TDO-first TAP index:
+
+```go
+dp := dap.NewDebugPort(dap.JTAGDP(chain, 0), dap.WithMaxWaits(100))
+identity, err := dp.Connect(ctx)
+if err != nil {
+    return err // Connect attempts cleanup; retain dp for any required retry.
+}
+idcode, present := identity.IDCODE()
+```
+
+Both constructors send no traffic. JTAG accepts four- and eight-bit instruction
+registers and validates the exact chain during Connect. Its identity supplies
+only IDCODE, while SWD supplies only DPIDR. Keep the chain exclusive to the
+debug port until `dp.Release(cleanupCtx)` succeeds, using an independent
+bounded context and retaining the owner after failure. Release returns the
+chain to BYPASS/Idle; only then close the caller-owned probe.
+
+Baseline JTAG supports IDCODE, CTRL/STAT, readable SELECT, RDBUFF, and ABORT.
+It rejects DPIDR and banked registers. ABORT accepts only DAPABORT value `1`.
+AP, transaction, and MEM-AP access require SWD. Each JTAG scan captures the
+preceding accepted request; WAIT polling never resends an accepted operation.
+Connection setup primes the pipeline, establishes SELECT zero, clears sticky
+status, and acquires only power requests not already asserted. It temporarily
+disables inherited ORUNDETECT and rejects active pushed-operation or
+transaction-counter modes. Release restores acquired power and control state.
+
+After scan-state loss, cleanup revalidates the exact chain and reacquires its
+TAP before restoring state. Changed identity stops restoration. A poisoned
+adapter may prevent cleanup; it is never reopened automatically. JTAG uses a
+thirty-second independent recovery budget, configurable with
+`dap.WithCleanupTimeout`; SWD retains its one-second default.
 
 ## The SW-DP register window
 
