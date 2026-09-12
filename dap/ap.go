@@ -113,7 +113,7 @@ func (dp *DebugPort) readAPEffect(ctx context.Context, sel APSel, addr uint8) (b
 	if err := dp.selectAP(ctx, sel, addr); err != nil {
 		return false, 0, err
 	}
-	_, err := dp.transfer(ctx, apTransferRequest(addr&0x0c, true), 0)
+	_, err := dp.conn.transfer(ctx, apTransferRequest(addr&0x0c, true), 0)
 	if err != nil {
 		possible := !requestWasRejected(err) && !requestWasNotSent(err) && !errors.Is(err, swd.ErrFault)
 		return possible, 0, fmt.Errorf("dap: post raw AP read at %#02x: %w", addr, err)
@@ -156,7 +156,7 @@ func (dp *DebugPort) writeAPEffect(ctx context.Context, sel APSel, addr uint8, v
 	if err := dp.selectAP(ctx, sel, addr); err != nil {
 		return false, err
 	}
-	_, err := dp.transfer(ctx, apTransferRequest(addr&0x0c, false), value)
+	_, err := dp.conn.transfer(ctx, apTransferRequest(addr&0x0c, false), value)
 	if err != nil {
 		possible := !requestWasRejected(err) && !requestWasNotSent(err) && !errors.Is(err, swd.ErrFault)
 		return possible, fmt.Errorf("dap: write raw AP register at %#02x: %w", addr, err)

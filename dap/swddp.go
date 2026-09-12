@@ -76,7 +76,9 @@ func NewDebugPort(conn *swd.Conn, options ...Option) *DebugPort {
 			option.apply(&config)
 		}
 	}
-	return &DebugPort{conn: newSWDExecutor(conn), maxWaits: config.maxWaits, cleanupTimeout: config.cleanupTimeout}
+	dp := &DebugPort{maxWaits: config.maxWaits, cleanupTimeout: config.cleanupTimeout}
+	dp.conn = newSWDExecutor(conn, dp)
+	return dp
 }
 
 func (dp *DebugPort) cleanupContext() (context.Context, context.CancelFunc) {
@@ -131,9 +133,9 @@ func (dp *DebugPort) readDPRegister(ctx context.Context, reg DPRegister, info dp
 	var value uint32
 	var err error
 	if reg == RDBUFF && dp.state.dpWritePending {
-		value, err = dp.transferDPWriteBarrier(ctx)
+		value, err = dp.conn.transferDPWriteBarrier(ctx)
 	} else {
-		value, err = dp.transfer(ctx, dpTransferRequest(reg, true), 0)
+		value, err = dp.conn.transfer(ctx, dpTransferRequest(reg, true), 0)
 	}
 	if err != nil {
 		return 0, fmt.Errorf("dap: read %s: %w", info.name, err)
@@ -239,7 +241,7 @@ func (dp *DebugPort) writeDP(ctx context.Context, reg DPRegister, value uint32) 
 	if err := dp.prepareDPWrite(ctx, reg, info); err != nil {
 		return err
 	}
-	_, err = dp.transfer(ctx, dpTransferRequest(reg, false), value)
+	_, err = dp.conn.transfer(ctx, dpTransferRequest(reg, false), value)
 	if err != nil {
 		return fmt.Errorf("dap: write %s: %w", info.name, err)
 	}
