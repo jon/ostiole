@@ -24,14 +24,14 @@ type Chain struct {
 
 // NewChain copies an explicit layout without traffic. Connect performs validation.
 func NewChain(conn *Conn, layout Layout) (*Chain, error) {
-	if conn == nil || len(layout) == 0 || len(layout) > 1024 {
-		return nil, errors.New("jtag: connection and bounded nonempty layout required")
+	if conn == nil {
+		return nil, errors.New("jtag: connection required")
+	}
+	if err := layout.Validate(); err != nil {
+		return nil, err
 	}
 	c := &Chain{conn: conn, layout: append(Layout(nil), layout...), selected: -1}
 	for _, spec := range c.layout {
-		if spec.ir < 2 || spec.ir > 64 {
-			return nil, errors.New("jtag: invalid TAP specification")
-		}
 		c.irBits += spec.ir
 	}
 	return c, nil

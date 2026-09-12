@@ -37,3 +37,17 @@ func (s TAPSpec) ResetRegister() ObservedTAP { return s.reset }
 // Matching reset registers and IR captures validates a supplied layout; it
 // cannot prove a physical identity for bypass entries or infer IR boundaries.
 type Layout []TAPSpec
+
+// Validate checks that the layout contains 1..1024 valid TAP specifications.
+// It sends no traffic and does not compare the layout with a physical chain.
+func (l Layout) Validate() error {
+	if len(l) == 0 || len(l) > 1024 {
+		return errors.New("jtag: bounded nonempty layout required")
+	}
+	for _, spec := range l {
+		if spec.ir < 2 || spec.ir > 64 {
+			return errors.New("jtag: invalid TAP specification")
+		}
+	}
+	return nil
+}
