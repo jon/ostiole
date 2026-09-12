@@ -48,7 +48,7 @@ func (r *txnResult) resolve(value uint32, err error) {
 	}
 	r.resolved = true
 	r.value = value
-	r.err = classifyPortError(err)
+	r.err = err
 }
 
 type txnOpKind uint8
@@ -64,16 +64,18 @@ const (
 )
 
 type txnOp struct {
-	kind       txnOpKind
-	dpReg      DPRegister
-	apSel      APSel
-	apAddr     uint8
-	data       uint32
-	values     []uint32
-	preserveAP bool
-	result     *txnResult
-	err        error
-	accepted   int
+	kind           txnOpKind
+	dpReg          DPRegister
+	apSel          APSel
+	apAddr         uint8
+	data           uint32
+	values         []uint32
+	preserveAP     bool
+	result         *txnResult
+	err            error
+	accepted       int
+	confirmed      int
+	uncertainWrite bool
 }
 
 // Txn queues an ordered, single-use sequence of ADIv5 DP and AP operations.
@@ -188,11 +190,7 @@ func (t *Txn) Commit(ctx context.Context) error {
 		t.resolveInvalid()
 		return err
 	}
-	if err := t.dp.settlePreviousDPWrite(ctx); err != nil {
-		t.resolveSuffix(0)
-		return err
-	}
-	return classifyPortError(t.execute(ctx, newTxnPlanner(t.dp).plan(t.ops)))
+	return t.dp.conn.executeTxn(ctx, t)
 }
 
 func (dp *DebugPort) settlePreviousDPWrite(ctx context.Context) error {
@@ -247,7 +245,7 @@ func (t *Txn) checkAccess() error {
 	return nil
 }
 
-func (t *Txn) executionError(step txnStep, err error) error {
+func (t *swdTxn) executionError(step txnStep, err error) error {
 	writeBarrier := step.settlesDPWrite || step.completesWrite
 	if writeBarrier && errors.Is(err, swd.ErrParity) {
 		return err
@@ -290,17 +288,17 @@ type txnStep struct {
 	invalidatesAP    bool
 }
 
-type txnPlanner struct {
+type swdTxnPlanner struct {
 	selectDP      selectState
 	selectPending bool
 	steps         []txnStep
 }
 
-func newTxnPlanner(dp *DebugPort) *txnPlanner {
-	return &txnPlanner{selectDP: dp.state.selectDP, selectPending: dp.state.selectPending}
+func newSWDTxnPlanner(dp *DebugPort) *swdTxnPlanner {
+	return &swdTxnPlanner{selectDP: dp.state.selectDP, selectPending: dp.state.selectPending}
 }
 
-func (p *txnPlanner) plan(ops []txnOp) []txnStep {
+func (p *swdTxnPlanner) plan(ops []txnOp) []txnStep {
 	for i := 0; i < len(ops); {
 		if ops[i].kind != txnReadAPSequential {
 			p.lower(i, ops[i])
@@ -321,7 +319,7 @@ func sameSequentialAP(first, next txnOp) bool {
 	return next.kind == txnReadAPSequential && first.apSel == next.apSel && first.apAddr == next.apAddr
 }
 
-func (p *txnPlanner) lower(index int, op txnOp) {
+func (p *swdTxnPlanner) lower(index int, op txnOp) {
 	switch op.kind {
 	case txnReadDP, txnWriteDP:
 		p.lowerDP(index, op)
@@ -332,7 +330,7 @@ func (p *txnPlanner) lower(index int, op txnOp) {
 	}
 }
 
-func (p *txnPlanner) lowerSequentialAP(start int, ops []txnOp) {
+func (p *swdTxnPlanner) lowerSequentialAP(start int, ops []txnOp) {
 	selection, _ := ops[0].apSel.Value()
 	value := uint32(selection)<<24 | uint32(ops[0].apAddr&0xf0)
 	p.selectValue(start, value)
@@ -350,7 +348,7 @@ func (p *txnPlanner) lowerSequentialAP(start int, ops []txnOp) {
 	p.steps = append(p.steps, txnStep{req: dpTransferRequest(RDBUFF, true), dpReg: RDBUFF, op: start + len(ops) - 1, deliver: true, deliverValue: true, operationStarted: true, apRead: true})
 }
 
-func (p *txnPlanner) lowerAPWriteSequence(index int, op txnOp) {
+func (p *swdTxnPlanner) lowerAPWriteSequence(index int, op txnOp) {
 	selection, _ := op.apSel.Value()
 	value := uint32(selection)<<24 | uint32(op.apAddr&0xf0)
 	p.selectValue(index, value)
@@ -376,7 +374,7 @@ func (p *txnPlanner) lowerAPWriteSequence(index int, op txnOp) {
 	})
 }
 
-func (p *txnPlanner) lowerDP(index int, op txnOp) {
+func (p *swdTxnPlanner) lowerDP(index int, op txnOp) {
 	info, _ := describeDPRegister(op.dpReg)
 	if !info.bankIndependent {
 		p.selectBank(index, info.bank)
@@ -422,7 +420,7 @@ func txnDPRequest(op txnOp, info dpRegisterInfo) transferRequest {
 	return transferRequest{Read: op.kind == txnReadDP, Addr: info.offset}
 }
 
-func (p *txnPlanner) lowerAP(index int, op txnOp) {
+func (p *swdTxnPlanner) lowerAP(index int, op txnOp) {
 	addr := op.apAddr
 	selection, _ := op.apSel.Value()
 	value := uint32(selection)<<24 | uint32(addr&0xf0)
@@ -453,7 +451,7 @@ func (p *txnPlanner) lowerAP(index int, op txnOp) {
 	})
 }
 
-func (p *txnPlanner) selectBank(index int, bank uint8) {
+func (p *swdTxnPlanner) selectBank(index int, bank uint8) {
 	value := uint32(bank)
 	if p.selectDP.valid {
 		value |= p.selectDP.value &^ 0x0f
@@ -462,7 +460,7 @@ func (p *txnPlanner) selectBank(index int, bank uint8) {
 	p.settleSELECT(index)
 }
 
-func (p *txnPlanner) selectValue(index int, value uint32) {
+func (p *swdTxnPlanner) selectValue(index int, value uint32) {
 	if p.selectDP.valid && p.selectDP.value == value {
 		return
 	}
@@ -476,7 +474,7 @@ func (p *txnPlanner) selectValue(index int, value uint32) {
 	p.selectPending = true
 }
 
-func (p *txnPlanner) settleSELECT(index int) {
+func (p *swdTxnPlanner) settleSELECT(index int) {
 	if !p.selectPending {
 		return
 	}
@@ -494,7 +492,7 @@ func settlesSELECT(req transferRequest) bool {
 	return req.Addr != dpRegisterOffset(ABORT) && req.Addr != dpRegisterOffset(SELECT)
 }
 
-func (t *Txn) execute(ctx context.Context, steps []txnStep) error {
+func (t *swdTxn) execute(ctx context.Context, steps []txnStep) error {
 	waits := make([]int, len(steps))
 	for cursor := 0; cursor < len(steps); {
 		end := nextBatchBoundary(steps, cursor)
@@ -528,7 +526,7 @@ func txnResponseBoundary(step txnStep) bool {
 	return step.dpReg == DPIDR || step.dpReg == CTRLSTAT || step.dpReg == ABORT
 }
 
-func (t *Txn) transferSteps(ctx context.Context, steps []txnStep) ([]transferResult, error) {
+func (t *swdTxn) transferSteps(ctx context.Context, steps []txnStep) ([]transferResult, error) {
 	return t.dp.conn.transferSteps(ctx, steps)
 }
 
@@ -541,14 +539,14 @@ func firstFailedTransfer(results []transferResult) int {
 	return len(results)
 }
 
-func (t *Txn) acceptBatchPrefix(steps []txnStep, results []transferResult, count int) {
+func (t *swdTxn) acceptBatchPrefix(steps []txnStep, results []transferResult, count int) {
 	for i := range count {
 		value, _ := results[i].value()
 		t.acceptStep(steps[i], value)
 	}
 }
 
-func (t *Txn) handleBatchFailure(ctx context.Context, steps []txnStep, results []transferResult, batchErr error, waits *int) error {
+func (t *swdTxn) handleBatchFailure(ctx context.Context, steps []txnStep, results []transferResult, batchErr error, waits *int) error {
 	err := results[0].err()
 	if errors.Is(err, swd.ErrIndeterminate) {
 		return t.failBatchTransport(steps, results, batchErr)
@@ -583,14 +581,14 @@ func (t *Txn) handleBatchFailure(ctx context.Context, steps []txnStep, results [
 	return t.failClockedSuffix(steps[:clockedTransferCount(results)], errors.Join(err, batchErr))
 }
 
-func (t *Txn) handleBatchNotExecuted(step txnStep, batchErr error, waits int) error {
+func (t *swdTxn) handleBatchNotExecuted(step txnStep, batchErr error, waits int) error {
 	if waits > 0 {
 		return t.failStep(step, t.dp.conn.finishWait(batchErr, stepMayAffectAP(step)))
 	}
 	return t.failStep(step, batchErr)
 }
 
-func (t *Txn) failBatchWAITCleanup(steps []txnStep, results []transferResult, err error) error {
+func (t *swdTxn) failBatchWAITCleanup(steps []txnStep, results []transferResult, err error) error {
 	if !batchSuffixAbandoned(results) {
 		return t.failUnexpectedBatchSuffix(steps[:clockedTransferCount(results)], err)
 	}
@@ -602,7 +600,7 @@ func (t *Txn) failBatchWAITCleanup(steps []txnStep, results []transferResult, er
 	return err
 }
 
-func (t *Txn) retryBatchWAIT(ctx context.Context, steps []txnStep, results []transferResult, waits *int) error {
+func (t *swdTxn) retryBatchWAIT(ctx context.Context, steps []txnStep, results []transferResult, waits *int) error {
 	if !batchSuffixAbandoned(results) {
 		return t.failUnexpectedBatchSuffix(steps[:clockedTransferCount(results)], swd.ErrWait)
 	}
@@ -647,7 +645,7 @@ func clockedTransferCount(results []transferResult) int {
 	return len(results)
 }
 
-func (t *Txn) failUnexpectedBatchSuffix(steps []txnStep, ackErr error) error {
+func (t *swdTxn) failUnexpectedBatchSuffix(steps []txnStep, ackErr error) error {
 	cause := errors.Join(ackErr, ErrIndeterminate, errors.New("dap: a request after WAIT or FAULT was not abandoned"))
 	t.dp.state.loseFraming()
 	t.resolveIndeterminateSteps(steps, cause)
@@ -655,7 +653,7 @@ func (t *Txn) failUnexpectedBatchSuffix(steps []txnStep, ackErr error) error {
 	return cause
 }
 
-func (t *Txn) failBatchTransport(steps []txnStep, results []transferResult, batchErr error) error {
+func (t *swdTxn) failBatchTransport(steps []txnStep, results []transferResult, batchErr error) error {
 	primary := errors.Join(batchErr, ErrIndeterminate)
 	t.dp.state.loseFraming()
 	lastOp := steps[0].op
@@ -674,7 +672,7 @@ func (t *Txn) failBatchTransport(steps []txnStep, results []transferResult, batc
 	return primary
 }
 
-func (t *Txn) failClockedSuffix(steps []txnStep, err error) error {
+func (t *swdTxn) failClockedSuffix(steps []txnStep, err error) error {
 	primary := errors.Join(err, ErrIndeterminate)
 	t.dp.state.loseFraming()
 	t.resolveIndeterminateSteps(steps, primary)
@@ -682,7 +680,7 @@ func (t *Txn) failClockedSuffix(steps []txnStep, err error) error {
 	return primary
 }
 
-func (t *Txn) failCompletedBatchBarrier(steps []txnStep, err error) error {
+func (t *swdTxn) failCompletedBatchBarrier(steps []txnStep, err error) error {
 	step := steps[0]
 	err = t.executionError(step, err)
 	t.applyFailedStepEffect(step, err)
@@ -703,13 +701,13 @@ func (t *Txn) failCompletedBatchBarrier(steps []txnStep, err error) error {
 	return primary
 }
 
-func (t *Txn) resolveIndeterminateSteps(steps []txnStep, err error) {
+func (t *swdTxn) resolveIndeterminateSteps(steps []txnStep, err error) {
 	for i := range steps {
 		t.ops[steps[i].op].result.resolve(0, err)
 	}
 }
 
-func (t *Txn) acceptStep(step txnStep, value uint32) {
+func (t *swdTxn) acceptStep(step txnStep, value uint32) {
 	t.observeStep(step, value, nil)
 	if step.acceptWrite {
 		t.ops[step.op].accepted++
@@ -736,7 +734,7 @@ func (t *Txn) acceptStep(step txnStep, value uint32) {
 	t.ops[step.op].result.resolve(value, nil)
 }
 
-func (t *Txn) observeStep(step txnStep, value uint32, err error) {
+func (t *swdTxn) observeStep(step txnStep, value uint32, err error) {
 	t.dp.conn.resolveSELECT(step.req, value, err)
 	if step.settlesDPWrite && (err == nil || errors.Is(err, swd.ErrParity) || faultHasValidState(err)) {
 		t.dp.state.settleDPWrite()
@@ -749,7 +747,7 @@ func stepMayAffectAP(step txnStep) bool {
 	return step.req.AP || step.operationStarted && !step.settlesDPWrite
 }
 
-func (t *Txn) failStep(step txnStep, err error) error {
+func (t *swdTxn) failStep(step txnStep, err error) error {
 	err = t.executionError(step, err)
 	t.applyFailedStepEffect(step, err)
 	t.ops[step.op].result.resolve(0, err)
@@ -757,7 +755,7 @@ func (t *Txn) failStep(step txnStep, err error) error {
 	return err
 }
 
-func (t *Txn) applyFailedStepEffect(step txnStep, err error) {
+func (t *swdTxn) applyFailedStepEffect(step txnStep, err error) {
 	if (!step.invalidatesAP && !step.apRead && !step.apWrite) || t.dp.state.response == responseLost {
 		return
 	}

@@ -5,8 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-
-	"github.com/jon/ostiole/swd"
 )
 
 const tarAutoIncrementWindow = uint64(0x400)
@@ -74,8 +72,8 @@ func validateBlockRange(addr uint64, length int, largeAddress bool) error {
 }
 
 // ReadBlock reads an arbitrary target-memory range into buf. Like other DAP
-// operations, it retries the same physical request after a clean WAIT until the
-// debug port's configured limit is reached or the operation context ends. If
+// operations, it follows the binding's WAIT policy until the debug port's
+// configured limit is reached or the operation context ends. If
 // selection, framing, or cleanup becomes uncertain, it returns an error and the
 // debug port requires repair. A FAULT returns the contiguous byte prefix
 // definitely obtained before the fault. Cancellation and transport or protocol
@@ -217,14 +215,13 @@ func (m *MemAP) putBlockValue(dst []byte, size TransferSize, value uint64) {
 }
 
 // WriteBlock writes an arbitrary target-memory range from buf. It returns the
-// contiguous byte prefix whose RDBUFF completion requests were accepted. If
+// contiguous byte prefix whose writes have confirmed completion. If
 // the current chunk might have reached memory, the error wraps ErrIndeterminate
 // and WriteBlock does not retry that chunk. An indeterminate chunk invalidates
 // the MemAP; Release remains available to restore its saved state. WriteBlock
-// retries the same physical request after a clean WAIT until the operation
-// context ends or the debug port's configured limit is reached. It never
-// replays an accepted write; if the RDBUFF completion request returns WAIT, it
-// retries only that request. If the MEM-AP does not accept single address
+// follows the binding's WAIT policy until the operation context ends or the
+// debug port's configured limit is reached. It never replays an accepted
+// write while waiting for completion. If the MEM-AP does not accept single address
 // increment, WriteBlock writes TAR before each word.
 func (m *MemAP) WriteBlock(ctx context.Context, addr uint64, buf []byte) (int, error) {
 	if len(buf) == 0 {
@@ -326,14 +323,14 @@ func (m *MemAP) writeBlockValues(ctx context.Context, addr uint64, values []uint
 	if err == nil {
 		return len(values), nil
 	}
-	accepted := writeTxn.ops[0].accepted
-	if accepted == len(values) && errors.Is(err, swd.ErrParity) && !errors.Is(err, ErrIndeterminate) {
+	confirmed := writeTxn.ops[0].confirmed
+	if confirmed == len(values) {
 		return len(values), err
 	}
-	if accepted > 0 && (len(values) != 1 || !faultReportsWriteDataError(err)) {
+	if writeTxn.ops[0].uncertainWrite {
 		err = m.markBlockWriteIndeterminate(err, generation)
 	}
-	return 0, err
+	return confirmed, err
 }
 
 func (m *MemAP) writeBlockRegister(ctx context.Context, addr uint8, value uint32) error {
