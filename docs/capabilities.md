@@ -59,6 +59,11 @@ wire; failed activation attempts cleanup and retains failed cleanup for
 `Probe.Close` to retry. The owner imports no concrete driver or transport.
 It does not own SWD transactions, DAP, or MEM-AP state.
 
+`Probe.JTAG` similarly lends packed JTAG clocks. Only one protocol can be
+activated per owner. Close invalidates either borrowed surface, including
+when cleanup must be retried. Unsupported protocols fail before activation.
+JTAG TAP and chain state belong to `jtag`.
+
 FTDI, J-Link, and CMSIS-DAP expose exact-attachment `OpenProbe` entry points.
 These acquire USB without adapter or target traffic; requesting SWD opens
 the concrete session. FTDI also requires one explicit supported MPSSE port.

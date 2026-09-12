@@ -47,6 +47,7 @@ type Probe struct {
 	info    Info
 	backend Backend
 	wire    Wire
+	jtag    JTAGWire
 	closing bool
 }
 
@@ -73,6 +74,7 @@ func (p *Probe) Close() error {
 	}
 	p.closing = true
 	p.wire = nil
+	p.jtag = nil
 	if p.backend == nil {
 		return nil
 	}
@@ -86,31 +88,45 @@ func (p *Probe) Close() error {
 // SWD configures and lends a wire. Failed activation attempts cleanup and
 // leaves Close available for retry. Reconfiguration requires a fresh owner.
 func (p *Probe) SWD(ctx context.Context, config SWDConfig) (SWD, error) {
-	if ctx == nil {
-		return SWD{}, errors.New("probe: nil context")
-	}
-	if err := ctx.Err(); err != nil {
+	if err := p.canActivate(ctx, config.MaxClockHz); err != nil {
 		return SWD{}, err
-	}
-	if config.MaxClockHz < 1000 {
-		return SWD{}, errors.New("probe: clock ceiling must be at least 1 kHz")
-	}
-	if p == nil || p.backend == nil || p.closing || p.wire != nil {
-		return SWD{}, errors.New("probe: owner is not available for activation")
 	}
 	b, ok := p.backend.(SWDBackend)
 	if !ok {
 		return SWD{}, ErrUnsupportedSWD
 	}
 	wire, err := b.SWD(ctx, config)
-	if err == nil && wire == nil {
-		err = errors.New("probe: backend returned no wire")
-	}
-	if err != nil {
-		return SWD{}, errors.Join(err, p.Close())
+	if err := p.activationError(wire != nil, err); err != nil {
+		return SWD{}, err
 	}
 	p.wire = wire
 	return SWD{probe: p}, nil
+}
+
+func (p *Probe) canActivate(ctx context.Context, hz uint32) error {
+	if ctx == nil {
+		return errors.New("probe: nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if hz < 1000 {
+		return errors.New("probe: clock ceiling must be at least 1 kHz")
+	}
+	if p == nil || p.backend == nil || p.closing || p.wire != nil || p.jtag != nil {
+		return errors.New("probe: owner is not available for activation")
+	}
+	return nil
+}
+
+func (p *Probe) activationError(hasWire bool, err error) error {
+	if err == nil && !hasWire {
+		err = errors.New("probe: backend returned no wire")
+	}
+	if err != nil {
+		return errors.Join(err, p.Close())
+	}
+	return nil
 }
 
 // SWD is a borrowed wire. Its Probe must outlive every call on it.
