@@ -54,6 +54,10 @@ the caller must account for that effect when inspecting an unknown chain.
 
 ## Explicit layouts
 
+`layout.Validate()` checks a `jtag.Layout` before opening a probe. It rejects
+empty, oversized, or invalid specifications without traffic; only
+`Chain.Connect` compares the expected layout with the physical chain.
+
 `NewChain(conn, layout)` copies a nonempty layout in scan-out order (nearest
 TDO first). Build each entry with `IDCODE(irBits, id)` or `Bypass(irBits)`;
 the zero specification is invalid. IR lengths must be 2 through 64 bits.

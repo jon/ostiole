@@ -50,6 +50,22 @@ func TestLayoutValidation(t *testing.T) {
 	}
 }
 
+func TestLayoutPreflight(t *testing.T) {
+	good, _ := IDCODE(4, 0x5ba00477)
+	for _, layout := range []Layout{nil, {}, {{}}, make(Layout, 1025)} {
+		if err := layout.Validate(); err == nil {
+			t.Fatal("invalid layout passed preflight")
+		}
+	}
+	if err := (Layout{good}).Validate(); err != nil {
+		t.Fatal(err)
+	}
+	w, _, chain := benchChain(t)
+	if err := chain.Layout().Validate(); err != nil || w.calls != 0 {
+		t.Fatalf("layout preflight: %v, calls=%d", err, w.calls)
+	}
+}
+
 func TestIRLengthMustMatchExactly(t *testing.T) {
 	w, conn, _ := benchChain(t)
 	a, _ := IDCODE(4, 0x5ba00477)
