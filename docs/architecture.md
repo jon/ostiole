@@ -230,6 +230,10 @@ writes and uncertain effects without making MEM-AP interpret SWD errors.
 After interpreting SWD responses, the executor adds DAP error classifications
 to completed operations and individual transaction results while retaining
 their original causes.
+
+Connection setup validates the context and options before protocol entry.
+Power acquisition starts only after entry establishes the identity and
+control state; failed setup and ordinary release use the same link cleanup.
 `NewAPSel` constructs an AP selector whose zero value is invalid.
 `APSel.Address` combines it with a
 complete eight-bit register address; the resulting `APAddress` also has an
