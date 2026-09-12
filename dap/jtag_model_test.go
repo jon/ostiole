@@ -53,6 +53,7 @@ type jtagDPModel struct {
 	complete         func(jtagRequest) uint32
 	onAccept         func(jtagRequest)
 	onWait           func()
+	onAbort          func()
 	ignoreControl    bool
 	stuckSticky      bool
 	forcedACK        *byte
@@ -84,6 +85,9 @@ func (m *jtagDPModel) update(instruction uint64, value uint64) {
 	if instruction&0xf == 8 {
 		if value != 8 {
 			panic("non-baseline ABORT")
+		}
+		if m.onAbort != nil {
+			m.onAbort()
 		}
 		m.aborts++
 		m.ctrl &^= 0xfff << 12

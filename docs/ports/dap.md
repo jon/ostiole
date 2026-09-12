@@ -1,7 +1,7 @@
 # Arm Debug Access Port
 
 The Debug Access Port (DAP) is the register fabric behind an Arm debug port.
-SWD supplies an AP/DP selector, two address bits, and a read/write bit;
+SWD and JTAG-DP supply an AP/DP selector, two address bits, and a read/write bit;
 `SELECT` turns that small window into DP register banks and a set of Access
 Ports (APs). The surprising parts are the posted AP pipeline, power
 handshakes, and the amount of state a supposedly read-only memory inspection
@@ -14,10 +14,69 @@ model and requirements. This note keeps only the traps worth having close at
 hand and the hardware observations below. “DAP” here means Arm Debug Access
 Port, not Microsoft's Debug Adapter Protocol.
 
+## Binding a debug port
+
+The wire connection is explicit, but AP selection, transactions, and memory
+access use the same APIs on either link:
+
+```go
+dp := dap.NewDebugPort(dap.SWDP(swdConn), dap.WithMaxWaits(100))
+```
+
+For JTAG, supply the complete expected chain and a zero-based TAP index,
+nearest TDO first:
+
+```go
+arm, err := jtag.IDCODE(4, 0x5ba00477)
+if err != nil {
+    return err
+}
+xilinx, err := jtag.IDCODE(12, 0x14730093)
+if err != nil {
+    return err
+}
+chain, err := jtag.NewChain(jtag.New(wire), jtag.Layout{arm, xilinx})
+if err != nil {
+    return err
+}
+dp := dap.NewDebugPort(dap.JTAGDP(chain, 0), dap.WithMaxWaits(100))
+```
+
+These constructors send no traffic. The zero `dap.Port` is invalid, and
+`Connect` rejects nil connections, bad indices, and unsupported instruction
+widths before touching hardware. JTAG-DP supports architectural four- and
+eight-bit instructions. The binding validates the exact complete layout;
+it does not discover IR boundaries or activate board-specific chain routing.
+
+Give `dp` exclusive use of the supplied SWD connection or JTAG chain until
+`Release` succeeds. `Connect` enters the protocol and acquires missing power
+requests; it does not open the probe. Either binding supports the same AP and
+memory composition. This helper borrows the caller's `dp`, leaving it reachable
+after an error, and returns the acquired MEM-AP:
+
+```go
+func connectMEMAP(ctx context.Context, dp *dap.DebugPort, ap dap.APSel) (*dap.MemAP, error) {
+    if _, err := dp.Connect(ctx); err != nil {
+        return nil, err
+    }
+    return dap.OpenMemAP(ctx, dp, ap)
+}
+```
+
+Pass an explicit selector such as `dap.NewAPSel(1)`. The caller retains `dp`
+and the probe on every return path, and takes responsibility for a returned
+MEM-AP. After use or an error, release the MEM-AP if one was returned, then
+release `dp`, then close the probe. Stop at the first cleanup failure and keep
+that owner and its dependencies for retry. Each cleanup attempt needs a fresh,
+independent, bounded context. A failed restoration can be retried without
+repeating successful restoration steps. `armdebug` remains SWD-only; the JTAG
+path composes these owners explicitly.
+
 ## Connection identity
 
 `DebugPort.Connect` returns a `dap.Identity`. Its accessors report whether
-the corresponding identification register is present:
+the corresponding identification register is present. With `dp` retained by
+the caller as above:
 
 ```go
 identity, err := dp.Connect(ctx)
@@ -27,9 +86,10 @@ if err != nil {
 dpidr, present := identity.DPIDR()
 ```
 
-The current SW-DP path supplies DPIDR; `IDCODE()` reports absence rather than
-reinterpreting that value as a JTAG TAP identifier. The zero identity contains
-neither register. `DebugPort.Identity()` retains the last successful identity
+The SW-DP path supplies DPIDR; the JTAG-DP path supplies IDCODE. Each accessor
+reports absence on the other binding rather than reinterpreting its encoding.
+The zero identity contains neither register. `DebugPort.Identity()` retains
+the last successful identity
 after release or a cleanup failure. Release acquired MEM-APs before releasing
 the debug port, and keep the wire connection and probe open until that cleanup
 succeeds.
@@ -42,50 +102,58 @@ If cancellation stops WAIT retries, the result remains a context error.
 Independently joined cleanup failures remain visible.
 
 `dap.WithCleanupTimeout(3 * time.Second)` gives each independent recovery
-attempt three seconds instead of SWD's default one second. Recovery does not
-reuse a canceled operation context. The option does not change the deadline
+attempt three seconds. The defaults are one second for SWD and thirty seconds
+for JTAG. Full JTAG chain validation alone exceeds one second at 100 kHz;
+allow more time at slower clocks. Recovery does not reuse a canceled operation
+context. The option does not change the deadline
 for ordinary operations, and `Connect` rejects nonpositive durations before
 sending traffic.
 
-## Explicit port bindings
+## Baseline JTAG-DP
 
-Wrap an SWD connection in `dap.SWDP(swdConn)` before passing it to
-`dap.NewDebugPort`. For baseline JTAG-DP, supply an explicit chain and its
-zero-based, TDO-first TAP index:
+`dap.JTAGDP` implements the original ADIv5 JTAG-DP register set: IDCODE,
+CTRL/STAT, SELECT, RDBUFF, ABORT, and AP access. `dap.IDCODE` is a distinct
+read-only logical register. SELECT is readable on JTAG-DP; DPIDR, RESEND, and
+banked DP registers are unavailable. ABORT accepts only the architectural
+DAPABORT value, `1`. Later JTAG-DP versions and version detection are not
+implemented, and IDCODE is not decoded as DPIDR.
 
-```go
-dp := dap.NewDebugPort(dap.JTAGDP(chain, 0), dap.WithMaxWaits(100))
-identity, err := dp.Connect(ctx)
-if err != nil {
-    return err // Connect attempts cleanup; retain dp for any required retry.
-}
-idcode, present := identity.IDCODE()
-```
+The private JTAG executor uses 35-bit DPACC/APACC scans. Each capture belongs
+to the preceding accepted request. A WAIT discards the newly shifted request;
+completion polling therefore does not resend the accepted operation. RDBUFF
+scans drain responses, while a logical JTAG RDBUFF read returns that register's
+own zero value. Other TAPs remain in BYPASS, and the generic JTAG layer splits
+scans at the wire's transfer limit.
 
-Both constructors send no traffic. JTAG accepts four- and eight-bit instruction
-registers and validates the exact chain during Connect. Its identity supplies
-only IDCODE, while SWD supplies only DPIDR. Keep the chain exclusive to the
-debug port until `dp.Release(cleanupCtx)` succeeds, using an independent
-bounded context and retaining the owner after failure. Release returns the
-chain to BYPASS/Idle; only then close the caller-owned probe.
+JTAG's acknowledgement combines OK and FAULT. After each AP operation, the
+executor reads CTRL/STAT before reporting success or issuing another AP
+operation. On a sticky fault, the executor clears and checks the sticky state,
+then returns `FaultError` without replaying the operation. If clearing or
+checking fails, `Release` retries it before releasing the chain, even when the
+port inherited all power requests. An uncertain write, including immediate
+`WriteRawAP`, also reports `ErrIndeterminate` and invalidates existing MEM-AP
+handles; restoration remains available. JTAG transactions execute one logical
+operation at a time.
+SWD retains its packed physical
+requests and confirmed-prefix behavior. Both paths leave the unsent transaction
+suffix unexecuted after a failure; MEM-AP does not interpret either wire protocol.
 
-Baseline JTAG supports IDCODE, CTRL/STAT, readable SELECT, RDBUFF, and ABORT.
-It rejects DPIDR and banked registers. ABORT accepts only DAPABORT value `1`.
-AP, transaction, and MEM-AP access require SWD. Each JTAG scan captures the
-preceding accepted request; WAIT polling never resends an accepted operation.
 Connection setup primes the pipeline, establishes SELECT zero, clears sticky
-status, and acquires only power requests not already asserted. It temporarily
-disables inherited ORUNDETECT and rejects active pushed-operation or
-transaction-counter modes. Release restores acquired power and control state.
-If sticky-state clearing or verification fails during setup, Release retains
-that obligation and confirms the clear before releasing the chain. A failed
-attempt remains retryable, including when all power requests were inherited.
+status, and temporarily disables inherited ORUNDETECT. Release restores that
+setting. Active pushed-operation or transaction-counter modes are rejected,
+and owned CTRL/STAT writes cannot enable them. A pending AP operation that
+exhausts its WAIT bound requires ABORT and invalidates AP-derived state; its
+error is indeterminate, not “not executed.” Cancellation remains the primary
+operation error, and recovery uses the independent cleanup budget.
+Abort recovery also checks and clears sticky status left by an operation
+finishing during the abort. A failed check blocks further AP access and chain
+release until cleanup succeeds.
 
-After scan-state loss, cleanup revalidates the exact chain and reacquires its
-TAP before restoring state. Changed identity stops restoration. A poisoned
-adapter may prevent cleanup; it is never reopened automatically. JTAG uses a
-thirty-second independent recovery budget, configurable with
-`dap.WithCleanupTimeout`; SWD retains its one-second default.
+After scan-state loss, cleanup revalidates the exact chain and reacquires the
+selected TAP before restoring AP or DAP state. If the identity has changed,
+cleanup stops before restoration. Keep the debug port and its probe available
+for cleanup. A poisoned adapter may prevent cleanup; the library reports that
+limitation and never reopens it automatically.
 
 ## The SW-DP register window
 

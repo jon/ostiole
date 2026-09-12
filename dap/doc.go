@@ -1,31 +1,22 @@
 // Package dap manages an Arm Debug Access Port over SWD or baseline ADIv5 JTAG-DP.
 //
-// Construct a Port with SWDP or JTAGDP and pass it to NewDebugPort. Construction
-// sends no traffic; Connect validates the binding and enters the protocol.
-// JTAG requires an explicit chain and zero-based, TDO-first TAP index with a
-// four- or eight-bit IR. It supports IDCODE, CTRL/STAT, SELECT, RDBUFF, and ABORT;
-// AP, transaction, and MEM-AP access require SWD. JTAG temporarily disables
-// inherited ORUNDETECT, rejects pushed operations and transaction counting,
-// and restores its changes during Release before returning the chain to BYPASS.
-// JTAG recovery revalidates the exact chain before restoration; its default
-// independent cleanup budget is thirty seconds, configurable with
-// WithCleanupTimeout. The debug port never closes the probe.
-//
-// For SWD access:
-//
-// A DebugPort enters SWD and acquires volatile debug-port state with Connect.
+// Construct a Port with SWDP or JTAGDP and pass it to NewDebugPort. These
+// constructors send no traffic; Connect validates the binding, enters the
+// protocol, and acquires volatile debug-port state. JTAG requires a complete
+// explicit chain and zero-based, TDO-first TAP index with a four- or eight-bit IR.
 // OpenMemAP validates one access port and snapshots the register values it will
 // change. Release them in reverse order: the MemAP first, then the DebugPort.
 //
-// DP, AP, transaction, and MEM-AP operations retry a clean WAIT on the same
-// physical request until their configured limit is reached or their context
-// ends. NewDebugPort uses only the context unless WithMaxWaits supplies a
-// response-count limit. SetMaxWaits can change that limit while the port is
-// idle. If the context ends, errors.Is reports the context error and the
-// original WAIT is not retained as swd.ErrWait; an independently joined
+// SWD retries a clean WAIT on the rejected physical request; JTAG polls the
+// preceding accepted request without replay. Both stop at the configured WAIT
+// limit or when the context ends. NewDebugPort uses only the context unless
+// WithMaxWaits supplies a response-count limit. SetMaxWaits can change it
+// while the port is idle. If the context ends, errors.Is reports its error;
+// the original WAIT is not retained as ErrWait. An independently joined
 // cleanup failure remains visible. A FAULT ends the operation. An accepted
 // write is not replayed; if its RDBUFF completion request returns WAIT, only
-// that request is retried.
+// that completion is polled. Identity distinguishes a decoded DPIDR on SWD
+// from a raw IDCODE on JTAG; neither accessor fabricates the other.
 //
 // MemAP.ReadScalar and MemAP.WriteScalar perform aligned scalar target-memory
 // accesses; MemAP.ReadBlock and MemAP.WriteBlock accept arbitrary byte ranges.
@@ -37,14 +28,17 @@
 // and DebugPort before reconnecting.
 //
 // DebugPort and MemAP values are not safe for concurrent use. Serialize calls
-// that share either value or the underlying swd.Conn. A DebugPort requires
-// exclusive use of that SWD transaction stream until it is no longer used;
+// that share either value or the underlying SWD connection or JTAG chain.
+// A DebugPort requires exclusive use until Release succeeds;
 // direct transfers can invalidate its cached register selection and response
 // state.
 //
 // ReadDP and WriteDP accept logical ADIv5 register names. They distinguish
-// operations which share a physical SWD offset, enforce direction, and manage
-// DPBANKSEL without exposing a current-bank operation.
+// operations which share a physical offset and enforce direction and availability.
+// SWD manages DPBANKSEL without exposing a current-bank operation. Baseline
+// JTAG supports readable SELECT, rejects banked registers and DPIDR, and accepts
+// only the architectural DAPABORT value for ABORT. Later JTAG-DP versions and
+// version detection are not implemented.
 //
 // NewAPSel constructs an access-port selector; the zero APSel is invalid.
 // APSel.Address combines a selector with a complete eight-bit ADIv5 AP address;
@@ -61,25 +55,32 @@
 // Public DP, AP, transaction, and MEM-AP operations require a successful
 // Connect. The underlying SWD connection establishes the simple or fixed
 // response grammar, tries to enable ORUNDETECT, and restores that change during
-// Release. DAP operations must preserve that bit.
+// Release. JTAG temporarily disables inherited ORUNDETECT and restores it on
+// release. It rejects active pushed-operation and transaction-counter modes.
+// DAP writes must preserve the binding-owned mode.
 //
 // A failed Connect attempts bounded cleanup before returning. If that cleanup
 // also fails, Release remains available but other debug-port and access-port
 // operations fail until cleanup succeeds. A failed Release has the same
-// cleanup-only behavior and may be retried.
+// cleanup-only behavior and may be retried. WithCleanupTimeout configures each
+// independent recovery attempt: one second by default for SWD, thirty for JTAG.
+// JTAG recovery revalidates the exact chain and reacquires the TAP before
+// restoration. The debug port never closes or automatically reopens the probe.
 //
 // A DebugPort does not replay a request which returns FAULT. It reads
 // bank-zero CTRL/STAT when the register selection is known, clears the sticky
 // conditions reported there, verifies the clear, and returns a FaultError. A
-// SELECT write remains provisional until later traffic establishes whether
+// SWD SELECT write remains provisional until later traffic establishes whether
 // its data took effect. Failed FAULT cleanup leaves the port in the same
 // cleanup-only state as a failed release.
 //
 // A Txn queues an ordered group of DP and AP operations. Commit validates the
 // complete queue, settles any earlier immediate DP write, then sends queued
-// traffic through the SWD batch executor. ReadResult.Value reports data from a
-// queued read; WriteResult.Err
-// reports completion of a queued write. DP writes and AP operations settle
+// traffic through a private SWD or JTAG executor. SWD retains its packed frames;
+// JTAG executes logical operations sequentially and checks CTRL/STAT after each
+// AP operation, because its acknowledgement combines OK and FAULT.
+// ReadResult.Value reports data from a queued read; WriteResult.Err reports
+// completion of a queued write. DP writes and AP operations settle
 // through RDBUFF. If an operation fails, earlier confirmed results remain
 // available and later operations report that they were not executed. A result
 // reports ErrIndeterminate when traffic was clocked but completion cannot be

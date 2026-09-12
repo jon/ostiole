@@ -221,8 +221,8 @@ func (m *MemAP) putBlockValue(dst []byte, size TransferSize, value uint64) {
 // the MemAP; Release remains available to restore its saved state. WriteBlock
 // follows the binding's WAIT policy until the operation context ends or the
 // debug port's configured limit is reached. It never replays an accepted
-// write while waiting for completion. If the MEM-AP does not accept single address
-// increment, WriteBlock writes TAR before each word.
+// write while waiting for completion. If the MEM-AP does not accept single
+// address increment, WriteBlock writes TAR before each word.
 func (m *MemAP) WriteBlock(ctx context.Context, addr uint64, buf []byte) (int, error) {
 	if len(buf) == 0 {
 		return 0, nil
@@ -340,11 +340,11 @@ func (m *MemAP) writeBlockRegister(ctx context.Context, addr uint8, value uint32
 }
 
 func (m *MemAP) markBlockWriteIndeterminate(err error, generation uint64) error {
-	if errors.Is(err, ErrIndeterminate) {
-		return err
-	}
 	if m.dp.state.apGeneration == generation {
 		m.dp.state.invalidateAP()
+	}
+	if errors.Is(err, ErrIndeterminate) {
+		return err
 	}
 	return errors.Join(err, ErrIndeterminate)
 }
