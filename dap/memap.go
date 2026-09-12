@@ -170,6 +170,8 @@ func (m *MemAP) readScalar(ctx context.Context, addr uint64, size TransferSize) 
 // WriteScalar performs one aligned, sized target-memory write. Sub-word values
 // are placed in the address lane selected by the MEM-AP byte order. It returns
 // only after the AP completion barrier succeeds.
+// An uncertain JTAG write reports ErrIndeterminate and invalidates the MemAP;
+// Release remains available to restore its saved state.
 func (m *MemAP) WriteScalar(ctx context.Context, addr uint64, size TransferSize, value uint64) error {
 	if err := m.checkScalar(addr, size, "write"); err != nil {
 		return err

@@ -569,10 +569,10 @@ scans every ADIv5 AP selector without reading class-specific registers. Raw AP
 access rejects an invalid or unaligned address before traffic. Use it only when
 the caller understands the selected AP class and will restore any state the
 access changes. A raw MEM-AP data-register write can write target memory. This
-layer owns posted AP read and write completion and retries only the physical
-request that returned WAIT. `dap.NewDebugPort(dap.SWDP(conn))` uses the operation context
-as the retry bound. `dap.NewDebugPort(dap.SWDP(conn), dap.WithMaxWaits(1))` returns the
-first clean WAIT as `swd.ErrWait`. `SetMaxWaits` changes the limit before
+layer owns AP read and write completion. Construct an SWD binding with
+`dap.NewDebugPort(dap.SWDP(conn))`; the operation context bounds WAIT retry.
+Adding `dap.WithMaxWaits(1)` stops at the first clean WAIT, reporting both
+`dap.ErrWait` and its underlying `swd.ErrWait`. `SetMaxWaits` changes the limit before
 `Connect` or after a successful `Release`; it rejects the change while the port
 is connected or cleanup is pending. The count is per physical request and does
 not bound host I/O. A raw AP read or write which completes, or might have
@@ -580,6 +580,19 @@ completed, invalidates existing `MemAP` values. If the limit or context ends
 after an AP WAIT, `dap.DebugPort` issues DAPABORT; existing `dap.MemAP` values
 reject further reads, though `dap.MemAP.Release` still attempts to restore their
 saved state.
+
+For an explicit JTAG composition, pass `dap.JTAGDP(chain, tapIndex)` instead.
+The chain supplies the complete expected layout; the index is zero-based and
+TDO-first. `Connect` validates it and enters baseline ADIv5 JTAG-DP. The same
+AP, `Txn`, and `OpenMemAP` APIs then apply. JTAG polls accepted requests without
+replaying them and checks CTRL/STAT after each AP operation. It temporarily
+disables inherited ORUNDETECT and restores it during release. Release MEM-APs,
+then DAP and its chain, before closing the probe. Independent recovery defaults
+to thirty seconds for JTAG, versus one second for SWD; use
+`dap.WithCleanupTimeout` for slower clocks. The [DAP guide](ports/dap.md)
+shows the binding and cleanup sequence. `armdebug` continues
+to compose SWD only.
+
 The SWD connection reads DPIDR, clears supported sticky conditions with ABORT,
 establishes bank zero through RDBUFF, and establishes its response grammar
 before DAP requests power.

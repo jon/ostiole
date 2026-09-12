@@ -32,32 +32,6 @@ func TestJTAGDPConnectionAndBaselineRegisters(t *testing.T) {
 	}
 }
 
-func TestJTAGDPRejectsAPAndTransactionsBeforeTraffic(t *testing.T) {
-	_, wire, chain := jtagModelChain(t, 4, 0)
-	dp := dap.NewDebugPort(dap.JTAGDP(chain, 0))
-	if _, err := dp.Connect(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	before := wire.calls
-	if _, err := dp.ReadAPIDR(t.Context(), dap.NewAPSel(1)); err == nil {
-		t.Fatal("accepted AP access")
-	}
-	txn := dp.NewTxn()
-	result := txn.ReadDP(dap.CTRLSTAT)
-	if err := txn.Commit(t.Context()); err == nil {
-		t.Fatal("accepted transaction")
-	}
-	if _, err := result.Value(); err == nil {
-		t.Fatal("unexecuted result succeeded")
-	}
-	if wire.calls != before {
-		t.Fatal("unsupported operation sent traffic")
-	}
-	if err := dp.Release(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func exerciseJTAGDPRegisters(t *testing.T, ir, position int) {
 	t.Helper()
 	m, wire, chain := jtagModelChain(t, ir, position)

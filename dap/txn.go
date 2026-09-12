@@ -79,11 +79,11 @@ type txnOp struct {
 }
 
 // Txn queues an ordered, single-use sequence of ADIv5 DP and AP operations.
-// Calls sharing the transaction, its DebugPort, or the underlying SWD
-// connection must be serialized. Queued operations have the same effects,
+// Calls sharing the transaction, its DebugPort, or the underlying connection
+// or chain must be serialized. Queued operations have the same effects,
 // WAIT behavior, and lifecycle requirements as the corresponding DebugPort
 // methods. Commit can pack their physical SWD requests while preserving
-// logical result order.
+// logical result order. JTAG completes and checks each AP operation in order.
 type Txn struct {
 	dp        *DebugPort
 	ops       []txnOp
@@ -103,7 +103,7 @@ func (t *Txn) ReadDP(reg DPRegister) *ReadResult {
 
 // WriteDP queues one logical debug-port write. Commit settles the write through
 // RDBUFF before its WriteResult reports success. CTRL/STAT writes must preserve
-// the connection-owned ORUNDETECT bit. Release does not restore power-request
+// the binding-owned ORUNDETECT bit. Release does not restore power-request
 // bits changed this way. Rejection does not invalidate existing MemAP values by
 // itself; a completed or indeterminate DAPABORT does.
 func (t *Txn) WriteDP(reg DPRegister, value uint32) *WriteResult {
@@ -161,14 +161,15 @@ func (t *Txn) queue(op txnOp) *txnResult {
 
 // Commit validates the complete queue, settles any earlier immediate DP write,
 // then executes queued operations in order until one fails. The underlying SWD
-// connection can pack fixed frames without changing logical result order.
+// connection can pack fixed frames without changing logical result order;
+// JTAG executes logical operations sequentially and checks AP completion.
 // Failure while settling the earlier write leaves every queued operation
-// unexecuted. Commit retries the same physical request after a clean WAIT until
-// the DebugPort's configured limit is reached or the operation context ends; it
-// does not retry a FAULT. If the context ends, errors.Is reports the context
-// error for Commit and the affected result. The original WAIT is not retained
-// as swd.ErrWait; independently joined cleanup failures remain visible. Commit
-// resolves every result before returning and can be called only once.
+// unexecuted. SWD retries a rejected request after WAIT; JTAG polls completion
+// without replaying an accepted request. The configured WAIT limit and context
+// bound both paths. Faults and ambiguous transfers are not replayed. If the
+// context ends, it supplies the operation error; independent cleanup failures
+// remain visible. Commit resolves every result before returning and can be
+// called only once.
 func (t *Txn) Commit(ctx context.Context) error {
 	if t == nil || t.committed {
 		return ErrTxnCommitted
@@ -191,8 +192,7 @@ func (t *Txn) Commit(ctx context.Context) error {
 		return err
 	}
 	if t.dp.jtag != nil {
-		t.resolveSuffix(0)
-		return errors.New("dap: JTAG-DP transactions are unavailable")
+		return t.dp.jtag.executeTxn(ctx, t)
 	}
 	return t.dp.conn.executeTxn(ctx, t)
 }

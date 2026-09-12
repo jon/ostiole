@@ -111,6 +111,10 @@ func (dp *DebugPort) readAPEffect(ctx context.Context, sel APSel, addr uint8) (b
 	if err := dp.selectAP(ctx, sel, addr); err != nil {
 		return false, 0, err
 	}
+	if dp.jtag != nil {
+		result := dp.jtag.accessAP(ctx, apTransferRequest(addr&0x0c, true), 0)
+		return result.outcome != transferUnsent && result.outcome != transferRejected, result.data, jtagResultError(result)
+	}
 	return dp.conn.readAP(ctx, addr)
 }
 
@@ -120,6 +124,7 @@ func (dp *DebugPort) readAPEffect(ctx context.Context, sel APSel, addr uint8) (b
 // restore any state the write changes. Writing a MEM-AP data register can
 // write target memory. The address must be four-byte aligned. The debug port
 // must be connected and have no cleanup pending.
+// A JTAG write with uncertain completion also reports ErrIndeterminate.
 func (dp *DebugPort) WriteRawAP(ctx context.Context, addr APAddress, value uint32) error {
 	if err := dp.requireConnected(); err != nil {
 		return err
@@ -147,6 +152,10 @@ func (dp *DebugPort) writeAPEffect(ctx context.Context, sel APSel, addr uint8, v
 	}
 	if err := dp.selectAP(ctx, sel, addr); err != nil {
 		return false, err
+	}
+	if dp.jtag != nil {
+		result := dp.jtag.accessAP(ctx, apTransferRequest(addr&0x0c, false), value)
+		return result.outcome != transferUnsent && result.outcome != transferRejected, jtagResultError(result)
 	}
 	return dp.conn.writeAP(ctx, addr, value)
 }
@@ -190,11 +199,8 @@ func validateRawAPAddress(addr uint8, write bool) error {
 }
 
 func (dp *DebugPort) requireConnected() error {
-	if dp != nil && dp.jtag != nil {
-		return errors.New("dap: JTAG-DP AP access is unavailable")
-	}
-	if dp == nil || dp.conn == nil || dp.state.session == sessionIdle {
-		return errors.New("dap: SW-DP is not connected")
+	if !dp.bound() || dp.state.session == sessionIdle {
+		return errors.New("dap: debug port is not connected")
 	}
 	if dp.state.session == sessionRepairRequired {
 		return dp.repairPendingError()

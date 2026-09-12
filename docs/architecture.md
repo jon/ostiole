@@ -10,6 +10,9 @@ The current hardware paths are:
 USB host access
   |
   +-- FTDI MPSSE or J-Link --> JTAG TAPs and explicit chains
+  |                             |
+  |                             v
+  |                           Arm JTAG-DP --> DAP transactions and MEM-AP
   |
   +-- FTDI MPSSE, J-Link, or CMSIS-DAP v2
         |
@@ -45,7 +48,7 @@ debugger service.
 | `swd` | Enter SWD, establish its response grammar, and encode, execute, and validate individual or packed DP/AP register transactions. |
 | `jtag` | Track TAP state, scan registers, discover reset entries, measure IR length, and validate explicit chains for selected-TAP access over a caller-supplied wire. |
 | `swd/sim` | Model SWD protocol entry, register transfers, fixed-frame packing, and transfer limits without hardware. |
-| `dap` | Manage SW-DP identity and power, ordered DP/AP transactions, posted AP access, and scalar or block MEM-AP access. |
+| `dap` | Bind SW-DP or baseline ADIv5 JTAG-DP, manage identity and power, execute ordered DP/AP transactions, and provide scalar or block MEM-AP access. |
 | `dap/sim` | Model the DP, AP, and byte-addressed target-memory state consumed by `dap`. |
 | `target/cortexm` | Read and decode the architectural Cortex-M CPUID value. |
 | `examples/...` | Demonstrate public package compositions as executable programs. |
@@ -207,11 +210,15 @@ notes.
 
 `dap.DebugPort.Connect` returns a `dap.Identity`, whose accessors distinguish
 DPIDR from IDCODE without treating their encodings as interchangeable. The
-current SW-DP connection establishes only DPIDR. The debug port asks the SWD
-connection to enter and establish framing before applying ADIv5 policy.
+SW-DP connection establishes only DPIDR; JTAG-DP establishes only IDCODE.
+Construct the opaque binding with `dap.SWDP(conn)` or
+`dap.JTAGDP(chain, tapIndex)` and pass it to `dap.NewDebugPort`. The zero
+binding is invalid; constructors send no traffic. The debug port enters the
+bound protocol before applying ADIv5 policy.
 Public DP, AP, transaction, and MEM-AP operations
 remain blocked until that connection is active. The debug port validates
-DPIDR, gives each logical DP register its architectural direction and bank,
+register availability and direction for the binding. On SWD it validates
+DPIDR, gives each logical DP register its architectural bank,
 preserves the AP fields while changing DPBANKSEL, and requests acknowledged
 debug and system power. CTRL/STAT writes preserve connection-owned ORUNDETECT,
 and a non-default DLCR turnaround remains unsupported. The debug port retries
@@ -222,8 +229,9 @@ physical boundary. A packed WAIT retries the WAITed request and the suffix the
 target abandoned; it does not repeat the confirmed prefix.
 The private SWD executor owns request retries, sticky-fault recovery, and the
 SELECT confirmations that depend on SWD response grammar. It resolves wire
-batch results before returning them to the transaction policy. Unsent and rejected requests remain distinct from
-confirmed transfers and ambiguous exchanges; read parity errors still report
+batch results before returning them to the transaction policy. Unsent and
+rejected requests remain distinct from confirmed transfers and ambiguous
+exchanges; read parity errors still report
 that the request was accepted, without claiming that its data is valid.
 The executor also completes posted AP operations and reports confirmed block
 writes and uncertain effects without making MEM-AP interpret SWD errors.
@@ -235,15 +243,20 @@ Connection setup validates the context and options before protocol entry.
 Power acquisition starts only after entry establishes the identity and
 control state; failed setup and ordinary release use the same link cleanup.
 
-`dap.SWDP(conn)` and `dap.JTAGDP(chain, index)` construct opaque bindings for
-`NewDebugPort` without traffic. JTAG-DP register access requires an explicit
-chain and TDO-first TAP index with a four- or eight-bit IR. Its private executor
-owns 35-bit framing and delayed responses, polls accepted requests without
-replay, and restores acquired power and inherited ORUNDETECT before chain
-release. After losing scan state, `DebugPort` revalidates the exact chain before
-restoring state.
-JTAG's independent cleanup budget defaults to thirty seconds. AP, transaction,
-and MEM-AP access require SWD.
+The private JTAG executor owns DPACC/APACC framing and its delayed-response
+pipeline. It polls an accepted request to completion without replaying it,
+then checks CTRL/STAT after each AP operation before another AP operation is
+issued. JTAG uses the same `Txn`, AP selection, and `OpenMemAP` APIs with
+sequential logical execution. Baseline SELECT is readable, IDCODE is distinct
+from DPIDR, and later banked registers are rejected. The binding temporarily
+disables inherited ORUNDETECT and rejects active pushed-operation or
+transaction-counter modes. Release restores acquired control state and parks
+the chain in BYPASS/Idle. After losing scan state, `DebugPort` revalidates the
+exact chain and reacquires its TAP before restoring state. `WithCleanupTimeout`
+bounds each independent recovery attempt: one second by default for SWD,
+thirty for JTAG.
+No driver is reopened automatically after a poisoned exchange.
+
 `NewAPSel` constructs an AP selector whose zero value is invalid.
 `APSel.Address` combines it with a
 complete eight-bit register address; the resulting `APAddress` also has an
@@ -252,7 +265,7 @@ identity. Raw AP access rejects invalid or unaligned addresses before traffic.
 Register names and effects remain specific to the selected AP class. A write
 to a MEM-AP data register can write target memory. A raw AP read or write which
 completes, or whose completion is uncertain, invalidates existing `MemAP`
-values. `dap.DebugPort` retries the same physical request after a clean WAIT
+values. On SWD, `dap.DebugPort` retries the same physical request after a clean WAIT
 until its response-count limit is reached or the operation context ends. The
 one-argument constructor uses only the context; `WithMaxWaits` sets a limit,
 and `SetMaxWaits` changes it while the port is idle. If either boundary ends AP
