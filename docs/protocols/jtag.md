@@ -144,6 +144,21 @@ before a wire call preserves the last confirmed state.
 
 ## FTDI wire
 
+An FTDI probe opened through discovery or `ftdi.OpenProbe` can lend JTAG:
+
+```go
+wire, err := opened.JTAG(ctx, probe.JTAGConfig{MaxClockHz: 100_000})
+if err != nil {
+    return errors.Join(err, opened.Close()) // Retain opened if cleanup fails.
+}
+conn := jtag.New(wire)
+```
+
+Use that connection with the explicit layout above. Release the chain with
+a fresh bounded context before calling `opened.Close`; retain both values
+if chain release fails. A probe activates only one protocol. Close invalidates
+the borrowed wire, even if the implementation still has cleanup to retry.
+
 `ftdi.Open(ctx, device, ftdi.Config{Port: ftdi.PortA, MaxClockHz: 100_000})`
 opens one explicitly selected USB attachment as a protocol-neutral MPSSE
 channel. Opening leaves target pins as inputs; `JTAGIO` establishes JTAG
@@ -165,14 +180,16 @@ On Nostalgia, the ZCU104 FT4232H (`0403:6011`, serial `01691`, port A) passed:
 
 ```sh
 OSTIOLE_ZCU104_JTAG_HIL=1 OSTIOLE_JTAG_SERIAL=01691 \
-  go test -tags integration ./ftdi -run '^TestHILFT4232HJTAG$' -count=1 -v
+  go test -tags integration ./ftdi -run '^TestHILFT4232H(Probe)?JTAG$' -count=1 -v
 ```
 
 At 100 kHz, reset discovery returned Arm IDCODE `0x5ba00477` and Xilinx
 IDCODE `0x14730093`. The test validated the explicit IR4/IR12 layout, read
 the Arm IDCODE through selected TAP 0, parked the chain in BYPASS/Idle, and
-closed the channel. The board's DAP had already been activated externally;
-the test does not activate it or access DAP registers or target memory.
+closed the channel. Both direct opening and registered discovery through
+`Probe.JTAG` completed the same sequence. The board's DAP had already been
+activated externally; neither path activates it or accesses DAP registers
+or target memory.
 
 The [OpenOCD JTAG primer](https://openocd.org/doc/doxygen/html/primerjtag.html)
 describes TAP state and scan mechanics. The reset sequence also appears in

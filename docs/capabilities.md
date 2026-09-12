@@ -62,7 +62,8 @@ It does not own SWD transactions, DAP, or MEM-AP state.
 `Probe.JTAG` similarly lends packed JTAG clocks. Only one protocol can be
 activated per owner. Close invalidates either borrowed surface, including
 when cleanup must be retried. Unsupported protocols fail before activation.
-JTAG TAP and chain state belong to `jtag`.
+FTDI owners support SWD or standard-pin JTAG; J-Link and CMSIS-DAP owners
+currently support SWD only. JTAG TAP and chain state belong to `jtag`.
 
 FTDI, J-Link, and CMSIS-DAP expose exact-attachment `OpenProbe` entry points.
 These acquire USB without adapter or target traffic; requesting SWD opens

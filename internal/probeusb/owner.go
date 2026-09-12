@@ -22,6 +22,12 @@ type Activate func(context.Context, *usb.Device, probe.SWDConfig) (Session, erro
 
 // Open acquires the exact attachment without claiming or configuring it.
 func Open(ctx context.Context, identity usb.DeviceInfo, function string, activate Activate) (*probe.Probe, error) {
+	return open(ctx, identity, function, func(device attachment) probe.Backend {
+		return &owner{device: device, activate: activate}
+	})
+}
+
+func open(ctx context.Context, identity usb.DeviceInfo, function string, bind func(attachment) probe.Backend) (*probe.Probe, error) {
 	if ctx == nil {
 		return nil, errors.New("probe: nil open context")
 	}
@@ -34,7 +40,7 @@ func Open(ctx context.Context, identity usb.DeviceInfo, function string, activat
 	}
 	info := probe.Info{Product: identity.Product, Serial: identity.Serial,
 		Function: function, Location: fmt.Sprintf("%d:%d", identity.Bus, identity.Address)}
-	return probe.New(info, &owner{device: openedUSB{device}, activate: activate}), nil
+	return probe.New(info, bind(openedUSB{device})), nil
 }
 
 type attachment interface {
@@ -48,7 +54,7 @@ func (d openedUSB) raw() *usb.Device { return d.Device }
 
 type owner struct {
 	device   attachment
-	session  Session
+	session  probe.Backend
 	activate Activate
 }
 

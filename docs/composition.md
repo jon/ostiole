@@ -22,7 +22,7 @@ data-register write can write target memory.
 | Read metadata from one J-Link | `usb.New`, `jlink.SupportedDevices`, `Enumerator.Open`, `jlink.Open`, `Session.Info` | Package tests |
 | Read metadata from one CMSIS-DAP v2 probe | `usb.New`, `usb.AllDevices`, `cmsisdap.Candidates`, `Enumerator.Open`, `cmsisdap.Open`, `Session.Info` | Package tests |
 | Open one FTDI MPSSE SWD port | `Enumerator.Open`, `ftdi.Open` | `examples/trivial/swd-dpidr` |
-| Use an FTDI JTAG chain | `ftdi.Open`, then `jtag.New` and `jtag.NewChain` | FTDI integration tests |
+| Use an FTDI JTAG chain | `ftdi.Open` or `Probe.JTAG`, then `jtag.New` and `jtag.NewChain` | FTDI integration tests |
 | Open one J-Link SWD session | `Enumerator.Open`, `jlink.Open`, `jlink.WithSWD` | Package tests |
 | Open one CMSIS-DAP SWD session | `Enumerator.Open`, `cmsisdap.Open`, `cmsisdap.WithSWD` | Package tests |
 | Connect SWD or transfer DP/AP registers | `swd.New`, `Conn.Connect`, `Conn.ReadDP`, `Conn.WriteDP`, `Conn.ReadAP`, `Conn.WriteAP`, `Conn.NewBatch`, `Conn.Release` | `examples/trivial/swd-dpidr` |
@@ -238,6 +238,12 @@ connection := swd.New(wire)
 Use a named error result for this cleanup pattern. Release any SWD or DAP
 state before closing the probe. The caller must stop using the transferred
 backend directly; the borrowed wire has no independent close operation.
+
+FTDI owners can instead lend JTAG with
+`opened.JTAG(ctx, probe.JTAGConfig{MaxClockHz: 100_000})`. Pass the wire to
+`jtag.New`, supply an explicit layout, and release the chain before closing
+the probe. Retain both after a failed release so cleanup can be retried.
+The [JTAG guide](protocols/jtag.md) covers pin wiring and chain ownership.
 
 Concrete drivers can open that owner from an exact USB identity:
 
