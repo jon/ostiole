@@ -97,11 +97,12 @@ does not prove that the board connects those pins to a debug target.
 | FT2232H | Yes | Ports A and B using the standard H-series interface and endpoint layout. |
 | FT4232H | Yes | Ports A and B using the standard H-series interface and endpoint layout. |
 | Explicit clock | Yes | `MaxClockHz` is a ceiling; `Channel.ClockHz` reports the attainable configured rate. Examples request 400 kHz. |
-| MPSSE lifecycle | Yes | Claim, reset bit mode, purge stale traffic, synchronize, and configure pins and clock. Close drains pending bulk OUT work before resetting bit mode, setting the latency timer to 16 ms, purging the receive and transmit paths, releasing, and closing. |
-| SWD bit streams | Yes | Direction-safe output and input runs. Enough maximum-packet-sized IN transfers remain posted to cover the largest response admitted by the 16,384-bit SWD limit, including FTDI status bytes. That requires seventeen requests for a 512-byte endpoint and 133 for a 64-byte endpoint. The receive path consumes them in submission order, replenishes each before delivering its payload, and discards status-only packets independently of OUT completion. |
+| MPSSE lifecycle | Yes | Claim, reset bit mode, purge stale traffic, synchronize, and configure the clock with target pins as inputs. Close drains pending bulk OUT work before resetting bit mode, setting the latency timer to 16 ms, purging the receive and transmit paths, releasing, and closing. |
+| SWD bit streams | Yes | Direction-safe output and input runs. Enough maximum-packet-sized IN transfers remain posted to cover the worst-case response admitted by the shared 8,192-clock wire limit, including FTDI status bytes. That requires seventeen requests for a 512-byte endpoint and 133 for a 64-byte endpoint. The receive path consumes them in submission order, replenishes each before delivering its payload, and discards status-only packets independently of OUT completion. |
 | Ambiguous transfer handling | Yes | A USB error, including an asynchronous receive failure, invalid transfer count, malformed FTDI packet, or surplus payload poisons the channel. A call which observes the poisoned channel returns the first cause and matches `ErrChannelPoisoned`; later SWD traffic requires a fresh channel. `Close` remains available and retryable. |
 | Continuous receive | HIL | One FT232H session completed 1,000 consecutive full AP enumerations on each host: 1,024,012 physical OK acknowledgements on macOS and 1,024,022 on Linux, with no WAIT, FAULT, or invalid acknowledgement and one SWD entry per run. The macOS bench had reproduced intermittent OUT completion failures when IN was not kept armed. |
-| JTAG | No | No public JTAG engine or FTDI JTAG interface exists. |
+| JTAG | Yes | `Channel.JTAGIO` establishes standard TCK/TDI/TDO/TMS directions before clocking; the same channel also supplies SWD. Packed streams are capped at 8,192 clocks; the worst-case response fits the existing receive window. Other GPIO remain inputs. |
+| FT4232H JTAG chain | HIL | On Nostalgia, ZCU104 serial `01691`, port A at 100 kHz: reset discovery found Arm `0x5ba00477` and Xilinx `0x14730093`; explicit IR4/IR12 validation, selected Arm IDCODE read, BYPASS/Idle release, and channel close completed. Board-specific DAP activation had already been performed externally. No DAP register or target-memory access was exercised. |
 
 The driver binds the standard FTDI H-series interfaces and endpoint numbers.
 It does not inspect USB descriptors to verify a different layout. A listed
@@ -186,14 +187,14 @@ specification notes, and current physical observation.
 and idle clocks over a supplied wire, with bounded transfers and
 unknown-state recovery after wire failures.
 Hardware-independent tests cover the state graph, reset sequence, transfer
-limits, and cancellation. No bundled adapter implements `jtag.Wire` yet.
+limits, and cancellation. FTDI supplies the bundled `jtag.Wire` implementation.
 Bounded discovery distinguishes IDCODE and bypass entries. IR measurement
 checks total length without inferring individual boundaries. Explicit chain
 layouts validate reset identities, total length, and capture boundaries;
 selected-TAP scans own bypass padding and detect stale instruction selection.
 Behavioral tests cover multiple TAPs, dummy DAPs, invalid lengths, borrowed
-surface invalidation, and retryable release. There is no JTAG-DP implementation
-or physical JTAG validation in this package yet.
+surface invalidation, and retryable release. The FT4232H bench above exercises
+these chain operations; there is no JTAG-DP implementation yet.
 See [JTAG](protocols/jtag.md) for effects and ownership.
 
 ## Debug Access Port and MEM-AP
@@ -272,7 +273,7 @@ the volatile DAP and MEM-AP state described above.
 
 ## Not currently provided
 
-There is no CMSIS-DAP HID/v1 transport, bundled JTAG adapter, automatic probe
+There is no CMSIS-DAP HID/v1 transport, automatic probe
 discovery policy, CoreSight or ROM-table discovery,
 multi-core or SoC attachment, general target control, semihosting, trace,
 debugger protocol server, firmware flashing, FPGA programming, or Windows

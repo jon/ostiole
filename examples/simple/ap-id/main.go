@@ -59,7 +59,11 @@ func readIdentity(ctx context.Context) (_ identity, err error) {
 	}
 	ch, err := ftdi.Open(ctx, dev, ftdi.Config{Port: ftdi.PortA, MaxClockHz: 400_000})
 	if err != nil {
-		return identity{}, errors.Join(err, dev.Close())
+		closeOwner := dev.Close
+		if ch != nil {
+			closeOwner = ch.Close
+		}
+		return identity{}, errors.Join(err, closeOwner())
 	}
 	conn := swd.New(ch)
 	dp := dap.NewDebugPort(conn)

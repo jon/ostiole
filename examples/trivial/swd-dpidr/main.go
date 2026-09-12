@@ -50,7 +50,11 @@ func readDPIDR(ctx context.Context) (value uint32, err error) {
 	}
 	ch, err := ftdi.Open(ctx, dev, ftdi.Config{Port: ftdi.PortA, MaxClockHz: 400_000})
 	if err != nil {
-		return 0, errors.Join(err, dev.Close())
+		closeOwner := dev.Close
+		if ch != nil {
+			closeOwner = ch.Close
+		}
+		return 0, errors.Join(err, closeOwner())
 	}
 	defer func() {
 		err = errors.Join(err, ch.Close())

@@ -2,6 +2,7 @@ package ftdi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -13,9 +14,27 @@ const (
 	maxSWDTransferBits    = 16_384
 )
 
-// MaxTransferBits reports the conservative SWDIO limit used for packed
-// transfers. It does not access the adapter.
-func (c *Channel) MaxTransferBits() int { return maxSWDTransferBits }
+// MaxTransferBits reports the common wire limit, or zero while inactive.
+func (c *Channel) MaxTransferBits() int {
+	if c == nil || !c.active {
+		return 0
+	}
+	return maxJTAGTransferBits
+}
+
+func (c *Channel) wireReady(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("ftdi: nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if c == nil || !c.active {
+		return errors.New("ftdi: inactive channel")
+	}
+
+	return c.transportReady()
+}
 
 type swdRead struct {
 	offset int
@@ -24,14 +43,14 @@ type swdRead struct {
 
 // SWDIO executes one direction-explicit SWD bit stream.
 func (c *Channel) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
-	if bits < 0 || len(direction)*8 < bits || len(output)*8 < bits {
+	if err := c.wireReady(ctx); err != nil {
+		return nil, err
+	}
+	if bits < 0 || bits > maxJTAGTransferBits || len(direction) < (bits+7)/8 || len(output) < (bits+7)/8 {
 		return nil, fmt.Errorf("ftdi: invalid %d-bit SWD stream", bits)
 	}
-	if err := c.transportReady(); err != nil {
-		return nil, err
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
+	if bits == 0 {
+		return []byte{}, nil
 	}
 	commands, reads := swdCommands(direction, output, bits)
 	var response []byte

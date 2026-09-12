@@ -79,6 +79,7 @@ func (t *fakeUSBTransfer) complete(count int, err error) {
 
 func claimFakeChannel(t *testing.T, channel *Channel) {
 	t.Helper()
+	channel.active = true
 	if err := channel.claimUSB(); err != nil {
 		t.Fatal(err)
 	}
@@ -423,7 +424,7 @@ func TestChannelConfiguresAConservativeMPSSEClock(t *testing.T) {
 		0x8d,
 		0x86, 74, 0,
 		0x85,
-		0x80, 0, 1,
+		0x80, 0, 0,
 		0x82, 0, 0,
 	}
 	if len(raw.writes) != 1 ||

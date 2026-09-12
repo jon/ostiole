@@ -40,7 +40,7 @@ const (
 	PortB
 )
 
-// Config selects one MPSSE port and the maximum requested SWD clock.
+// Config selects one MPSSE port and the maximum requested protocol clock.
 type Config struct {
 	Port       Port
 	MaxClockHz uint32
@@ -86,6 +86,7 @@ func (c ownedUSBClaim) SubmitBulk(ctx context.Context, endpoint uint8, buffer []
 
 // Channel addresses one explicit MPSSE-capable USB function.
 type Channel struct {
+	active      bool
 	device      usbDevice
 	iface       uint8
 	index       uint16
@@ -109,6 +110,7 @@ func newChannel(device usbDevice, config Config) (*Channel, error) {
 	if device == nil {
 		return nil, errors.New("ftdi: nil USB device")
 	}
+
 	if config.Port != PortA && config.Port != PortB {
 		return nil, errors.New("ftdi: port A or B is required")
 	}
@@ -148,9 +150,9 @@ func validateSelection(identity usb.DeviceInfo, port Port) error {
 	return nil
 }
 
-// ClockHz reports the SWD clock selected during Open.
+// ClockHz reports the configured protocol clock, or zero while inactive.
 func (c *Channel) ClockHz() uint32 {
-	if c == nil {
+	if c == nil || !c.active {
 		return 0
 	}
 	return c.clockHz

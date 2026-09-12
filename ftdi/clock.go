@@ -26,7 +26,7 @@ func (c *Channel) configure(ctx context.Context) error {
 		cmdDisable3Phase,
 		cmdSetClockDiv, byte(c.divisor), byte(c.divisor >> 8),
 		cmdDisableLoop,
-		cmdSetDataLow, 0, pinClock,
+		cmdSetDataLow, 0, 0,
 		cmdSetDataHigh, 0, 0,
 	})
 }

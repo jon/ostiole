@@ -22,6 +22,7 @@ data-register write can write target memory.
 | Read metadata from one J-Link | `usb.New`, `jlink.SupportedDevices`, `Enumerator.Open`, `jlink.Open`, `Session.Info` | Package tests |
 | Read metadata from one CMSIS-DAP v2 probe | `usb.New`, `usb.AllDevices`, `cmsisdap.Candidates`, `Enumerator.Open`, `cmsisdap.Open`, `Session.Info` | Package tests |
 | Open one FTDI MPSSE SWD port | `Enumerator.Open`, `ftdi.Open` | `examples/trivial/swd-dpidr` |
+| Use an FTDI JTAG chain | `ftdi.Open`, then `jtag.New` and `jtag.NewChain` | FTDI integration tests |
 | Open one J-Link SWD session | `Enumerator.Open`, `jlink.Open`, `jlink.WithSWD` | Package tests |
 | Open one CMSIS-DAP SWD session | `Enumerator.Open`, `cmsisdap.Open`, `cmsisdap.WithSWD` | Package tests |
 | Connect SWD or transfer DP/AP registers | `swd.New`, `Conn.Connect`, `Conn.ReadDP`, `Conn.WriteDP`, `Conn.ReadAP`, `Conn.WriteAP`, `Conn.NewBatch`, `Conn.Release` | `examples/trivial/swd-dpidr` |
@@ -461,10 +462,13 @@ Pass the opened device to `ftdi.Open` with the MPSSE port and maximum requested
 clock. The driver reads and validates the product from the device identity;
 discovery does not choose the port or clock.
 
-`ftdi.Open` takes ownership of the `*usb.Device` when it succeeds. Close the
-returned channel rather than separately closing the device. After an error,
-call `Device.Close`. `Open` has already attempted cleanup, so that call either
-finishes cleanup or harmlessly repeats it.
+`ftdi.Open` initializes MPSSE and the clock with target pins as inputs.
+The returned channel supplies both `SWDIO` and `JTAGIO`; each call establishes
+its own directions. A non-nil channel owns the USB device even on error;
+close that channel and retain it if cleanup fails. Only a nil result leaves
+`Device.Close` with the caller. Release higher-level protocol state before
+closing the channel, and do not mix raw operations underneath a live protocol
+connection.
 
 Adapter drivers submit USB transfers through the claimed interface and keep
 their scheduling policy themselves:
