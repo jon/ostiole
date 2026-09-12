@@ -15,6 +15,7 @@ func (e *jtagExecutor) configure(ctx context.Context) (uint32, error) {
 		return 0, errors.New("dap: inherited JTAG transaction modes are active")
 	}
 	e.ownedOverrun = state&overrunDetect != 0
+	e.faultPending = true
 	if err := e.writeDP(ctx, CTRLSTAT, state&^overrunDetect|jtagSticky); err != nil {
 		return 0, err
 	}
@@ -25,6 +26,7 @@ func (e *jtagExecutor) configure(ctx context.Context) (uint32, error) {
 	if state&(overrunDetect|jtagSticky|jtagTransactionModes) != 0 {
 		return 0, errors.New("dap: JTAG-DP still has sticky status, ORUNDETECT, or transaction modes set")
 	}
+	e.faultPending = false
 	return state, nil
 }
 
@@ -66,6 +68,9 @@ func (e *jtagExecutor) enter(ctx context.Context) error {
 }
 
 func (e *jtagExecutor) release(ctx context.Context) error {
+	if err := e.repairFault(ctx); err != nil {
+		return err
+	}
 	if e.ownedOverrun {
 		state, err := e.readDP(ctx, CTRLSTAT)
 		if err != nil {

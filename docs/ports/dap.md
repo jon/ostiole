@@ -77,6 +77,9 @@ Connection setup primes the pipeline, establishes SELECT zero, clears sticky
 status, and acquires only power requests not already asserted. It temporarily
 disables inherited ORUNDETECT and rejects active pushed-operation or
 transaction-counter modes. Release restores acquired power and control state.
+If sticky-state clearing or verification fails during setup, Release retains
+that obligation and confirms the clear before releasing the chain. A failed
+attempt remains retryable, including when all power requests were inherited.
 
 After scan-state loss, cleanup revalidates the exact chain and reacquires its
 TAP before restoring state. Changed identity stops restoration. A poisoned
