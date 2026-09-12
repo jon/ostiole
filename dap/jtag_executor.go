@@ -16,6 +16,7 @@ type jtagExecutor struct {
 	tap           jtag.TAP
 	ownedOverrun  bool
 	abortRequired bool
+	faultPending  bool
 }
 
 func (e *jtagExecutor) validate() error {
