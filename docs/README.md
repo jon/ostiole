@@ -16,6 +16,8 @@ today and how to assemble them without duplicating lower-level behavior.
   and direction-explicit sequence commands.
 - [Arm Debug Access Ports](ports/dap.md) describes the ADIv5 register window,
   posted AP access, power handshakes, and MEM-AP details worth testing.
+- [CoreSight component identity](coresight.md) describes identification
+  registers, borrowed memory access, and the inspection example.
 - [Composition](composition.md) maps common tasks to the narrowest public
   package that implements them and gives coding agents a selection checklist.
 - [Capabilities](capabilities.md) distinguishes implemented behavior from

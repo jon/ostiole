@@ -57,3 +57,47 @@ Deterministic tests cover malformed identities, unknown classes, optional
 fields, cancellation, failures at every register read, and the final aligned
 page of the 64-bit address space. Composition tests exercise the existing
 SWD/DAP simulator with both MEM-AP byte orders above 4 GiB.
+
+## Inspection example
+
+`examples/simple/coresight-info` opens a managed SWD connection, acquires the
+required AP, reads one identification page, and attempts owner cleanup up to
+three times. Both AP and base are required; probe filters may be omitted only
+when selection remains unique.
+
+```sh
+go run ./examples/simple/coresight-info \
+  -provider cmsisdap -serial SERIAL -ap 0 -base 0xe00ff000
+```
+
+Use that address only on a target whose memory map places an accessible
+identification page there. The example requests a 100 kHz clock and applies a
+ten-second operation deadline. The library also accepts memory clients reached
+through JTAG; the example configures SWD only.
+
+## Hardware evidence
+
+On September 12, 2026, the macOS Nostalgia bench ran:
+
+```sh
+OSTIOLE_CORESIGHT_HIL=1 \
+  go test -tags=integration -run TestHILComponentIdentity -count=1 -v ./coresight
+```
+
+Each path opened two fresh sessions at a requested 100 kHz:
+
+| Path | Identification page | Result |
+| --- | --- | --- |
+| CMSIS-DAP v2 micro:bit, serial `9900360140124e4500279015000000360000000097969901`, SWD AP0 | `0xe00ff000` | CIDR `0xb105100d`, PIDR `0x04000bb471`, class 1, Arm part `0x471`. |
+| FT4232H `01691`/A, ZCU104 JTAG AP1 | `0x80410000` | CIDR `0xb105900d`, PIDR `0x04004bbd03`, class 9, Arm part `0xd03`; DEVARCH `0x47706a15`, DEVID `3`, DEVTYPE `0x15`. |
+
+Both sessions on each path returned the same identity. Every Arm debug owner
+reported successful close, including its MEM-AP and DAP restoration and probe
+release. This test does not independently measure restored state after close.
+The ZCU104 used the externally enabled Arm `0x5ba00477`/IR4 and Xilinx
+`0x14730093`/IR12 chain. No board routing, component unlock, halt, reset, or
+target-memory write was performed.
+
+The example command above also passed on that micro:bit with its exact serial.
+These results cover one identification page on each bench, not ROM traversal,
+component register access, or physical large-address and big-endian support.

@@ -32,7 +32,7 @@ data-register write can write target memory.
 | Access another AP register by its full ADIv5 address | `DebugPort.ReadRawAP`, `DebugPort.WriteRawAP` | Package tests |
 | Read or write one aligned target scalar through a MEM-AP | `dap.OpenMemAP`, `MemAP.ReadScalar`, `MemAP.WriteScalar`, `MemAP.Release` | `examples/simple/cortexm-info` uses `ReadWord`. |
 | Read or write arbitrary target bytes through a MEM-AP | `dap.OpenMemAP`, `MemAP.ReadBlock`, `MemAP.WriteBlock`, `MemAP.Release` | Package tests |
-| Identify one debug component through scalar memory | `coresight.Identify` | Package tests |
+| Identify one debug component through scalar memory | `coresight.Identify` | `examples/simple/coresight-info` |
 | Identify a Cortex-M through any compatible word reader | `cortexm.Identify` | `examples/simple/cortexm-info` |
 | Test SWD and DAP behavior without hardware | `swd/sim`, `dap/sim` | Package tests |
 
