@@ -40,7 +40,7 @@ func WithMaxWaits(maxWaits uint) Option {
 // reports the context error and the original WAIT is not retained as
 // swd.ErrWait. Independently joined cleanup failures remain visible.
 type DebugPort struct {
-	conn         *swd.Conn
+	conn         *swdExecutor
 	maxWaits     uint
 	identity     Identity
 	identified   bool
@@ -64,7 +64,7 @@ func NewDebugPort(conn *swd.Conn, options ...Option) *DebugPort {
 			option.apply(&config)
 		}
 	}
-	return &DebugPort{conn: conn, maxWaits: config.maxWaits}
+	return &DebugPort{conn: newSWDExecutor(conn), maxWaits: config.maxWaits}
 }
 
 // SetMaxWaits changes the clean WAIT response limit while the debug port is

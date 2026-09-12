@@ -59,16 +59,7 @@ func (dp *DebugPort) transfer(ctx context.Context, req transferRequest, data uin
 }
 
 func (dp *DebugPort) transferOnce(ctx context.Context, req transferRequest, data uint32) (uint32, error) {
-	if req.AP && req.Read {
-		return dp.conn.ReadAP(ctx, req.Addr)
-	}
-	if req.AP {
-		return 0, dp.conn.WriteAP(ctx, req.Addr, data)
-	}
-	if req.Read {
-		return dp.conn.ReadDP(ctx, req.Addr)
-	}
-	return 0, dp.conn.WriteDP(ctx, req.Addr, data)
+	return dp.conn.transfer(ctx, req, data)
 }
 
 func (dp *DebugPort) transferDPWriteBarrier(ctx context.Context) (uint32, error) {

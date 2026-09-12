@@ -528,43 +528,11 @@ func txnResponseBoundary(step txnStep) bool {
 	return step.dpReg == DPIDR || step.dpReg == CTRLSTAT || step.dpReg == ABORT
 }
 
-type txnTransferResult struct {
-	read  *swd.ReadResult
-	write *swd.WriteResult
+func (t *Txn) transferSteps(ctx context.Context, steps []txnStep) ([]transferResult, error) {
+	return t.dp.conn.transferSteps(ctx, steps)
 }
 
-func (r txnTransferResult) value() (uint32, error) {
-	if r.read != nil {
-		return r.read.Value()
-	}
-	return 0, r.write.Err()
-}
-
-func (r txnTransferResult) err() error {
-	_, err := r.value()
-	return err
-}
-
-func (t *Txn) transferSteps(ctx context.Context, steps []txnStep) ([]txnTransferResult, error) {
-	batch := t.dp.conn.NewBatch()
-	results := make([]txnTransferResult, len(steps))
-	for i := range steps {
-		step := steps[i]
-		switch {
-		case step.req.AP && step.req.Read:
-			results[i].read = batch.ReadAP(step.req.Addr)
-		case step.req.AP:
-			results[i].write = batch.WriteAP(step.req.Addr, step.data)
-		case step.req.Read:
-			results[i].read = batch.ReadDP(step.req.Addr)
-		default:
-			results[i].write = batch.WriteDP(step.req.Addr, step.data)
-		}
-	}
-	return results, batch.Commit(ctx)
-}
-
-func firstFailedTransfer(results []txnTransferResult) int {
+func firstFailedTransfer(results []transferResult) int {
 	for i := range results {
 		if results[i].err() != nil {
 			return i
@@ -573,19 +541,19 @@ func firstFailedTransfer(results []txnTransferResult) int {
 	return len(results)
 }
 
-func (t *Txn) acceptBatchPrefix(steps []txnStep, results []txnTransferResult, count int) {
+func (t *Txn) acceptBatchPrefix(steps []txnStep, results []transferResult, count int) {
 	for i := range count {
 		value, _ := results[i].value()
 		t.acceptStep(steps[i], value)
 	}
 }
 
-func (t *Txn) handleBatchFailure(ctx context.Context, steps []txnStep, results []txnTransferResult, batchErr error, waits *int) error {
+func (t *Txn) handleBatchFailure(ctx context.Context, steps []txnStep, results []transferResult, batchErr error, waits *int) error {
 	err := results[0].err()
 	if errors.Is(err, swd.ErrIndeterminate) {
 		return t.failBatchTransport(steps, results, batchErr)
 	}
-	if errors.Is(err, swd.ErrNotExecuted) {
+	if results[0].outcome == transferUnsent {
 		return t.handleBatchNotExecuted(steps[0], batchErr, *waits)
 	}
 	value, _ := results[0].value()
@@ -622,7 +590,7 @@ func (t *Txn) handleBatchNotExecuted(step txnStep, batchErr error, waits int) er
 	return t.failStep(step, batchErr)
 }
 
-func (t *Txn) failBatchWAITCleanup(steps []txnStep, results []txnTransferResult, err error) error {
+func (t *Txn) failBatchWAITCleanup(steps []txnStep, results []transferResult, err error) error {
 	if !batchSuffixAbandoned(results) {
 		return t.failUnexpectedBatchSuffix(steps[:clockedTransferCount(results)], err)
 	}
@@ -634,7 +602,7 @@ func (t *Txn) failBatchWAITCleanup(steps []txnStep, results []txnTransferResult,
 	return err
 }
 
-func (t *Txn) retryBatchWAIT(ctx context.Context, steps []txnStep, results []txnTransferResult, waits *int) error {
+func (t *Txn) retryBatchWAIT(ctx context.Context, steps []txnStep, results []transferResult, waits *int) error {
 	if !batchSuffixAbandoned(results) {
 		return t.failUnexpectedBatchSuffix(steps[:clockedTransferCount(results)], swd.ErrWait)
 	}
@@ -655,11 +623,11 @@ func (t *Txn) retryBatchWAIT(ctx context.Context, steps []txnStep, results []txn
 	return nil
 }
 
-func batchSuffixAbandoned(results []txnTransferResult) bool {
+func batchSuffixAbandoned(results []transferResult) bool {
 	unsent := false
 	for i := 1; i < len(results); i++ {
 		err := results[i].err()
-		if errors.Is(err, swd.ErrNotExecuted) {
+		if results[i].outcome == transferUnsent {
 			unsent = true
 			continue
 		}
@@ -670,9 +638,9 @@ func batchSuffixAbandoned(results []txnTransferResult) bool {
 	return true
 }
 
-func clockedTransferCount(results []txnTransferResult) int {
+func clockedTransferCount(results []transferResult) int {
 	for i := 1; i < len(results); i++ {
-		if errors.Is(results[i].err(), swd.ErrNotExecuted) {
+		if results[i].outcome == transferUnsent {
 			return i
 		}
 	}
@@ -687,7 +655,7 @@ func (t *Txn) failUnexpectedBatchSuffix(steps []txnStep, ackErr error) error {
 	return cause
 }
 
-func (t *Txn) failBatchTransport(steps []txnStep, results []txnTransferResult, batchErr error) error {
+func (t *Txn) failBatchTransport(steps []txnStep, results []transferResult, batchErr error) error {
 	primary := errors.Join(batchErr, ErrIndeterminate)
 	t.dp.state.loseFraming()
 	lastOp := steps[0].op
