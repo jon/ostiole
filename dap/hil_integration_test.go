@@ -156,7 +156,11 @@ func openHardwareDebugPortWithFaultWire(t *testing.T, ctx context.Context) (*dap
 	}
 	ch, err := ftdi.Open(ctx, dev, ftdi.Config{Port: ftdi.PortA, MaxClockHz: 400_000})
 	if err != nil {
-		t.Fatal(errors.Join(err, dev.Close()))
+		closeOwner := dev.Close
+		if ch != nil {
+			closeOwner = ch.Close
+		}
+		t.Fatal(errors.Join(err, closeOwner()))
 	}
 	t.Cleanup(func() {
 		if err := ch.Close(); err != nil {

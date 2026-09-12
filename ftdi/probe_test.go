@@ -27,7 +27,7 @@ func TestProbeRetainsFTDICleanupAfterFailedSetupAndDrain(t *testing.T) {
 		fakeUSBDevice: &fakeUSBDevice{abortErr: drain, abortErrEP: 0x02},
 		setupErr:      setup,
 	}
-	channel, err := openProbeChannel(t.Context(), raw, Config{Port: PortA, MaxClockHz: 100_000})
+	channel, err := openChannel(t.Context(), raw, Config{Port: PortA, MaxClockHz: 100_000})
 	if channel == nil || !errors.Is(err, setup) || !errors.Is(err, drain) {
 		t.Fatalf("lost cleanup channel: %T, %v", channel, err)
 	}

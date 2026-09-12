@@ -20,21 +20,12 @@ func OpenProbe(ctx context.Context, identity usb.DeviceInfo, port Port) (*probe.
 		function = "B"
 	}
 	return probeusb.Open(ctx, identity, function, func(ctx context.Context, device *usb.Device, config probe.SWDConfig) (probeusb.Session, error) {
-		session, err := openProbeChannel(ctx, ownedUSBDevice{Device: device}, Config{Port: port, MaxClockHz: config.MaxClockHz})
+		session, err := Open(ctx, device, Config{Port: port, MaxClockHz: config.MaxClockHz})
 		if session == nil {
 			return nil, err
 		}
 		return session, err
 	})
-}
-
-func openProbeChannel(ctx context.Context, device usbDevice, config Config) (*Channel, error) {
-	channel, err := newChannel(device, config)
-	if err != nil {
-		return nil, err
-	}
-	_, err = prepareChannel(ctx, channel)
-	return channel, err
 }
 
 func supportedDevice(info usb.DeviceInfo) bool {

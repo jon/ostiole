@@ -64,6 +64,7 @@ func (c *Channel) Close() error {
 	if c == nil || c.device == nil {
 		return nil
 	}
+	c.active = false
 	var result error
 	if c.claim != nil {
 		if err := c.claim.AbortBulk(c.bulkOut); err != nil {
@@ -83,5 +84,9 @@ func (c *Channel) Close() error {
 			return errors.Join(result, err)
 		}
 	}
-	return errors.Join(result, c.device.Close())
+	result = errors.Join(result, c.device.Close())
+	if result == nil {
+		c.device = nil
+	}
+	return result
 }

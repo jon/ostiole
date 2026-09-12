@@ -95,7 +95,11 @@ func openChannel(ctx context.Context) (*ftdi.Channel, error) {
 	}
 	ch, err := ftdi.Open(ctx, dev, ftdi.Config{Port: ftdi.PortA, MaxClockHz: 400_000})
 	if err != nil {
-		return nil, errors.Join(err, dev.Close())
+		closeOwner := dev.Close
+		if ch != nil {
+			closeOwner = ch.Close
+		}
+		return nil, errors.Join(err, closeOwner())
 	}
 	return ch, nil
 }

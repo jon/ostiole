@@ -8,21 +8,22 @@ The current hardware paths are:
 
 ```text
 USB host access
-      |
-      v
-FTDI MPSSE, J-Link, or CMSIS-DAP v2 adapter
-      |
-      v
-Serial Wire Debug
-      |
-      v
-Arm Debug Port and MEM-AP
-      |
-      v
-Cortex-M identity
-      |
-      v
-examples and ost
+  |
+  +-- FTDI MPSSE --> JTAG TAPs and explicit chains
+  |
+  +-- FTDI MPSSE, J-Link, or CMSIS-DAP v2
+        |
+        v
+      Serial Wire Debug
+        |
+        v
+      Arm Debug Port and MEM-AP
+        |
+        v
+      Cortex-M identity
+        |
+        v
+      examples and ost
 ```
 
 Programs can stop at any layer. Reading a raw SWD register does not require a
@@ -38,7 +39,7 @@ debugger service.
 | `armdebug` | Own a probe, its connected SW-DP, and explicitly acquired MEM-APs; restore APs before releasing DAP/SWD and closing the probe. |
 | `discover` | Enumerate registered transports, classify probe bindings, and select one candidate without owning an open probe. |
 | `discover/probes` | Register all bundled probe providers for generic tools. |
-| `ftdi` | Own one explicitly selected FTDI MPSSE port and expose direction-safe SWD bits. |
+| `ftdi` | Own one explicitly selected FTDI MPSSE port and expose direction-safe SWD bits or packed JTAG clocks. |
 | `jlink` | Find one reviewed J-Link USB application interface, own its command session, configure SWD, and adapt scan v3 to direction-explicit SWD bits. |
 | `cmsisdap` | Shortlist CMSIS-DAP product strings, validate one explicitly selected v2 bulk interface, own its command session, configure SWD, and adapt packet-bounded sequence commands to direction-explicit SWD bits. |
 | `swd` | Enter SWD, establish its response grammar, and encode, execute, and validate individual or packed DP/AP register transactions. |
@@ -70,7 +71,7 @@ ordering ties by numeric bus/address and VID/PID; missing or duplicate serials
 cannot keep physical-device ordering stable when replugging changes addresses.
 
 Each concrete driver exposes `OpenProbe` to acquire an exact USB attachment
-under a generic `probe.Probe`. Interface claim and SWD configuration happen
+under a generic `probe.Probe`. Interface claim and channel setup happen
 when the owner lends SWD. The concrete adapters share the USB-to-session
 ownership transition and retain either the attachment or returned session
 after failed activation, so the generic owner can retry cleanup.
@@ -90,8 +91,16 @@ for the driver. A device that disappeared or changed identity returns
 
 `ftdi.SupportedDevices` provides the USB identities understood by the FTDI
 driver. It does not select a device. `ftdi.Open` derives the product from the
-opened USB device; `ftdi.Config` selects the MPSSE port and a maximum SWD
+opened USB device; `ftdi.Config` selects the MPSSE port and a maximum wire
 clock. The channel reports the attainable clock it configured.
+
+`ftdi.Open` initializes MPSSE and the clock with target pins as inputs.
+The same `Channel` supplies `SWDIO` and `JTAGIO`; each nonempty call establishes
+its pin directions before clocking. No protocol or wiring selector is needed.
+A non-nil channel owns the attachment even on error; a nil result leaves it
+with the caller. Calls are serialized. Do not mix raw traffic underneath a
+borrowed SWD or JTAG connection, whose protocol state that traffic invalidates.
+Release higher-level state before closing the channel. No reset pin is driven.
 
 `jlink.SupportedDevices` likewise returns exact candidate identities rather
 than a vendor wildcard. `jlink.Open` inspects the active descriptors, rejects
@@ -125,7 +134,7 @@ up and released in reverse order.
 | `*usb.Enumerator` | Holds inventory configuration, not an open attachment. |
 | `*usb.Device` | Owns one open attachment. `ClaimInterface` returns the sole owner of one interface; that value reads the selected alternate before its first endpoint lookup, selects later alternates explicitly, submits bulk transfers, and releases the claim. A successful macOS alternate selection retains the active pipe properties IOKit reports. A failed alternate selection invalidates cached endpoint state so the next lookup reads the host state again. A failed release can be retried, and `Device.Close` does not close the attachment while release remains pending. |
 | `*usb.BulkTransfer` | Represents one request on one active bulk endpoint. Its buffer length is the requested transfer length; the endpoint address supplies direction. `Wait` reports the exact count for a successful short or zero-length completion, and ending the wait context does not cancel the request. A host-engine failure can end `Wait` before `Done` closes; the buffer remains host-owned until `Done`. `AbortBulk` cancels and performs a bounded drain of every pending request on the named endpoint. Failed cancellation or drain retains the requests and claim for another cleanup attempt. Closing the claim applies the same bound before release. |
-| `*ftdi.Channel` | Takes ownership of the USB device after `ftdi.Open` succeeds. It keeps enough ordered maximum-packet-sized IN requests armed to cover its largest response and consumes FTDI status-only completions independently of MPSSE writes. An ambiguous transfer or asynchronous receive failure poisons the channel before later traffic can use the command stream. Recovery requires closing it and opening a new one. `Close` drains bulk OUT before resetting bit mode, setting the latency timer to 16 ms, purging the receive and transmit paths, releasing the interface, and closing the device. A failed cancellation or interface release leaves the channel and device open for another `Close`. It does not preserve prior FTDI settings. |
+| `*ftdi.Channel` | Takes ownership of the USB device whenever `ftdi.Open` returns a non-nil channel, including on error. It keeps enough ordered maximum-packet-sized IN requests armed to cover its largest response and consumes FTDI status-only completions independently of MPSSE writes. An ambiguous transfer or asynchronous receive failure poisons the channel before later traffic can use the command stream. Recovery requires closing it and opening a new one. `Close` drains bulk OUT before resetting bit mode, setting the latency timer to 16 ms, purging the receive and transmit paths, releasing the interface, and closing the device. A failed cancellation or interface release leaves the channel and device open for another `Close`. It does not preserve prior FTDI settings. |
 | `*jlink.Session` | Takes ownership of the USB device after `jlink.Open` succeeds. Metadata-only open claims the descriptor-selected application interface, resolves its active endpoint properties, and leaves target configuration unchanged. `WithSWD` or `ConfigureSWD` selects SWD and sets volatile probe clock state; `Close` does not restore an unknown prior interface or clock. A complete nonzero scan status requires explicit reconfiguration. An ambiguous bulk exchange or abandoned response poisons the session, and later commands require closing it and explicitly reopening the device. A failed interface release leaves `Close` retryable. Device close runs once, and later calls return its cached result. |
 | `*cmsisdap.Session` | Takes ownership of the USB device after `cmsisdap.Open` succeeds. It claims one descriptor-selected v2 command interface and uses the probe's negotiated packet size, with one full response IN request submitted before each command OUT request. Metadata-only open sends no target-port command. `WithSWD` or `ConfigureSWD` connects the SWD port and requests a maximum clock. After failed SWD configuration, `Open` makes a bounded cleanup attempt; if a synchronized disconnect remains pending, it returns the session with the error. After a poisoned exchange, `Close` reports the abandoned port and continues USB cleanup without sending another command. Device close runs once, and later calls return its cached result. |
 | `*swd.Conn` | Owns one logical SWD transaction stream and the ORUNDETECT bit it adds. `Connect` establishes the target's response grammar and `Release` restores the inherited setting. It does not own a separate host resource. Calls must be serialized. |
@@ -144,10 +153,10 @@ connection with another transaction owner while the debug port remains in
 use. No layer adds a mutex; serialization belongs to the composition.
 
 Constructors and open operations attempt to clean up resources acquired before
-a failed return. `ftdi.Open` takes ownership of its input only on success. After
-an error, the caller closes the device; that call is harmless when `Open`
-already completed cleanup and retries it otherwise. A failed `cmsisdap.Open`
-can instead return a non-nil session when synchronized target-port cleanup
+a failed return. A non-nil result from `ftdi.Open` retains cleanup obligations
+in the returned channel; close that channel and retain it if cleanup fails.
+Only a nil result leaves device cleanup with the caller. A failed `cmsisdap.Open`
+can return a non-nil session when synchronized target-port cleanup
 remains retryable; the caller closes that session before the device.
 
 ## Protocol and policy boundaries

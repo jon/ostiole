@@ -42,8 +42,8 @@ func TestChannelExecutesDirectionSafeSWDRuns(t *testing.T) {
 }
 
 func TestChannelReportsSWDTransferLimit(t *testing.T) {
-	if got := (*Channel)(nil).MaxTransferBits(); got != 16_384 {
-		t.Fatalf("MaxTransferBits() = %d, want 16384", got)
+	if got := (*Channel)(nil).MaxTransferBits(); got != 0 {
+		t.Fatalf("MaxTransferBits() = %d, want 0", got)
 	}
 }
 
@@ -156,6 +156,7 @@ func TestPoisonedChannelStillClosesAndRetriesCleanup(t *testing.T) {
 	if err := channel.openUSBTransfers(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	channel.active = true
 	if _, err := channel.SWDIO(context.Background(), []byte{1}, []byte{1}, 1); !errors.Is(err, ErrChannelPoisoned) {
 		t.Fatalf("SWDIO() error = %v, want ErrChannelPoisoned", err)
 	}

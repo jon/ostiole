@@ -142,9 +142,37 @@ bits. An invalid response length or a wire error loses TAP synchronization.
 Only an explicit successful Reset permits movement afterward. Cancellation
 before a wire call preserves the last confirmed state.
 
-Hardware-independent tests exercise the wire and TAP state machine. No
-bundled adapter implements `jtag.Wire` yet, so this path has not been tested
-on hardware.
+## FTDI wire
+
+`ftdi.Open(ctx, device, ftdi.Config{Port: ftdi.PortA, MaxClockHz: 100_000})`
+opens one explicitly selected USB attachment as a protocol-neutral MPSSE
+channel. Opening leaves target pins as inputs; `JTAGIO` establishes JTAG
+pin directions before each nonempty call. `SWDIO` establishes SWD directions.
+The config selects the port and clock; the wire operation determines directions. A non-nil
+`Channel` owns the attachment even when open returns an error; close that
+channel and retain it if cleanup fails. A nil channel leaves the device with
+the caller for cleanup. Opening does not preserve earlier FTDI settings.
+
+The caller must verify standard MPSSE wiring: pin 0 TCK, pin 1 TDI, pin 2
+TDO, and pin 3 TMS. TCK/TDI/TMS are outputs and the remaining pins are inputs.
+No reset pin is driven. The channel drives TMS and TDI on falling TCK edges
+and samples TDO on rising edges. Both wire methods accept at most 8,192 clocks per call;
+`jtag.Conn` splits longer scans. A failed exchange poisons the channel rather
+than replaying clocks. Release the chain before closing its channel. Do not mix raw SWD and JTAG
+traffic underneath a protocol connection; serialize every call on the channel.
+
+On Nostalgia, the ZCU104 FT4232H (`0403:6011`, serial `01691`, port A) passed:
+
+```sh
+OSTIOLE_ZCU104_JTAG_HIL=1 OSTIOLE_JTAG_SERIAL=01691 \
+  go test -tags integration ./ftdi -run '^TestHILFT4232HJTAG$' -count=1 -v
+```
+
+At 100 kHz, reset discovery returned Arm IDCODE `0x5ba00477` and Xilinx
+IDCODE `0x14730093`. The test validated the explicit IR4/IR12 layout, read
+the Arm IDCODE through selected TAP 0, parked the chain in BYPASS/Idle, and
+closed the channel. The board's DAP had already been activated externally;
+the test does not activate it or access DAP registers or target memory.
 
 The [OpenOCD JTAG primer](https://openocd.org/doc/doxygen/html/primerjtag.html)
 describes TAP state and scan mechanics. The reset sequence also appears in
