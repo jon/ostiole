@@ -48,7 +48,7 @@ func (r *txnResult) resolve(value uint32, err error) {
 	}
 	r.resolved = true
 	r.value = value
-	r.err = err
+	r.err = classifyPortError(err)
 }
 
 type txnOpKind uint8
@@ -192,7 +192,7 @@ func (t *Txn) Commit(ctx context.Context) error {
 		t.resolveSuffix(0)
 		return err
 	}
-	return t.execute(ctx, newTxnPlanner(t.dp).plan(t.ops))
+	return classifyPortError(t.execute(ctx, newTxnPlanner(t.dp).plan(t.ops)))
 }
 
 func (dp *DebugPort) settlePreviousDPWrite(ctx context.Context) error {

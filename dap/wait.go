@@ -55,7 +55,8 @@ func apTransferRequest(addr uint8, read bool) transferRequest {
 }
 
 func (dp *DebugPort) transfer(ctx context.Context, req transferRequest, data uint32) (uint32, error) {
-	return dp.transferWithAPRecovery(ctx, req, data, waitMayAffectAP(req), true)
+	value, err := dp.transferWithAPRecovery(ctx, req, data, waitMayAffectAP(req), true)
+	return value, classifyPortError(err)
 }
 
 func (dp *DebugPort) transferOnce(ctx context.Context, req transferRequest, data uint32) (uint32, error) {
@@ -67,7 +68,7 @@ func (dp *DebugPort) transferDPWriteBarrier(ctx context.Context) (uint32, error)
 	if err == nil || errors.Is(err, swd.ErrParity) || faultHasValidState(err) {
 		dp.state.settleDPWrite()
 	}
-	return value, err
+	return value, classifyPortError(err)
 }
 
 func (dp *DebugPort) transferWithAPRecovery(ctx context.Context, req transferRequest, data uint32, apWork, settlePrevious bool) (uint32, error) {
@@ -183,7 +184,7 @@ func (dp *DebugPort) finishRetryError(req transferRequest, value uint32, err err
 }
 
 func (dp *DebugPort) handleFault(req transferRequest, apWork bool) error {
-	fault := &FaultError{}
+	fault := &FaultError{cause: swd.ErrFault}
 	if !dp.state.responseKnown() || !dp.state.faultBankZero() {
 		dp.state.loseFraming()
 		return errors.Join(fault, errors.New("dap: cannot read CTRL/STAT after FAULT without a known response grammar and bank-zero selection"))
