@@ -101,7 +101,7 @@ func (s *Session) transportReady(ctx context.Context) error {
 }
 
 func (s *Session) sessionReady() error {
-	if s == nil || s.device == nil {
+	if s == nil || s.device == nil || s.closing {
 		return errors.New("jlink: session is closed")
 	}
 	if s.claim == nil {

@@ -79,6 +79,7 @@ type Session struct {
 	delayInput   bool
 	inputCarry   bool
 	closeDone    bool
+	closing      bool
 	closeErr     error
 }
 
@@ -142,8 +143,11 @@ func openSession(ctx context.Context, device usbDevice, options ...Option) (_ *S
 }
 
 func configureOpen(ctx context.Context, session *Session, config openConfig) error {
-	if !config.configureSWD {
+	if !config.configure {
 		return nil
+	}
+	if config.interfaceID == interfaceJTAG {
+		return session.ConfigureJTAG(ctx, config.maxClockHz)
 	}
 	return session.ConfigureSWD(ctx, config.maxClockHz)
 }
@@ -317,11 +321,14 @@ func (s *Session) Info() Info {
 
 // Close releases the application interface and closes the USB device. A
 // failed interface release retains the claim so Close can retry it. Device
-// close runs once; later calls return its cached result.
+// close runs once; later calls return its cached result. Starting Close blocks
+// configuration and scans even if releasing the interface fails.
 func (s *Session) Close() error {
 	if s == nil {
 		return nil
 	}
+	s.closing = true
+	s.configured = false
 	if s.claim != nil {
 		if err := s.claim.Close(); err != nil {
 			return err

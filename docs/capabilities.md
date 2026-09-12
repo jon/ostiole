@@ -62,12 +62,13 @@ It does not own SWD transactions, DAP, or MEM-AP state.
 `Probe.JTAG` similarly lends packed JTAG clocks. Only one protocol can be
 activated per owner. Close invalidates either borrowed surface, including
 when cleanup must be retried. Unsupported protocols fail before activation.
-FTDI owners support SWD or standard-pin JTAG; J-Link and CMSIS-DAP owners
-currently support SWD only. JTAG TAP and chain state belong to `jtag`.
+FTDI and J-Link owners support SWD or JTAG; CMSIS-DAP owners currently support
+SWD only. JTAG TAP and chain state belong to `jtag`.
 
 FTDI, J-Link, and CMSIS-DAP expose exact-attachment `OpenProbe` entry points.
-These acquire USB without adapter or target traffic; requesting SWD opens
-the concrete session. FTDI also requires one explicit supported MPSSE port.
+These acquire USB without adapter or target traffic; activating a protocol
+opens the concrete session. FTDI also requires one explicit supported MPSSE
+port.
 
 ## Arm debug ownership
 
@@ -124,9 +125,10 @@ wires its MPSSE port for debugging.
 | Firmware record | Yes | Retains the complete length-delimited record and exposes its first NUL-delimited field for display. |
 | Capabilities | Yes | Preserves the opaque short or long bitset. The long query is gated by short bit 31, and the common prefix must agree. |
 | Optional metadata | Yes | Capability-gated hardware version, workspace hint, available target interfaces, and current target interface. A selected interface outside the 0–31 range represented by the availability mask is rejected. |
-| Target-interface effects | Optional | Metadata-only `Open` remains passive. `WithSWD` or `ConfigureSWD` explicitly selects advertised SWD and requests a whole-kHz target clock no greater than the caller's ceiling. The clock command has no application response. Close does not restore an unknown prior interface or clock. |
+| Target-interface effects | Optional | Metadata-only `Open` remains passive. `WithSWD`/`ConfigureSWD` or `WithJTAG`/`ConfigureJTAG` selects the advertised interface and requests a whole-kHz target clock no greater than the caller's ceiling. Conflicting open options fail before traffic. The clock command has no application response. Close does not restore an unknown prior interface or clock. |
 | SWD adapter | Yes | A configured session implements `swd.Wire` and `swd.TransferLimits` through scan v3. It masks output where the target drives SWDIO and reports the configured clock and conservative scan limit. |
-| Scan completion | Yes | Samples and the trailing status byte are read separately. Status 6 reports insufficient probe workspace. Any complete nonzero status requires explicit SWD reconfiguration but does not poison the USB session. No scan is replayed. |
+| JTAG adapter | Yes | A configured session implements `jtag.Wire` and `jtag.TransferLimits` through scan v3. TMS and TDI are independent packed streams, and TDO is returned without the SWD sample correction. The conservative 504-bit limit can be lowered by workspace. Wrong-protocol calls fail before traffic. |
+| Scan completion | Yes | Samples and the trailing status byte are read separately. Status 6 reports insufficient probe workspace. Any complete nonzero status requires explicit protocol reconfiguration but does not poison the USB session. No scan is replayed. Starting Close blocks configuration and scans, including after a failed interface release. |
 | Ambiguous transfer handling | Yes | A failed, invalid, or progress-free bulk exchange poisons the session. Cancellation after a complete command but before its complete response is likewise ambiguous. The first transfer failure remains visible through cancellation cleanup; later commands require an explicit close and reopen. |
 | Metadata-only reopen | HIL | A genuine J-Link EDU Mini V2 completed 100 consecutive reopen tests, or 200 fresh sessions, on macOS. Every session returned its full firmware record, 256 capability bits, hardware version, workspace, available interfaces, and current interface. The selected interface remained SWD. No scan or target-control command was sent. |
 | Read-only SWD composition | HIL | At a requested 100 kHz, a genuine J-Link EDU Mini V2 reported a 504-bit scan limit and completed ten full restoration runs against a Cortex-M target. Each run used two fresh sessions, read DPIDR `0x2BA01477`, AP0 IDR `0x24770011`, CPUID `0x410FC241` with part `0xC24`, and DHCSR, and matched DPIDR, CPUID, and DHCSR.S_HALT across reopen. The saved AP0 CSW and TAR values were restored before release. An earlier target returned DPIDR `0x0BB11477`, AP0 IDR `0x04770021`, and Cortex-M0 CPUID `0x410CC200`. |
@@ -138,6 +140,13 @@ on FTDI. The tested EDU Mini returned target-input
 samples displaced by one clock. The correction is gated to its USB product and
 full firmware record; for other firmware records, the package returns the
 samples unchanged.
+
+The J-Link JTAG bench on Nostalgia uses EDU Mini V2 serial `000802011345`
+and a two-TAP ESP32 chain. Direct and registered-probe paths at 100 kHz found
+two `0x120034e5` IDCODEs, measured total IR length 10, validated an explicit
+5+5 layout, and read each TAP's IDCODE while bypassing the other. Both paths
+released the chain to BYPASS/Idle and closed USB. This does not establish
+target-memory access, run control, or support for other probe firmware.
 
 ## CMSIS-DAP v2 USB session
 
@@ -193,11 +202,12 @@ specification notes, and current physical observation.
 and idle clocks over a supplied wire, with bounded transfers and
 unknown-state recovery after wire failures.
 Hardware-independent tests cover the state graph, reset sequence, transfer
-limits, and cancellation. FTDI supplies the bundled `jtag.Wire` implementation.
-Bounded discovery distinguishes IDCODE and bypass entries. IR measurement
-checks total length without inferring individual boundaries. Explicit chain
-layouts validate reset identities, total length, and capture boundaries;
-selected-TAP scans own bypass padding and detect stale instruction selection.
+limits, and cancellation. FTDI and J-Link supply bundled `jtag.Wire`
+implementations. Bounded discovery distinguishes IDCODE and bypass entries.
+IR measurement checks total length without inferring individual boundaries.
+Explicit chain layouts validate reset identities, total length, and capture
+boundaries; selected-TAP scans own bypass padding and detect stale
+instruction selection.
 Behavioral tests cover multiple TAPs, dummy DAPs, invalid lengths, borrowed
 surface invalidation, and retryable release. The FT4232H bench above exercises
 these chain operations; there is no JTAG-DP implementation yet.

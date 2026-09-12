@@ -14,19 +14,34 @@ type Option struct {
 }
 
 type openConfig struct {
-	configureSWD bool
-	maxClockHz   uint32
+	configure   bool
+	interfaceID uint8
+	maxClockHz  uint32
 }
 
 // WithSWD configures Open to select SWD and request a whole-kHz target clock no
 // greater than maxClockHz after reading probe metadata. The request must be at
-// least 1 kHz.
+// least 1 kHz. SWD and JTAG options cannot be combined in one Open call.
 func WithSWD(maxClockHz uint32) Option {
+	return withInterface(maxClockHz, interfaceSWD)
+}
+
+// WithJTAG configures Open to select JTAG and request a whole-kHz target clock
+// no greater than maxClockHz. The request must be at least 1 kHz. SWD and JTAG
+// options cannot be combined in one Open call.
+func WithJTAG(maxClockHz uint32) Option {
+	return withInterface(maxClockHz, interfaceJTAG)
+}
+
+func withInterface(maxClockHz uint32, target uint8) Option {
 	return Option{apply: func(config *openConfig) error {
 		if maxClockHz < 1_000 {
-			return errors.New("SWD clock ceiling must be at least 1 kHz")
+			return errors.New("target clock ceiling must be at least 1 kHz")
 		}
-		config.configureSWD = true
+		if config.configure && config.interfaceID != target {
+			return errors.New("SWD and JTAG options cannot be combined")
+		}
+		config.configure, config.interfaceID = true, target
 		config.maxClockHz = maxClockHz
 		return nil
 	}}

@@ -32,7 +32,7 @@ target, inspect a system, or provide a project-specific recovery utility.
 
 Ostiole is at an early, exploratory stage. The available packages provide
 native Linux and macOS USB access, an explicitly configured FTDI MPSSE path,
-descriptor-selected J-Link and CMSIS-DAP v2 metadata and SWD sessions, and
+descriptor-selected J-Link SWD/JTAG and CMSIS-DAP v2 SWD sessions, and
 conservative raw Serial Wire Debug transactions without automatic retries.
 
 The `swd/sim` package provides a hardware-free behavioral wire that models SWD

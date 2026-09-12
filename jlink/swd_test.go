@@ -257,7 +257,7 @@ func TestSWDTransferLimitUsesWorkspaceWithoutApplyingUSBPacketPolicy(t *testing.
 	device := metadataPeer(t, nil)
 	session := configuredSession(device, "another probe")
 	session.info.WorkspaceKnown, session.info.Workspace = true, 36
-	if _, err := session.swdTransferLimit(); err == nil {
+	if _, err := session.scanTransferLimit(minimumSWDFrameBits); err == nil {
 		t.Fatal("swdTransferLimit() accepted less than one connection sequence")
 	}
 	for _, test := range []struct {
@@ -269,7 +269,7 @@ func TestSWDTransferLimitUsesWorkspaceWithoutApplyingUSBPacketPolicy(t *testing.
 		{workspace: ^uint32(0), want: 504},
 	} {
 		session.info.Workspace = test.workspace
-		limit, err := session.swdTransferLimit()
+		limit, err := session.scanTransferLimit(minimumSWDFrameBits)
 		if err != nil {
 			t.Fatalf("workspace %d: %v", test.workspace, err)
 		}
@@ -278,7 +278,7 @@ func TestSWDTransferLimitUsesWorkspaceWithoutApplyingUSBPacketPolicy(t *testing.
 		}
 	}
 	session.application.bulkIn.MaxPacketSize = 64
-	limit, err := session.swdTransferLimit()
+	limit, err := session.scanTransferLimit(minimumSWDFrameBits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +320,7 @@ func configuredSession(device *peerUSBDevice, record string) *Session {
 		device: device, claim: &peerUSBClaim{device: device}, application: applicationInterface{
 			bulkIn: usb.Endpoint{Address: 0x84, MaxPacketSize: 512}, bulkOut: usb.Endpoint{Address: 0x03, MaxPacketSize: 512},
 		},
-		info: Info{USB: device.identity, Firmware: firmware, FirmwareRecord: []byte(record)}, configured: true, clockHz: 100_000, transferBits: 504,
+		info: Info{USB: device.identity, Firmware: firmware, FirmwareRecord: []byte(record), SelectedInterface: interfaceSWD}, configured: true, clockHz: 100_000, transferBits: 504,
 		delayInput: device.identity.PID == 0x1020 && record == delayedInputFirmwareRecord,
 	}
 }

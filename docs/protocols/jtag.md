@@ -163,18 +163,20 @@ the borrowed wire, even if the implementation still has cleanup to retry.
 opens one explicitly selected USB attachment as a protocol-neutral MPSSE
 channel. Opening leaves target pins as inputs; `JTAGIO` establishes JTAG
 pin directions before each nonempty call. `SWDIO` establishes SWD directions.
-The config selects the port and clock; the wire operation determines directions. A non-nil
-`Channel` owns the attachment even when open returns an error; close that
-channel and retain it if cleanup fails. A nil channel leaves the device with
-the caller for cleanup. Opening does not preserve earlier FTDI settings.
+The config selects the port and clock; the wire operation determines
+directions. A non-nil `Channel` owns the attachment even when open returns an
+error; close that channel and retain it if cleanup fails. A nil channel
+leaves the device with the caller for cleanup. Opening does not preserve
+earlier FTDI settings.
 
 The caller must verify standard MPSSE wiring: pin 0 TCK, pin 1 TDI, pin 2
 TDO, and pin 3 TMS. TCK/TDI/TMS are outputs and the remaining pins are inputs.
 No reset pin is driven. The channel drives TMS and TDI on falling TCK edges
-and samples TDO on rising edges. Both wire methods accept at most 8,192 clocks per call;
-`jtag.Conn` splits longer scans. A failed exchange poisons the channel rather
-than replaying clocks. Release the chain before closing its channel. Do not mix raw SWD and JTAG
-traffic underneath a protocol connection; serialize every call on the channel.
+and samples TDO on rising edges. Both wire methods accept at most 8,192
+clocks per call; `jtag.Conn` splits longer scans. A failed exchange poisons
+the channel rather than replaying clocks. Release the chain before closing
+its channel. Do not mix raw SWD and JTAG traffic underneath a protocol
+connection; serialize every call on the channel.
 
 On Nostalgia, the ZCU104 FT4232H (`0403:6011`, serial `01691`, port A) passed:
 
@@ -190,6 +192,34 @@ closed the channel. Both direct opening and registered discovery through
 `Probe.JTAG` completed the same sequence. The board's DAP had already been
 activated externally; neither path activates it or accesses DAP registers
 or target memory.
+
+## J-Link wire
+
+A J-Link probe opened through discovery or `jlink.OpenProbe` lends JTAG through
+the same `Probe.JTAG` call and cleanup sequence above. Direct users select it
+with `jlink.Open(ctx, device, jlink.WithJTAG(100_000))` or configure an existing
+session with `ConfigureJTAG`. Configuration selects the advertised interface
+and clock; it does not move the TAP. `JTAGIO` rejects an SWD-configured session
+before sending traffic. Release the current protocol owner before switching.
+See [J-Link USB, SWD, and JTAG](jlink.md) for session ownership and scan errors.
+
+On Nostalgia, EDU Mini V2 serial `000802011345` with firmware
+`J-Link EDU Mini V2 compiled Jun 25 2026 10:27:52` passed:
+
+```sh
+OSTIOLE_JLINK_JTAG_HIL=1 OSTIOLE_JLINK_HIL_SERIAL=000802011345 \
+  go test -tags integration ./jlink -run '^TestHILJLink(Probe)?JTAG$' -count=1 -v -timeout 90s
+```
+
+Both direct and registered-probe paths requested 100 kHz and used the 504-bit
+scan limit. Discovery returned two `0x120034e5` TAPs, matching the
+[ESP32 configuration](https://github.com/espressif/openocd-esp32/blob/master/tcl/target/esp32.cfg).
+The test measured total IR length 10, validated an explicit 5+5 layout, and
+read each TAP's IDCODE using instruction `0x1e` while bypassing the other.
+Chain release parked both TAPs in BYPASS/Idle before USB close. The probe path
+also checked that its borrowed wire was invalid after close. No target memory,
+power register, halt, or physical reset operation was exercised. This evidence
+covers one probe firmware and one chain, not all J-Link models.
 
 The [OpenOCD JTAG primer](https://openocd.org/doc/doxygen/html/primerjtag.html)
 describes TAP state and scan mechanics. The reset sequence also appears in
