@@ -220,8 +220,9 @@ transactions through RDBUFF. Ordered transactions use `swd.Batch` for ordinary
 fixed frames but keep sticky-exempt DPIDR, CTRL/STAT, and ABORT operations at a
 physical boundary. A packed WAIT retries the WAITed request and the suffix the
 target abandoned; it does not repeat the confirmed prefix.
-The private SWD executor resolves wire batch results before returning them to
-the transaction policy. Unsent and rejected requests remain distinct from
+The private SWD executor owns request retries, sticky-fault recovery, and the
+SELECT confirmations that depend on SWD response grammar. It resolves wire
+batch results before returning them to the transaction policy. Unsent and rejected requests remain distinct from
 confirmed transfers and ambiguous exchanges; read parity errors still report
 that the request was accepted, without claiming that its data is valid.
 `NewAPSel` constructs an AP selector whose zero value is invalid.

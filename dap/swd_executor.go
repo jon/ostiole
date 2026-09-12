@@ -28,13 +28,15 @@ func (r transferResult) err() error { return r.cause }
 
 type swdExecutor struct {
 	*swd.Conn
+
+	dp *DebugPort
 }
 
-func newSWDExecutor(conn *swd.Conn) *swdExecutor {
+func newSWDExecutor(conn *swd.Conn, dp *DebugPort) *swdExecutor {
 	if conn == nil {
 		return nil
 	}
-	return &swdExecutor{Conn: conn}
+	return &swdExecutor{Conn: conn, dp: dp}
 }
 
 func (e *swdExecutor) Connect(ctx context.Context) (uint32, error) {
@@ -46,7 +48,7 @@ func (e *swdExecutor) Release(ctx context.Context) error {
 	return classifyPortError(e.Conn.Release(ctx))
 }
 
-func (e *swdExecutor) transfer(ctx context.Context, req transferRequest, data uint32) (uint32, error) {
+func (e *swdExecutor) exchange(ctx context.Context, req transferRequest, data uint32) (uint32, error) {
 	if req.AP && req.Read {
 		return e.ReadAP(ctx, req.Addr)
 	}

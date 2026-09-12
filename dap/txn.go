@@ -199,7 +199,7 @@ func (dp *DebugPort) settlePreviousDPWrite(ctx context.Context) error {
 	if !dp.state.dpWritePending {
 		return nil
 	}
-	_, err := dp.transferDPWriteBarrier(ctx)
+	_, err := dp.conn.transferDPWriteBarrier(ctx)
 	if err != nil {
 		return fmt.Errorf("dap: settle previous DP write before transaction: %w", err)
 	}
@@ -568,7 +568,7 @@ func (t *Txn) handleBatchFailure(ctx context.Context, steps []txnStep, results [
 		if !batchSuffixAbandoned(results) {
 			return t.failUnexpectedBatchSuffix(steps[:clockedTransferCount(results)], err)
 		}
-		return t.failStep(steps[0], t.dp.handleFault(steps[0].req, stepMayAffectAP(steps[0])))
+		return t.failStep(steps[0], t.dp.conn.handleFault(steps[0].req, stepMayAffectAP(steps[0])))
 	}
 	if errors.Is(err, swd.ErrParity) {
 		clocked := clockedTransferCount(results)
@@ -585,7 +585,7 @@ func (t *Txn) handleBatchFailure(ctx context.Context, steps []txnStep, results [
 
 func (t *Txn) handleBatchNotExecuted(step txnStep, batchErr error, waits int) error {
 	if waits > 0 {
-		return t.failStep(step, t.dp.finishWait(batchErr, stepMayAffectAP(step)))
+		return t.failStep(step, t.dp.conn.finishWait(batchErr, stepMayAffectAP(step)))
 	}
 	return t.failStep(step, batchErr)
 }
@@ -613,11 +613,11 @@ func (t *Txn) retryBatchWAIT(ctx context.Context, steps []txnStep, results []tra
 		return t.failStep(step, cause)
 	}
 	t.observeStep(step, 0, swd.ErrWait)
-	if err := t.dp.validateWait(step.req, swd.ErrWait); err != nil {
+	if err := t.dp.conn.validateWait(step.req, swd.ErrWait); err != nil {
 		return t.failStep(step, err)
 	}
 	(*waits)++
-	if err := t.dp.stopAfterWAIT(ctx, *waits, stepMayAffectAP(step)); err != nil {
+	if err := t.dp.conn.stopAfterWAIT(ctx, *waits, stepMayAffectAP(step)); err != nil {
 		return t.failStep(step, err)
 	}
 	return nil
@@ -737,7 +737,7 @@ func (t *Txn) acceptStep(step txnStep, value uint32) {
 }
 
 func (t *Txn) observeStep(step txnStep, value uint32, err error) {
-	t.dp.resolveSELECT(step.req, value, err)
+	t.dp.conn.resolveSELECT(step.req, value, err)
 	if step.settlesDPWrite && (err == nil || errors.Is(err, swd.ErrParity) || faultHasValidState(err)) {
 		t.dp.state.settleDPWrite()
 	} else if !step.settlesDPWrite && responseSettlesPreviousDPWrite(step.req, err) {
