@@ -36,7 +36,7 @@ func TestPortErrorClassificationPreservesSWDCauses(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			target := &portErrorTarget{Target: sim.New(0x2ba01477), cause: test.cause}
 			addAP(t, target, 0, 0x24770011)
-			dp := dap.NewDebugPort(swd.New(swdsim.New(target)), dap.WithMaxWaits(1))
+			dp := dap.NewDebugPort(dap.SWDP(swd.New(swdsim.New(target))), dap.WithMaxWaits(1))
 			if _, err := dp.Connect(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -54,7 +54,7 @@ func TestPortErrorClassificationPreservesSWDCauses(t *testing.T) {
 
 func TestQueuedErrorsRetainProtocolIndependentClassification(t *testing.T) {
 	target := &portErrorTarget{Target: sim.New(0x2ba01477), cause: swd.ErrWait}
-	dp := dap.NewDebugPort(swd.New(swdsim.New(target)), dap.WithMaxWaits(1))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(swdsim.New(target))), dap.WithMaxWaits(1))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestQueuedErrorsRetainProtocolIndependentClassification(t *testing.T) {
 }
 
 func TestSuccessfulPortReadHasNoError(t *testing.T) {
-	dp := dap.NewDebugPort(swd.New(swdsim.New(sim.New(0x2ba01477))))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(swdsim.New(sim.New(0x2ba01477)))))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}

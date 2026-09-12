@@ -12,6 +12,7 @@ type transferOutcome uint8
 const (
 	transferUnsent transferOutcome = iota
 	transferRejected
+	transferInFlight
 	transferConfirmed
 	transferIndeterminate
 )

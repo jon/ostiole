@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"time"
-
-	"github.com/jon/ostiole/swd"
 )
 
 const dlcrTurnaroundMask = uint32(3 << 8)
@@ -23,35 +21,35 @@ type debugPortOptions struct {
 }
 
 // WithCleanupTimeout sets the independent budget for each recovery attempt.
-// The default is one second. Connect rejects nonpositive durations before
-// traffic. Ordinary operations remain bounded by their caller's context.
+// The default is one second for SWD and thirty seconds for JTAG. Connect
+// rejects nonpositive durations before traffic. Ordinary operations remain
+// bounded by their caller's context.
 func WithCleanupTimeout(timeout time.Duration) Option {
 	return Option{apply: func(options *debugPortOptions) {
 		options.cleanupTimeout = timeout
 	}}
 }
 
-// WithMaxWaits limits clean WAIT responses for one physical request without
-// sending traffic. Reaching a nonzero limit returns swd.ErrWait. One disables
-// WAIT retries; zero leaves retrying bounded only by the operation context. The
-// limit counts responses, not time, and does not bound a blocked host call.
+// WithMaxWaits limits WAIT observations for one request or pending completion
+// without traffic. Reaching a nonzero limit reports ErrWait. One stops at the
+// first WAIT; zero uses only the operation context. The limit counts responses,
+// not time, and does not bound a blocked host call.
 func WithMaxWaits(maxWaits uint) Option {
 	return Option{apply: func(options *debugPortOptions) {
 		options.maxWaits = maxWaits
 	}}
 }
 
-// DebugPort enters and accesses one SW-DP through an SWD connection.
+// DebugPort enters and accesses one SW-DP or baseline ADIv5 JTAG-DP.
 //
-// Calls to a DebugPort and its underlying connection must be serialized.
-// DebugPort caches protocol state, so do not use the connection directly while
-// the debug port remains in use. A DebugPort retries the same physical request
-// after a clean WAIT until its configured limit is reached or the operation
-// context ends. It does not retry a FAULT. If the context ends, errors.Is
-// reports the context error and the original WAIT is not retained as
-// swd.ErrWait. Independently joined cleanup failures remain visible.
+// Calls to a DebugPort and its underlying connection or chain must be
+// serialized. Give the debug port exclusive use until Release succeeds.
+// SWD retries rejected requests; JTAG polls an accepted operation without
+// replaying it. Neither replays faults or ambiguous transfers. Cancellation
+// returns the context error together with any cleanup failure.
 type DebugPort struct {
 	conn           *swdExecutor
+	jtag           *jtagExecutor
 	maxWaits       uint
 	cleanupTimeout time.Duration
 	identity       Identity
@@ -61,23 +59,25 @@ type DebugPort struct {
 	state          debugPortState
 }
 
-// NewDebugPort returns a debug-port client over conn. The one-argument form
-// retries a clean WAIT while the operation context remains active. Built-in
-// options send no traffic. Connect performs SWD protocol entry. The caller must
-// give the returned client exclusive use of conn's transaction stream until
-// the client is no longer used. Do not call conn.Connect, conn.Release,
-// conn.ReadDP, conn.WriteDP, conn.ReadAP, conn.WriteAP, or conn.JTAGToSWD while
-// using the DebugPort; doing so can invalidate its cached register selection
-// and response state.
-func NewDebugPort(conn *swd.Conn, options ...Option) *DebugPort {
+// NewDebugPort returns a client for port without traffic. Use SWDP or JTAGDP
+// to construct the binding. Connect validates it and performs protocol entry.
+// The client never closes the probe. Release acquired MemAPs, then the debug
+// port, before closing the probe; retain dependencies after a cleanup failure.
+func NewDebugPort(port Port, options ...Option) *DebugPort {
 	config := debugPortOptions{cleanupTimeout: time.Second}
+	if port.jtag {
+		config.cleanupTimeout = 30 * time.Second
+	}
 	for _, option := range options {
 		if option.apply != nil {
 			option.apply(&config)
 		}
 	}
 	dp := &DebugPort{maxWaits: config.maxWaits, cleanupTimeout: config.cleanupTimeout}
-	dp.conn = newSWDExecutor(conn, dp)
+	dp.conn = newSWDExecutor(port.swd, dp)
+	if port.jtag {
+		dp.jtag = &jtagExecutor{dp: dp, chain: port.chain, index: port.tapIndex}
+	}
 	return dp
 }
 
@@ -101,8 +101,9 @@ func (dp *DebugPort) SetMaxWaits(maxWaits uint) error {
 }
 
 // ReadDP reads one logical ADIv5 debug-port register. Bank-independent and
-// bank-zero registers remain distinct. Nonzero banks require an active DPv1 or
-// DPv2 connection; DPv3 uses the ADIv6 map. The debug port must be connected.
+// bank-zero registers remain distinct. Nonzero banks require an active SW-DP
+// DPv1 or DPv2 connection. Baseline JTAG-DP has no banked DP registers or DPIDR;
+// it supplies IDCODE instead. The debug port must be connected.
 func (dp *DebugPort) ReadDP(ctx context.Context, reg DPRegister) (uint32, error) {
 	if err := dp.requireOperational(); err != nil {
 		return 0, err
@@ -111,12 +112,15 @@ func (dp *DebugPort) ReadDP(ctx context.Context, reg DPRegister) (uint32, error)
 }
 
 func (dp *DebugPort) readDP(ctx context.Context, reg DPRegister) (uint32, error) {
-	if dp == nil || dp.conn == nil {
-		return 0, errors.New("dap: nil SWD connection")
+	if !dp.bound() {
+		return 0, errors.New("dap: invalid port binding")
 	}
 	info, err := dp.validateDPRegister(reg, false)
 	if err != nil {
 		return 0, err
+	}
+	if dp.jtag != nil {
+		return dp.jtag.readDP(ctx, reg)
 	}
 	if !info.bankIndependent && dp.state.dpBankAmbiguous() {
 		return 0, errors.New("dap: DP register bank is ambiguous after an unconfirmed SELECT write")
@@ -144,9 +148,10 @@ func (dp *DebugPort) readDPRegister(ctx context.Context, reg DPRegister, info dp
 	return value, nil
 }
 
-// WriteDP writes one logical ADIv5 debug-port register. The SWD connection owns
-// CTRL/STAT.ORUNDETECT, so writes must preserve that bit. Writes that require
-// unsupported turnaround framing are rejected before traffic. Release does
+// WriteDP writes one logical ADIv5 debug-port register. The binding owns
+// CTRL/STAT.ORUNDETECT: preserve its SWD value and keep it clear for JTAG.
+// JTAG pushed-operation and transaction-counter modes are rejected, as are
+// unsupported SWD turnaround settings. Release does
 // not restore power-request bits changed through this method. A successful
 // DAPABORT write invalidates existing MemAP values. The debug port must be
 // connected.
@@ -182,6 +187,12 @@ func (dp *DebugPort) confirmPendingSELECT(ctx context.Context) error {
 }
 
 func (dp *DebugPort) validateDPRegister(reg DPRegister, write bool) (dpRegisterInfo, error) {
+	if dp != nil && dp.jtag != nil {
+		return dp.jtag.register(reg, write)
+	}
+	if reg == IDCODE {
+		return dpRegisterInfo{}, errors.New("dap: IDCODE is unavailable on SW-DP")
+	}
 	info, ok := describeDPRegister(reg)
 	if !ok {
 		return dpRegisterInfo{}, fmt.Errorf("dap: invalid DP register %#04x", uint16(reg))
@@ -204,6 +215,9 @@ func (dp *DebugPort) validateDPWrite(reg DPRegister, value uint32) (dpRegisterIn
 	info, err := dp.validateDPRegister(reg, true)
 	if err != nil {
 		return dpRegisterInfo{}, err
+	}
+	if dp.jtag != nil {
+		return info, dp.jtag.validateWrite(reg, value)
 	}
 	if reg == CTRLSTAT && !dp.state.responseKnown() {
 		return dpRegisterInfo{}, errors.New("dap: write CTRL/STAT requires a known SWD response grammar")
@@ -231,12 +245,15 @@ func (dp *DebugPort) validateBankedDPRegister(info dpRegisterInfo) error {
 }
 
 func (dp *DebugPort) writeDP(ctx context.Context, reg DPRegister, value uint32) error {
-	if dp == nil || dp.conn == nil {
-		return errors.New("dap: nil SWD connection")
+	if !dp.bound() {
+		return errors.New("dap: invalid port binding")
 	}
 	info, err := dp.validateDPWrite(reg, value)
 	if err != nil {
 		return err
+	}
+	if dp.jtag != nil {
+		return dp.jtag.writeDP(ctx, reg, value)
 	}
 	if err := dp.prepareDPWrite(ctx, reg, info); err != nil {
 		return err
@@ -289,14 +306,14 @@ func (dp *DebugPort) confirmResponse(state uint32) {
 }
 
 func (dp *DebugPort) requireOperational() error {
-	if dp == nil || dp.conn == nil {
-		return errors.New("dap: nil SWD connection")
+	if !dp.bound() {
+		return errors.New("dap: invalid port binding")
 	}
 	if dp.state.session == sessionRepairRequired {
 		return dp.repairPendingError()
 	}
 	if dp.state.session != sessionConnected {
-		return errors.New("dap: SW-DP is not connected")
+		return errors.New("dap: debug port is not connected")
 	}
 	return nil
 }

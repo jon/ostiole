@@ -66,7 +66,7 @@ func readIdentity(ctx context.Context) (_ identity, err error) {
 		return identity{}, errors.Join(err, closeOwner())
 	}
 	conn := swd.New(ch)
-	dp := dap.NewDebugPort(conn)
+	dp := dap.NewDebugPort(dap.SWDP(conn))
 	defer func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
 		defer cancel()

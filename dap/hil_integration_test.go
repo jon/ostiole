@@ -180,5 +180,5 @@ func openHardwareDebugPortWithFaultWire(t *testing.T, ctx context.Context) (*dap
 		}
 		t.Logf("SWD entries=%d SWDIO_calls=%d physical ACKs: OK=%d WAIT=%d FAULT=%d invalid=%d fixed_calls=%d fixed_frames=%d", wire.entries, wire.calls, wire.counts[0b001], wire.counts[0b010], wire.counts[0b100], invalid, wire.fixedCalls, wire.fixed)
 	})
-	return dap.NewDebugPort(conn), faultWire
+	return dap.NewDebugPort(dap.SWDP(conn)), faultWire
 }

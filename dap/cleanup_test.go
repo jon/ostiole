@@ -37,7 +37,7 @@ func (w *cleanupBudgetWire) SWDIO(ctx context.Context, direction, output []byte,
 func TestCleanupTimeoutValidationIsInert(t *testing.T) {
 	for _, timeout := range []time.Duration{0, -time.Second} {
 		wire := &cleanupBudgetWire{inner: swdsim.New(sim.New(0x2ba01477))}
-		dp := dap.NewDebugPort(swd.New(wire), dap.WithCleanupTimeout(timeout))
+		dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)), dap.WithCleanupTimeout(timeout))
 		if _, err := dp.Connect(t.Context()); err == nil || wire.calls != 0 {
 			t.Fatalf("timeout %v: Connect = %v, calls=%d", timeout, err, wire.calls)
 		}
@@ -46,7 +46,7 @@ func TestCleanupTimeoutValidationIsInert(t *testing.T) {
 
 func TestConnectRejectsNilContextBeforeTraffic(t *testing.T) {
 	wire := &cleanupBudgetWire{inner: swdsim.New(sim.New(0x2ba01477))}
-	dp := dap.NewDebugPort(swd.New(wire))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
 	var nilContext context.Context
 	if _, err := dp.Connect(nilContext); err == nil || wire.calls != 0 {
 		t.Fatalf("Connect(nil) = %v, calls=%d", err, wire.calls)
@@ -55,7 +55,7 @@ func TestConnectRejectsNilContextBeforeTraffic(t *testing.T) {
 
 func TestRecoveryUsesConfiguredIndependentBudget(t *testing.T) {
 	wire := &cleanupBudgetWire{inner: swdsim.New(sim.New(0x2ba01477))}
-	dp := dap.NewDebugPort(swd.New(wire), dap.WithCleanupTimeout(3*time.Second))
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)), dap.WithCleanupTimeout(3*time.Second))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}

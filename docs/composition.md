@@ -570,8 +570,8 @@ access rejects an invalid or unaligned address before traffic. Use it only when
 the caller understands the selected AP class and will restore any state the
 access changes. A raw MEM-AP data-register write can write target memory. This
 layer owns posted AP read and write completion and retries only the physical
-request that returned WAIT. `dap.NewDebugPort(conn)` uses the operation context
-as the retry bound. `dap.NewDebugPort(conn, dap.WithMaxWaits(1))` returns the
+request that returned WAIT. `dap.NewDebugPort(dap.SWDP(conn))` uses the operation context
+as the retry bound. `dap.NewDebugPort(dap.SWDP(conn), dap.WithMaxWaits(1))` returns the
 first clean WAIT as `swd.ErrWait`. `SetMaxWaits` changes the limit before
 `Connect` or after a successful `Release`; it rejects the change while the port
 is connected or cleanup is pending. The count is per physical request and does

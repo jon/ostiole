@@ -190,6 +190,10 @@ func (t *Txn) Commit(ctx context.Context) error {
 		t.resolveInvalid()
 		return err
 	}
+	if t.dp.jtag != nil {
+		t.resolveSuffix(0)
+		return errors.New("dap: JTAG-DP transactions are unavailable")
+	}
 	return t.dp.conn.executeTxn(ctx, t)
 }
 
