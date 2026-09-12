@@ -34,6 +34,13 @@ after release or a cleanup failure. Release acquired MEM-APs before releasing
 the debug port, and keep the wire connection and probe open until that cleanup
 succeeds.
 
+Port operations and queued results support `errors.Is` with `dap.ErrWait`,
+`dap.ErrFault`, and `dap.ErrProtocol`. These classifications retain the
+underlying wire and context errors. `FaultError` reports captured CTRL/STAT
+without naming a wire protocol; an SWD fault still matches `swd.ErrFault`.
+If cancellation stops WAIT retries, the result remains a context error.
+Independently joined cleanup failures remain visible.
+
 ## The SW-DP register window
 
 IHI 0031H sections B2.1-B2.2 and C1.2 define DP and AP addressing. These are

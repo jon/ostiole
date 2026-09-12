@@ -37,6 +37,15 @@ func newSWDExecutor(conn *swd.Conn) *swdExecutor {
 	return &swdExecutor{Conn: conn}
 }
 
+func (e *swdExecutor) Connect(ctx context.Context) (uint32, error) {
+	value, err := e.Conn.Connect(ctx)
+	return value, classifyPortError(err)
+}
+
+func (e *swdExecutor) Release(ctx context.Context) error {
+	return classifyPortError(e.Conn.Release(ctx))
+}
+
 func (e *swdExecutor) transfer(ctx context.Context, req transferRequest, data uint32) (uint32, error) {
 	if req.AP && req.Read {
 		return e.ReadAP(ctx, req.Addr)
