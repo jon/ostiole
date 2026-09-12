@@ -6,6 +6,22 @@ import (
 	"testing"
 )
 
+func TestChainLayoutIsDetachedAndInert(t *testing.T) {
+	w, _, chain := benchChain(t)
+	layout := chain.Layout()
+	if len(layout) != 2 || layout[0].IRBits() != 4 || layout[1].IRBits() != 12 {
+		t.Fatalf("layout = %+v", layout)
+	}
+	layout[0] = TAPSpec{}
+	if chain.Layout()[0].IRBits() != 4 || w.calls != 0 {
+		t.Fatal("layout access mutated the chain or sent traffic")
+	}
+	var missing *Chain
+	if len(missing.Layout()) != 0 || len(new(Chain).Layout()) != 0 {
+		t.Fatal("uninitialized chain has a layout")
+	}
+}
+
 func TestSelectedTAPAndInvalidation(t *testing.T) {
 	w, conn, chain := benchChain(t)
 	ctx := context.Background()

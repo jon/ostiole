@@ -61,6 +61,10 @@ IDCODEs match exactly, including revision bits. Bypass entries carry no
 physical identity guarantee, and equal IDCODEs do not identify individual
 devices.
 
+`chain.Layout()` returns a detached copy of that expected layout without
+traffic. Changing the copy does not change the chain. A nil or uninitialized
+chain returns an empty layout.
+
 ```go
 first, err := jtag.IDCODE(4, firstID)
 if err != nil {

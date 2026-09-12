@@ -37,6 +37,15 @@ func NewChain(conn *Conn, layout Layout) (*Chain, error) {
 	return c, nil
 }
 
+// Layout returns a detached copy of the expected layout without traffic.
+// A nil or uninitialized Chain returns an empty layout.
+func (c *Chain) Layout() Layout {
+	if c == nil {
+		return nil
+	}
+	return append(Layout(nil), c.layout...)
+}
+
 // Connect resets and checks the complete reset chain and each supplied IR
 // capture boundary, then parks all TAPs in BYPASS/Idle. Every attempt invalidates
 // earlier borrowed TAPs. It never changes board-specific chain routing.
