@@ -590,7 +590,7 @@ disables inherited ORUNDETECT and restores it during release. Release MEM-APs,
 then DAP and its chain, before closing the probe. Independent recovery defaults
 to thirty seconds for JTAG, versus one second for SWD; use
 `dap.WithCleanupTimeout` for slower clocks. The [DAP guide](ports/dap.md)
-shows the binding and cleanup sequence. `armdebug` continues
+shows the binding and the read-only FTDI bench procedure. `armdebug` continues
 to compose SWD only.
 
 The SWD connection reads DPIDR, clears supported sticky conditions with ABORT,

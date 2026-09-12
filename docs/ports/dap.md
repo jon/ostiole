@@ -159,6 +159,30 @@ cleanup stops before restoration. Keep the debug port and its probe available
 for cleanup. A poisoned adapter may prevent cleanup; the library reports that
 limitation and never reopens it automatically.
 
+### FTDI JTAG-DP bench
+
+On Nostalgia, the test completed two fresh direct-driver sessions and two
+fresh discovered-probe sessions using FT4232H serial `01691`, port A at
+100 kHz, and the explicit Arm `0x5ba00477`/IR4 and Xilinx `0x14730093`/IR12
+chain. AP1 reported IDR `0x44770002`; reads at
+`0x80410ff0`, `0x80410ff4`, `0x80410ff8`, and `0x80410ffc` returned component
+identification words `0x0d`, `0x90`, `0x05`, and `0xb1`.
+
+```sh
+OSTIOLE_ZCU104_JTAGDP_HIL=1 go test -tags=integration ./dap \
+  -run '^TestHILZCU104JTAGDP$' -count=1 -v
+```
+
+In each session, AP1 CSW/TAR returned to `0x80000042`/`0x00000000`. Each
+acquired both power requests (`0x50000000`) with inherited ORUNDETECT clear,
+then completed DAP/chain release and probe close. Fresh sessions found the
+same inherited power/control state.
+
+Board-specific chain activation was completed externally after a power cycle.
+The test did not halt a processor, assert target reset, or write target memory.
+It does not establish later JTAG-DP register support or Arm JTAG-DP behavior
+on the J-Link ESP32 bench.
+
 ## The SW-DP register window
 
 IHI 0031H sections B2.1-B2.2 and C1.2 define DP and AP addressing. These are
