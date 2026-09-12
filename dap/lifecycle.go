@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 )
 
 const (
@@ -27,6 +26,9 @@ const (
 func (dp *DebugPort) Connect(ctx context.Context) (Identity, error) {
 	if dp == nil || dp.conn == nil {
 		return Identity{}, errors.New("dap: nil SWD connection")
+	}
+	if dp.cleanupTimeout <= 0 {
+		return Identity{}, errors.New("dap: cleanup timeout must be positive")
 	}
 	if dp.state.session == sessionConnected {
 		return Identity{}, errors.New("dap: SW-DP connection is already active")
@@ -95,7 +97,7 @@ func (dp *DebugPort) readResponseState(ctx context.Context) (uint32, error) {
 }
 
 func (dp *DebugPort) failConnect(cause error) error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := dp.cleanupContext()
 	defer cancel()
 	if dp.state.response == responseLost || dp.state.ownedPower != 0 {
 		if err := dp.reenter(ctx); err != nil {
@@ -127,7 +129,7 @@ func (dp *DebugPort) Release(ctx context.Context) error {
 	releaseCtx := ctx
 	if !dp.state.responseKnown() {
 		var cancel context.CancelFunc
-		releaseCtx, cancel = context.WithTimeout(context.Background(), time.Second)
+		releaseCtx, cancel = dp.cleanupContext()
 		defer cancel()
 		if err := dp.reenter(releaseCtx); err != nil {
 			return fmt.Errorf("dap: restore SWD protocol state for release: %w", err)

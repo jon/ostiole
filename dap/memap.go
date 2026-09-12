@@ -398,7 +398,7 @@ func (m *MemAP) prepareRelease(ctx context.Context) (context.Context, context.Ca
 	if m.dp.state.responseKnown() {
 		return ctx, func() {}, nil
 	}
-	releaseCtx, cancel := context.WithTimeout(context.Background(), waitRecoveryTimeout)
+	releaseCtx, cancel := m.dp.cleanupContext()
 	if err := m.dp.reenter(releaseCtx); err != nil {
 		cancel()
 		return nil, nil, fmt.Errorf("dap: restore SWD protocol state for MEM-AP release: %w", err)
