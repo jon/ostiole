@@ -828,7 +828,7 @@ func TestFailedConnectRepairBlocksOperations(t *testing.T) {
 	}
 	before := len(target.requests)
 	assertRepairBlocksTraffic(t, dp, target, before)
-	if info, ok := dp.Identity(); !ok || info.Raw != 0x2ba01477 {
+	if info, ok := dp.Identity(); !ok || swdIdentity(t, info).Raw != 0x2ba01477 {
 		t.Fatalf("Identity() = %+v, %t after repair failure", info, ok)
 	}
 	if err := dp.Release(t.Context()); err != nil {
@@ -1723,7 +1723,7 @@ func TestConnectRollsBackAgainstCurrentSetupIdentity(t *testing.T) {
 	if state&(debugRequest|systemRequest) != 0 {
 		t.Fatalf("power requests after rollback = %#08x, want 0", state)
 	}
-	if info, ok := dp.Identity(); !ok || info.Raw != 0x2ba01477 {
+	if info, ok := dp.Identity(); !ok || swdIdentity(t, info).Raw != 0x2ba01477 {
 		t.Fatalf("Identity() = %+v, %t after failed setup", info, ok)
 	}
 }
@@ -1753,7 +1753,7 @@ func TestConnectRepairsBeforeIdentifyingReplacementTarget(t *testing.T) {
 	if wire.reentries != 1 {
 		t.Fatalf("SWD re-entries = %d, want 1", wire.reentries)
 	}
-	if info, ok := dp.Identity(); !ok || info.Raw != 0x2ba01477 {
+	if info, ok := dp.Identity(); !ok || swdIdentity(t, info).Raw != 0x2ba01477 {
 		t.Fatalf("Identity() = %+v, %t after failed setup", info, ok)
 	}
 
@@ -1761,8 +1761,8 @@ func TestConnectRepairsBeforeIdentifyingReplacementTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect() after automatic repair: %v", err)
 	}
-	if info.Raw != 0x0ba01477 {
-		t.Fatalf("DPIDR = %#08x, want 0x0ba01477", info.Raw)
+	if swdIdentity(t, info).Raw != 0x0ba01477 {
+		t.Fatalf("DPIDR = %#08x, want 0x0ba01477", swdIdentity(t, info).Raw)
 	}
 	if err := dp.Release(t.Context()); err != nil {
 		t.Fatalf("Release() after replacement connection: %v", err)

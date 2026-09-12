@@ -140,8 +140,8 @@ func TestConnectAndReleaseSWDP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Raw != 0x2ba01477 {
-		t.Fatalf("DPIDR = %#08x, want 0x2ba01477", info.Raw)
+	if swdIdentity(t, info).Raw != 0x2ba01477 {
+		t.Fatalf("DPIDR = %#08x, want 0x2ba01477", swdIdentity(t, info).Raw)
 	}
 	assertPower(t, dp, allPower)
 

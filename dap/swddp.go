@@ -42,9 +42,9 @@ func WithMaxWaits(maxWaits uint) Option {
 type DebugPort struct {
 	conn         *swd.Conn
 	maxWaits     uint
-	identity     DPIDRInfo
+	identity     Identity
 	identified   bool
-	reentryID    DPIDRInfo
+	reentryID    Identity
 	reentryKnown bool
 	state        debugPortState
 }
@@ -203,10 +203,10 @@ func (dp *DebugPort) validateBankedDPRegister(info dpRegisterInfo) error {
 	if dp.state.session != sessionConnected || !dp.identified {
 		return errors.New("dap: banked DP access requires an active connection")
 	}
-	if dp.identity.Version > 2 {
-		return fmt.Errorf("dap: ADIv5 banked DP access does not support DPv%d", dp.identity.Version)
+	if dp.identity.dpidr.Version > 2 {
+		return fmt.Errorf("dap: ADIv5 banked DP access does not support DPv%d", dp.identity.dpidr.Version)
 	}
-	if dp.identity.Version < info.minVersion {
+	if dp.identity.dpidr.Version < info.minVersion {
 		return fmt.Errorf("dap: %s requires DPv%d or later", info.name, info.minVersion)
 	}
 	return nil

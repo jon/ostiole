@@ -26,7 +26,7 @@ func TestReadDPIDROverFTDI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("DPIDR=%#08x version=%d designer=%#03x", info.Raw, info.Version, info.Designer)
+	t.Logf("DPIDR=%#08x version=%d designer=%#03x", swdIdentity(t, info).Raw, swdIdentity(t, info).Version, swdIdentity(t, info).Designer)
 }
 
 func TestConnectAndReleaseOverFTDI(t *testing.T) {
@@ -59,7 +59,7 @@ func TestConnectAndReleaseOverFTDI(t *testing.T) {
 	if err := dp.Release(ctx); err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("DPIDR=%#08x after reconnect", second.Raw)
+	t.Logf("DPIDR=%#08x after reconnect", swdIdentity(t, second).Raw)
 }
 
 func TestOverrunResponsesOverFTDI(t *testing.T) {

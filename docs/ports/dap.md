@@ -14,6 +14,26 @@ model and requirements. This note keeps only the traps worth having close at
 hand and the hardware observations below. “DAP” here means Arm Debug Access
 Port, not Microsoft's Debug Adapter Protocol.
 
+## Connection identity
+
+`DebugPort.Connect` returns a `dap.Identity`. Its accessors report whether
+the corresponding identification register is present:
+
+```go
+identity, err := dp.Connect(ctx)
+if err != nil {
+    return err // Connect attempts cleanup; retain dp if Release must retry.
+}
+dpidr, present := identity.DPIDR()
+```
+
+The current SW-DP path supplies DPIDR; `IDCODE()` reports absence rather than
+reinterpreting that value as a JTAG TAP identifier. The zero identity contains
+neither register. `DebugPort.Identity()` retains the last successful identity
+after release or a cleanup failure. Release acquired MEM-APs before releasing
+the debug port, and keep the wire connection and probe open until that cleanup
+succeeds.
+
 ## The SW-DP register window
 
 IHI 0031H sections B2.1-B2.2 and C1.2 define DP and AP addressing. These are

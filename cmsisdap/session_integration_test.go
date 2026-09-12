@@ -115,12 +115,16 @@ func observeCMSISDAPTarget(t *testing.T, ctx context.Context, readyOnOpen bool) 
 	debugPort := dap.NewDebugPort(swd.New(wire))
 	cleanup.retain("debug port", debugPort.Release)
 
-	dpidr, err := debugPort.Connect(ctx)
+	identity, err := debugPort.Connect(ctx)
 	if err != nil {
 		for index, call := range wire.calls {
 			t.Logf("SWDIO[%d] bits=%d direction=%x output=%x input=%x", index, call.bits, call.direction, call.output, call.input)
 		}
 		t.Fatal(err)
+	}
+	dpidr, ok := identity.DPIDR()
+	if !ok {
+		t.Fatal("SW-DP identity has no DPIDR")
 	}
 	transaction := debugPort.NewTxn()
 	dpidrResult := transaction.ReadDP(dap.DPIDR)

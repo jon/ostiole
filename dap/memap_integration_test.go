@@ -57,7 +57,7 @@ func TestReadMEMAPWordOverFTDI(t *testing.T) {
 	}
 	assertHardwareAPRegister(t, ctx, dp, 0x00, savedCSW)
 	assertHardwareAPRegister(t, ctx, dp, 0x04, savedTAR)
-	t.Logf("DPIDR=%#08x CPUID=%#08x", info.Raw, cpuid)
+	t.Logf("DPIDR=%#08x CPUID=%#08x", swdIdentity(t, info).Raw, cpuid)
 }
 
 func assertHardwareAPRegister(t *testing.T, ctx context.Context, dp *dap.DebugPort, address uint8, want uint32) {
