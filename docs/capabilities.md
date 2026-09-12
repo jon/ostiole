@@ -262,6 +262,16 @@ the packages do not add locking.
 The [Arm Debug Access Port guide](ports/dap.md) describes ADIv5 register
 access, posted transactions, power handshakes, and the current bench result.
 
+## CoreSight component identity
+
+`coresight.Identify` reads CIDR and PIDR at an explicit 4 KiB aligned page,
+then DEVARCH, DEVID, and DEVTYPE for class 9. It preserves unknown identifiers
+and performs no target-memory writes. Deterministic tests cover invalid input,
+malformed preambles, cancellation, every read failure, and 64-bit addresses;
+MEM-AP simulation covers both byte orders. It does not walk ROM tables, unlock
+components, or infer the cause of inaccessible memory. See
+[CoreSight component identity](coresight.md).
+
 ## Cortex-M target operations
 
 | Capability | Implemented | Validation and boundary |
@@ -304,7 +314,7 @@ the volatile DAP and MEM-AP state described above.
 ## Not currently provided
 
 There is no CMSIS-DAP HID/v1 transport, automatic probe
-discovery policy, CoreSight or ROM-table discovery,
+discovery policy, ROM-table discovery,
 multi-core or SoC attachment, general target control, semihosting, trace,
 debugger protocol server, firmware flashing, FPGA programming, or Windows
 host implementation.

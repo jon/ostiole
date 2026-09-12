@@ -50,6 +50,7 @@ debugger service.
 | `swd/sim` | Model SWD protocol entry, register transfers, fixed-frame packing, and transfer limits without hardware. |
 | `dap` | Bind SW-DP or baseline ADIv5 JTAG-DP, manage identity and power, execute ordered DP/AP transactions, and provide scalar or block MEM-AP access. |
 | `dap/sim` | Model the DP, AP, and byte-addressed target-memory state consumed by `dap`. |
+| `coresight` | Identify one explicitly addressed debug component through borrowed scalar memory, without acquiring resources or writing target memory. |
 | `target/cortexm` | Read and decode the architectural Cortex-M CPUID value. |
 | `examples/...` | Demonstrate public package compositions as executable programs. |
 | `cmd/ost` | Provide a small command hierarchy over the same public packages. |
@@ -309,6 +310,11 @@ transactions. IDR zero means absent. The scan does not assume contiguous AP
 numbers and reads no class-specific register.
 See [Arm Debug Access Ports](ports/dap.md) for the ADIv5 register protocol and
 the awkward parts of posted and memory access.
+
+`coresight` reads component identification through a scalar-memory reader. It
+uses DAP transfer sizes but owns no DAP or MEM-AP state. See
+[CoreSight component identity](coresight.md) for its register and failure
+boundaries.
 
 `target/cortexm` depends only on a compatible word reader. It knows the CPUID
 address and encoding, but it does not know about USB, FTDI, or SWD.
