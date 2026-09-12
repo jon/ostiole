@@ -32,6 +32,7 @@ data-register write can write target memory.
 | Access another AP register by its full ADIv5 address | `DebugPort.ReadRawAP`, `DebugPort.WriteRawAP` | Package tests |
 | Read or write one aligned target scalar through a MEM-AP | `dap.OpenMemAP`, `MemAP.ReadScalar`, `MemAP.WriteScalar`, `MemAP.Release` | `examples/simple/cortexm-info` uses `ReadWord`. |
 | Read or write arbitrary target bytes through a MEM-AP | `dap.OpenMemAP`, `MemAP.ReadBlock`, `MemAP.WriteBlock`, `MemAP.Release` | Package tests |
+| Identify one debug component through scalar memory | `coresight.Identify` | Package tests |
 | Identify a Cortex-M through any compatible word reader | `cortexm.Identify` | `examples/simple/cortexm-info` |
 | Test SWD and DAP behavior without hardware | `swd/sim`, `dap/sim` | Package tests |
 
@@ -760,6 +761,23 @@ close failure is not lost.
 `ftdi.Open` attempts cleanup, then leaves the original device with the caller
 for the `Device.Close` described above. A successfully returned value belongs
 to the caller until its documented release or close method succeeds.
+
+## Identify a debug component
+
+After acquiring a MEM-AP through the owner above, pass it to the component
+reader with an explicitly known identification-page address:
+
+```go
+component, err := coresight.Identify(ctx, memory, 0xe00ff000)
+if err != nil {
+    return err
+}
+fmt.Printf("class=%#x part=%#x\n", component.Class(), component.Part())
+```
+
+This borrows the same memory client and adds no cleanup owner. The address
+must be safe and accessible on the selected AP; it is not a universal default.
+The [component guide](coresight.md) describes the returned identity and errors.
 
 ## Keep policy at the application edge
 
