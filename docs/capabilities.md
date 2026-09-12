@@ -270,7 +270,8 @@ and performs no target-memory writes. Deterministic tests cover invalid input,
 malformed preambles, cancellation, every read failure, and 64-bit addresses;
 MEM-AP simulation covers both byte orders. It does not walk ROM tables, unlock
 components, or infer the cause of inaccessible memory. See
-[CoreSight component identity](coresight.md).
+[CoreSight component identity](coresight.md) for the two-session micro:bit SWD
+and ZCU104 JTAG hardware observations and their limits.
 
 ## Cortex-M target operations
 
@@ -294,6 +295,8 @@ Available examples:
 - `examples/trivial/swd-dpidr` reads one raw DPIDR.
 - `examples/simple/ap-id` reports DPIDR and one explicitly selected AP IDR.
 - `examples/simple/cortexm-info` reports DPIDR, AP IDR, and Cortex-M CPUID.
+- `examples/simple/coresight-info` reads one explicitly addressed component
+  identity through a managed SWD connection and selected MEM-AP.
 - `examples/simple/arm-info` reports the same identities through generic probe
   discovery and one Arm debug owner, with explicit AP selection.
 
