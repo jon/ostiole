@@ -10,7 +10,7 @@ func TestTxnPlannerPipelinesSequentialAPReads(t *testing.T) {
 		{kind: txnReadAPSequential, apSel: sel, apAddr: memAPDRW},
 		{kind: txnReadAPSequential, apSel: sel, apAddr: memAPDRW},
 	}
-	steps := newTxnPlanner(dp).plan(ops)
+	steps := newSWDTxnPlanner(dp).plan(ops)
 	if len(steps) != 6 {
 		t.Fatalf("pipeline steps = %+v, want SELECT, its barrier, three AP reads, and RDBUFF", steps)
 	}
@@ -36,7 +36,7 @@ func TestTxnPlannerPipelinesSequentialAPReads(t *testing.T) {
 func TestTxnPlannerBuffersAPWriteSequence(t *testing.T) {
 	dp := &DebugPort{}
 	ops := []txnOp{{kind: txnWriteAPSequence, apSel: NewAPSel(3), apAddr: memAPDRW, values: []uint32{1, 2, 3}}}
-	steps := newTxnPlanner(dp).plan(ops)
+	steps := newSWDTxnPlanner(dp).plan(ops)
 	if len(steps) != 6 {
 		t.Fatalf("write steps = %+v, want SELECT, its barrier, three AP writes, and RDBUFF", steps)
 	}

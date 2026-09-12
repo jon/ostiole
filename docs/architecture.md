@@ -225,6 +225,11 @@ SELECT confirmations that depend on SWD response grammar. It resolves wire
 batch results before returning them to the transaction policy. Unsent and rejected requests remain distinct from
 confirmed transfers and ambiguous exchanges; read parity errors still report
 that the request was accepted, without claiming that its data is valid.
+The executor also completes posted AP operations and reports confirmed block
+writes and uncertain effects without making MEM-AP interpret SWD errors.
+After interpreting SWD responses, the executor adds DAP error classifications
+to completed operations and individual transaction results while retaining
+their original causes.
 `NewAPSel` constructs an AP selector whose zero value is invalid.
 `APSel.Address` combines it with a
 complete eight-bit register address; the resulting `APAddress` also has an

@@ -28,7 +28,6 @@ func (r transferResult) err() error { return r.cause }
 
 type swdExecutor struct {
 	*swd.Conn
-
 	dp *DebugPort
 }
 
@@ -107,4 +106,34 @@ func (e *swdExecutor) transferSteps(ctx context.Context, steps []txnStep) ([]tra
 		results[i] = queued[i].completed()
 	}
 	return results, err
+}
+
+func (t *Txn) recordSWDCompletions() {
+	for i := range t.ops {
+		op := &t.ops[i]
+		if op.kind != txnWriteAPSequence || !op.result.resolved {
+			continue
+		}
+		err := op.result.err
+		if err == nil || op.accepted == len(op.values) && errors.Is(err, swd.ErrParity) && !errors.Is(err, ErrIndeterminate) {
+			op.confirmed = len(op.values)
+		}
+		op.uncertainWrite = op.accepted > op.confirmed && (len(op.values) != 1 || !faultReportsWriteDataError(err))
+	}
+}
+
+type swdTxn struct{ *Txn }
+
+func (e *swdExecutor) executeTxn(ctx context.Context, txn *Txn) error {
+	defer txn.recordSWDCompletions()
+	if err := e.dp.settlePreviousDPWrite(ctx); err != nil {
+		txn.resolveSuffix(0)
+		return err
+	}
+	err := (&swdTxn{Txn: txn}).execute(ctx, newSWDTxnPlanner(e.dp).plan(txn.ops))
+	for i := range txn.ops {
+		result := txn.ops[i].result
+		result.err = classifyPortError(result.err)
+	}
+	return classifyPortError(err)
 }

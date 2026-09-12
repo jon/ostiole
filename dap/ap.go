@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
-	"github.com/jon/ostiole/swd"
 )
 
 // APSel identifies one access port. Its zero value is invalid; construct a
@@ -113,13 +111,7 @@ func (dp *DebugPort) readAPEffect(ctx context.Context, sel APSel, addr uint8) (b
 	if err := dp.selectAP(ctx, sel, addr); err != nil {
 		return false, 0, err
 	}
-	_, err := dp.conn.transfer(ctx, apTransferRequest(addr&0x0c, true), 0)
-	if err != nil {
-		possible := !requestWasRejected(err) && !requestWasNotSent(err) && !errors.Is(err, swd.ErrFault)
-		return possible, 0, fmt.Errorf("dap: post raw AP read at %#02x: %w", addr, err)
-	}
-	value, err := dp.readDP(ctx, RDBUFF)
-	return true, value, err
+	return dp.conn.readAP(ctx, addr)
 }
 
 // WriteRawAP writes the register at one complete access-port address and waits
@@ -156,15 +148,7 @@ func (dp *DebugPort) writeAPEffect(ctx context.Context, sel APSel, addr uint8, v
 	if err := dp.selectAP(ctx, sel, addr); err != nil {
 		return false, err
 	}
-	_, err := dp.conn.transfer(ctx, apTransferRequest(addr&0x0c, false), value)
-	if err != nil {
-		possible := !requestWasRejected(err) && !requestWasNotSent(err) && !errors.Is(err, swd.ErrFault)
-		return possible, fmt.Errorf("dap: write raw AP register at %#02x: %w", addr, err)
-	}
-	if _, err := dp.readDP(ctx, RDBUFF); err != nil {
-		return !faultReportsWriteDataError(err), fmt.Errorf("dap: complete raw AP write at %#02x: %w", addr, err)
-	}
-	return true, nil
+	return dp.conn.writeAP(ctx, addr, value)
 }
 
 func (dp *DebugPort) selectAP(ctx context.Context, sel APSel, addr uint8) error {
