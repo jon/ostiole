@@ -109,6 +109,10 @@ context. The option does not change the deadline
 for ordinary operations, and `Connect` rejects nonpositive durations before
 sending traffic.
 
+Pass a non-nil context to operations, including transaction commits and owner
+release. Operations reject nil contexts before sending traffic or changing
+protocol state.
+
 ## Baseline JTAG-DP
 
 `dap.JTAGDP` implements the original ADIv5 JTAG-DP register set: IDCODE,

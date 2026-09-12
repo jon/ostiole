@@ -90,7 +90,7 @@ func (m *MemAP) ReadBlock(ctx context.Context, addr uint64, buf []byte) (int, er
 	if m.epoch != m.dp.state.apGeneration {
 		return 0, fmt.Errorf("dap: read target memory: MEM-AP state was invalidated by debug-port recovery")
 	}
-	if err := m.dp.requireConnected(); err != nil {
+	if err := m.dp.requireConnected(ctx); err != nil {
 		return 0, err
 	}
 	if err := validateBlockRange(addr, len(buf), m.largeAddress); err != nil {
@@ -233,7 +233,7 @@ func (m *MemAP) WriteBlock(ctx context.Context, addr uint64, buf []byte) (int, e
 	if m.epoch != m.dp.state.apGeneration {
 		return 0, errors.New("dap: write target memory: MEM-AP state was invalidated by debug-port recovery")
 	}
-	if err := m.dp.requireConnected(); err != nil {
+	if err := m.dp.requireConnected(ctx); err != nil {
 		return 0, err
 	}
 	if err := validateBlockRange(addr, len(buf), m.largeAddress); err != nil {

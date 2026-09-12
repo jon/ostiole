@@ -68,7 +68,7 @@ func DecodeAPIDR(value uint32) APIDRInfo {
 // ReadAPIDR reads and decodes the identification register of one access port.
 // The debug port must be connected and have no cleanup pending.
 func (dp *DebugPort) ReadAPIDR(ctx context.Context, sel APSel) (APIDRInfo, error) {
-	if err := dp.requireConnected(); err != nil {
+	if err := dp.requireConnected(ctx); err != nil {
 		return APIDRInfo{}, err
 	}
 	value, err := dp.readAP(ctx, sel, apIDRAddress)
@@ -84,7 +84,7 @@ func (dp *DebugPort) ReadAPIDR(ctx context.Context, sel APSel) (APIDRInfo, error
 // restore any state the read changes. The address must be four-byte aligned.
 // The debug port must be connected and have no cleanup pending.
 func (dp *DebugPort) ReadRawAP(ctx context.Context, addr APAddress) (uint32, error) {
-	if err := dp.requireConnected(); err != nil {
+	if err := dp.requireConnected(ctx); err != nil {
 		return 0, err
 	}
 	value, err := validateAPAddress(addr, false)
@@ -126,7 +126,7 @@ func (dp *DebugPort) readAPEffect(ctx context.Context, sel APSel, addr uint8) (b
 // must be connected and have no cleanup pending.
 // A JTAG write with uncertain completion also reports ErrIndeterminate.
 func (dp *DebugPort) WriteRawAP(ctx context.Context, addr APAddress, value uint32) error {
-	if err := dp.requireConnected(); err != nil {
+	if err := dp.requireConnected(ctx); err != nil {
 		return err
 	}
 	address, err := validateAPAddress(addr, true)
@@ -198,7 +198,10 @@ func validateRawAPAddress(addr uint8, write bool) error {
 	return nil
 }
 
-func (dp *DebugPort) requireConnected() error {
+func (dp *DebugPort) requireConnected(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("dap: nil context")
+	}
 	if !dp.bound() || dp.state.session == sessionIdle {
 		return errors.New("dap: debug port is not connected")
 	}

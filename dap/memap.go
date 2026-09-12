@@ -132,7 +132,7 @@ func (m *MemAP) ReadScalar(ctx context.Context, addr uint64, size TransferSize) 
 }
 
 func (m *MemAP) readScalar(ctx context.Context, addr uint64, size TransferSize) (uint64, error) {
-	if err := m.checkScalar(addr, size, "read"); err != nil {
+	if err := m.checkScalar(ctx, addr, size, "read"); err != nil {
 		return 0, err
 	}
 	if err := m.selectSize(ctx, size); err != nil {
@@ -173,7 +173,7 @@ func (m *MemAP) readScalar(ctx context.Context, addr uint64, size TransferSize) 
 // An uncertain JTAG write reports ErrIndeterminate and invalidates the MemAP;
 // Release remains available to restore its saved state.
 func (m *MemAP) WriteScalar(ctx context.Context, addr uint64, size TransferSize, value uint64) error {
-	if err := m.checkScalar(addr, size, "write"); err != nil {
+	if err := m.checkScalar(ctx, addr, size, "write"); err != nil {
 		return err
 	}
 	if value&^sizeMask(size) != 0 {
@@ -209,14 +209,14 @@ func (m *MemAP) requireLargeDataCleanup(generation uint64) {
 	m.dp.state.beginRepair()
 }
 
-func (m *MemAP) checkScalar(addr uint64, size TransferSize, operation string) error {
+func (m *MemAP) checkScalar(ctx context.Context, addr uint64, size TransferSize, operation string) error {
 	if m == nil || m.dp == nil {
 		return errors.New("dap: nil MEM-AP")
 	}
 	if m.epoch != m.dp.state.apGeneration {
 		return fmt.Errorf("dap: %s target memory: MEM-AP state was invalidated by debug-port recovery", operation)
 	}
-	if err := m.dp.requireConnected(); err != nil {
+	if err := m.dp.requireConnected(ctx); err != nil {
 		return err
 	}
 	if err := validateScalarAccess(addr, size, m.largeAddress); err != nil {
@@ -394,6 +394,9 @@ func sizeBytes(size TransferSize) (int, error) {
 }
 
 func (m *MemAP) prepareRelease(ctx context.Context) (context.Context, context.CancelFunc, error) {
+	if ctx == nil {
+		return nil, nil, errors.New("dap: nil context")
+	}
 	if m.dp.state.session == sessionIdle {
 		return nil, nil, errors.New("dap: debug port is not connected")
 	}

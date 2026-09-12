@@ -47,6 +47,7 @@ func WithMaxWaits(maxWaits uint) Option {
 // SWD retries rejected requests; JTAG polls an accepted operation without
 // replaying it. Neither replays faults or ambiguous transfers. Cancellation
 // returns the context error together with any cleanup failure.
+// Nil contexts are rejected before traffic or changes to protocol state.
 type DebugPort struct {
 	conn           *swdExecutor
 	jtag           *jtagExecutor
@@ -105,7 +106,7 @@ func (dp *DebugPort) SetMaxWaits(maxWaits uint) error {
 // DPv1 or DPv2 connection. Baseline JTAG-DP has no banked DP registers or DPIDR;
 // it supplies IDCODE instead. The debug port must be connected.
 func (dp *DebugPort) ReadDP(ctx context.Context, reg DPRegister) (uint32, error) {
-	if err := dp.requireOperational(); err != nil {
+	if err := dp.requireOperational(ctx); err != nil {
 		return 0, err
 	}
 	return dp.readDP(ctx, reg)
@@ -156,7 +157,7 @@ func (dp *DebugPort) readDPRegister(ctx context.Context, reg DPRegister, info dp
 // DAPABORT write invalidates existing MemAP values. The debug port must be
 // connected.
 func (dp *DebugPort) WriteDP(ctx context.Context, reg DPRegister, value uint32) error {
-	if err := dp.requireOperational(); err != nil {
+	if err := dp.requireOperational(ctx); err != nil {
 		return err
 	}
 	return dp.writeDP(ctx, reg, value)
@@ -305,7 +306,10 @@ func (dp *DebugPort) confirmResponse(state uint32) {
 	dp.state.confirmResponse(state)
 }
 
-func (dp *DebugPort) requireOperational() error {
+func (dp *DebugPort) requireOperational(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("dap: nil context")
+	}
 	if !dp.bound() {
 		return errors.New("dap: invalid port binding")
 	}

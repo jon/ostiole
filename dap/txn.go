@@ -187,7 +187,7 @@ func (t *Txn) Commit(ctx context.Context) error {
 		t.resolveInvalid()
 		return err
 	}
-	if err := t.checkAccess(); err != nil {
+	if err := t.checkAccess(ctx); err != nil {
 		t.resolveInvalid()
 		return err
 	}
@@ -234,13 +234,13 @@ func (t *Txn) validate() error {
 	return errors.Join(errs...)
 }
 
-func (t *Txn) checkAccess() error {
+func (t *Txn) checkAccess(ctx context.Context) error {
 	for i := range t.ops {
 		op := &t.ops[i]
 		if op.kind == txnReadAPIDR || op.kind == txnReadRawAP || op.kind == txnWriteRawAP || op.kind == txnReadAPSequential || op.kind == txnWriteAPSequence {
-			op.err = t.dp.requireConnected()
+			op.err = t.dp.requireConnected(ctx)
 		} else {
-			op.err = t.dp.requireOperational()
+			op.err = t.dp.requireOperational(ctx)
 		}
 		if op.err != nil {
 			return op.err
