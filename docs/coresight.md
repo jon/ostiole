@@ -1,10 +1,10 @@
-# CoreSight component identity
+# CoreSight component inspection
 
 `coresight.Identify` reads one component's identification registers through a
 borrowed scalar-memory reader. A `dap.MemAP` implements that interface over
 SWD or JTAG. Obtain the advertised identification page from the selected
 MEM-AP with `ReadDebugBase`, or supply an explicitly known address. The package
-does not walk ROM tables.
+can also read individual ROM entries or walk a hierarchy with explicit limits.
 
 ```go
 base, present, err := memory.ReadDebugBase(ctx)
@@ -116,6 +116,62 @@ Entry reads do not access the child. A valid power ID is scoped to the
 containing table and does not establish that the child is powered. This API
 does not request power. Callers must establish access before identifying a
 child in another power domain. Reader ownership and cleanup remain as above.
+
+## Bounded traversal
+
+`Walk` identifies a root and follows present entries in depth-first order. A
+root that is not a ROM table produces one successful visit. Limits apply to
+the entire walk, with root depth zero. The component limit counts the root,
+failed identities, and skipped power-domain children. The entry limit counts
+absent entries and terminators as well as present entries. Validate limits
+before opening hardware when they come from application arguments.
+
+```go
+limits := coresight.WalkLimits{MaxDepth: 8, MaxComponents: 256, MaxEntries: 4096}
+if err := limits.Validate(); err != nil {
+    return err
+}
+visits, err := coresight.Walk(ctx, memory, base, limits)
+for _, visit := range visits {
+    if visit.Component != nil {
+        fmt.Printf("parent=%d entry=%d base=%#x class=%#x\n",
+            visit.Parent, visit.Index, visit.Component.Base, visit.Component.Class())
+    }
+    if visit.Err != nil {
+        fmt.Printf("parent=%d entry=%d: %v\n", visit.Parent, visit.Index, visit.Err)
+    }
+}
+if err != nil {
+    return err
+}
+```
+
+Each visit refers to its parent by index in the returned slice. The root has
+`Parent=-1` and `Index=-1`. Other visits retain the decoded entry, including
+power metadata scoped to the parent table. `Component` is nil if the identity
+was not obtained. Absent entries and terminators have no visits; use individual
+entry reads when their raw values matter.
+
+A power-domain child is recorded with `ErrPowerDomain` and skipped before any
+child access. The walk continues through its accessible siblings but returns
+a non-nil error, so those results cannot be mistaken for a complete inventory.
+It does not test a power-control register, request power, or offer an option
+to assume an advertised domain is accessible.
+
+Other failures stop the walk immediately, including malformed entries,
+unsupported ROM formats, repeated tables, exhausted limits, and memory errors.
+Repeated table references include cycles and duplicate references from separate
+parents; they fail before another identity read. Ordinary component references
+may repeat. Unknown component architectures remain leaves. A successful walk
+covers the supported tables reached from this root, not every debug component
+in the system.
+
+The returned error preserves underlying memory errors and matches
+`ErrWalkLimit`, `ErrRepeatedTable`, or `ErrPowerDomain` when applicable. Earlier
+visits remain available; an identity failure is recorded on its visit. An entry
+read failure or exhausted limit is reported in the returned error, without a
+child visit. Stop using a failed MEM-AP according to its recovery rules,
+then release its owner with bounded, retryable cleanup.
 
 ## Inspection example
 
