@@ -268,13 +268,16 @@ access, posted transactions, power handshakes, and the current bench result.
 ## CoreSight component identity
 
 `coresight.Identify` reads CIDR and PIDR at an explicit 4 KiB aligned page,
-then DEVARCH, DEVID, and DEVTYPE for class 9. It preserves unknown identifiers
-and performs no target-memory writes. Deterministic tests cover invalid input,
-malformed preambles, cancellation, every read failure, and 64-bit addresses;
-MEM-AP simulation covers both byte orders. It does not walk ROM tables, unlock
-components, or infer the cause of inaccessible memory. See
-[CoreSight component identity](coresight.md) for the two-session micro:bit SWD
-and ZCU104 JTAG hardware observations and their limits.
+then DEVARCH, DEVID, and DEVTYPE for class 9. It preserves unknown
+identifiers and performs no target-memory writes. Deterministic tests cover
+invalid input, malformed preambles, cancellation, every read failure, and
+64-bit addresses; MEM-AP simulation covers both byte orders.
+`Component.ROMTable` recognizes class 1 and Arm class 9 ROM geometry;
+`ReadEntry` decodes one entry, including its table-scoped power metadata,
+without accessing the child. It does not walk ROM tables, unlock components,
+or infer the cause of inaccessible memory. See [CoreSight component
+identity](coresight.md) for the two-session micro:bit SWD and ZCU104 JTAG
+hardware observations and their limits.
 
 ## Cortex-M target operations
 

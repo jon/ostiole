@@ -70,6 +70,53 @@ fields, cancellation, failures at every register read, and the final aligned
 page of the 64-bit address space. Composition tests exercise the existing
 SWD/DAP simulator with both MEM-AP byte orders above 4 GiB.
 
+## Reading ROM entries
+
+`Component.ROMTable` derives entry geometry from an identification snapshot
+without accessing memory. It recognizes class 1 and Arm's class 9 ROM
+architecture `0x0af7`, revision 0. Other component architectures return
+`ErrNotROMTable`; an unsupported ROM revision or entry format returns an error.
+A zero table is invalid.
+
+```go
+table, err := component.ROMTable()
+if err != nil {
+    return err
+}
+for i := 0; i < table.EntryCount(); i++ {
+    entry, err := table.ReadEntry(ctx, memory, i)
+    if err != nil {
+        return err
+    }
+    if entry.End {
+        break
+    }
+    if entry.Present {
+        fmt.Printf("entry=%d base=%#x power-ID=%d valid=%t\n",
+            i, entry.Base, entry.PowerID, entry.PowerIDValid)
+    }
+}
+```
+
+Class 1 tables hold at most 960 32-bit entries. Class 9 DEVID.FORMAT selects
+512 32-bit or 256 64-bit entries. A table that fills every slot needs no
+additional terminator. `ReadEntry` reads both words of a 64-bit entry before
+interpreting it and returns no partial entry on error. It applies signed
+relative offsets without allowing address underflow or overflow.
+
+The decoder follows IHI 0029E D6.4.4 and D7.5.17. It rejects reserved
+formats, nonzero reserved bits, zero offsets in present entries, and nonzero
+class 9 terminators. Class 9 absence (`PRESENT=2`) leaves the remaining bits
+uninterpreted. Class 1 FORMAT=0 entries are unsupported; all-ones entries
+are malformed. `Raw` retains the complete entry value on success. Unknown
+class 9 architectures are not interpreted as tables based on their part
+number alone.
+
+Entry reads do not access the child. A valid power ID is scoped to the
+containing table and does not establish that the child is powered. This API
+does not request power. Callers must establish access before identifying a
+child in another power domain. Reader ownership and cleanup remain as above.
+
 ## Inspection example
 
 `examples/simple/coresight-info` opens a managed SWD connection, acquires the
