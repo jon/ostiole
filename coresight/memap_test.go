@@ -53,6 +53,7 @@ func TestIdentifyThroughMEMAP(t *testing.T) {
 			if got.CIDR != 0xb105900d || got.PIDR != 0x24523bb906 || got.DEVARCH != 0x47721a14 {
 				t.Fatalf("identity=%+v", got)
 			}
+			verifyWalkThroughMEMAP(t, mem, target, ap, order)
 		})
 	}
 }
@@ -63,5 +64,26 @@ func releaseSimulation(t *testing.T, release func(context.Context) error) {
 	defer cancel()
 	if err := release(ctx); err != nil {
 		t.Error(err)
+	}
+}
+
+func verifyWalkThroughMEMAP(t *testing.T, mem *dap.MemAP, target *sim.Target, ap dap.APSel, order binary.ByteOrder) {
+	t.Helper()
+	const high = uint64(1) << 32
+	for address, word := range walkMemory().words {
+		var bytes [4]byte
+		order.PutUint32(bytes[:], word)
+		if err := target.SetMEMAPBytes(ap, high+address, bytes[:]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	visits, err := coresight.Walk(t.Context(), mem, high+0x10000, walkLimits())
+	if err != nil || len(visits) != 4 {
+		t.Fatalf("visits=%+v err=%v", visits, err)
+	}
+	for i, base := range []uint64{0x10000, 0x20000, 0x30000, 0x40000} {
+		if visits[i].Component == nil || visits[i].Component.Base != high+base {
+			t.Fatalf("visit %d=%+v", i, visits[i])
+		}
 	}
 }

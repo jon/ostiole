@@ -274,8 +274,10 @@ invalid input, malformed preambles, cancellation, every read failure, and
 64-bit addresses; MEM-AP simulation covers both byte orders.
 `Component.ROMTable` recognizes class 1 and Arm class 9 ROM geometry;
 `ReadEntry` decodes one entry, including its table-scoped power metadata,
-without accessing the child. It does not walk ROM tables, unlock components,
-or infer the cause of inaccessible memory. See [CoreSight component
+without accessing the child. `Walk` follows tables with explicit depth,
+component, and entry limits, preserves partial results, rejects repeated
+tables, and skips power-domain children. It does not unlock components, or
+infer the cause of inaccessible memory. See [CoreSight component
 identity](coresight.md) for the two-session micro:bit SWD and ZCU104 JTAG
 hardware observations and their limits.
 
@@ -324,7 +326,7 @@ the volatile DAP and MEM-AP state described above.
 ## Not currently provided
 
 There is no CMSIS-DAP HID/v1 transport, automatic probe
-discovery policy, ROM-table traversal,
+discovery policy,
 multi-core or SoC attachment, general target control, semihosting, trace,
 debugger protocol server, firmware flashing, FPGA programming, or Windows
 host implementation.

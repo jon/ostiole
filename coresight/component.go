@@ -1,4 +1,4 @@
-// Package coresight identifies debug components through target memory.
+// Package coresight identifies debug components and inspects ROM tables through target memory.
 // It borrows the reader and neither writes target memory nor owns cleanup.
 package coresight
 
@@ -11,7 +11,7 @@ import (
 )
 
 // ScalarReader reads aligned target scalars as numeric values, independently
-// of target byte order. Identify uses only dap.Size32. A dap.MemAP implements
+// of target byte order. Inspection uses only dap.Size32. A dap.MemAP implements
 // this interface; its owner remains responsible for serialization and release.
 type ScalarReader interface {
 	ReadScalar(context.Context, uint64, dap.TransferSize) (uint64, error)
