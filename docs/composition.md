@@ -34,6 +34,7 @@ data-register write can write target memory.
 | Read or write arbitrary target bytes through a MEM-AP | `dap.OpenMemAP`, `MemAP.ReadBlock`, `MemAP.WriteBlock`, `MemAP.Release` | Package tests |
 | Obtain a MEM-AP's advertised debug entry | `MemAP.ReadDebugBase` | `examples/simple/coresight-info` |
 | Identify one debug component through scalar memory | `coresight.Identify` | `examples/simple/coresight-info` |
+| Inspect ROM entries or a bounded component hierarchy | `Component.ROMTable`, `ROMTable.ReadEntry`, `coresight.Walk` | `examples/simple/coresight-info -walk` |
 | Identify a Cortex-M through any compatible word reader | `cortexm.Identify` | `examples/simple/cortexm-info` |
 | Test SWD and DAP behavior without hardware | `swd/sim`, `dap/sim` | Package tests |
 
@@ -787,7 +788,11 @@ This borrows the same memory client and adds no cleanup owner. An advertised
 address still requires component power and access permissions. A caller that
 already knows another accessible identification page can pass that address
 directly to `coresight.Identify`.
-The [component guide](coresight.md) describes the returned identity and errors.
+Use `coresight.Walk` with explicit `WalkLimits` to follow ROM entries. Retain
+partial visits when it returns an error, and leave power-domain children
+skipped until access has been established separately. The same memory owner
+retains cleanup responsibility. The [component guide](coresight.md) describes
+entry decoding, traversal bounds, power metadata, and incomplete results.
 
 ## Keep policy at the application edge
 

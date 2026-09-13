@@ -30,6 +30,7 @@ func run() (err error) {
 	function := flag.String("function", "", "exact probe function")
 	ap := flag.Int("ap", -1, "required MEM-AP index (0..255)")
 	address := flag.String("base", "", "override the MEM-AP debug base with a known identification page")
+	walk := flag.Bool("walk", false, "walk ROM tables with depth 8, 256 visits, and 4096 entry reads")
 	flag.Parse()
 	base, err := parseBase(*address)
 	if err != nil {
@@ -62,6 +63,13 @@ func run() (err error) {
 		if !present {
 			return errors.New("selected MEM-AP advertises no debug entry")
 		}
+	}
+	return inspect(ctx, memory, base, *walk)
+}
+
+func inspect(ctx context.Context, memory *dap.MemAP, base uint64, walk bool) error {
+	if walk {
+		return printWalk(ctx, memory, base)
 	}
 	component, err := coresight.Identify(ctx, memory, base)
 	if err != nil {
@@ -99,4 +107,20 @@ func parseBase(value string) (uint64, error) {
 		return 0, errors.New("-base must be a 4 KiB aligned address")
 	}
 	return base, nil
+}
+
+func printWalk(ctx context.Context, memory *dap.MemAP, base uint64) error {
+	limits := coresight.WalkLimits{MaxDepth: 8, MaxComponents: 256, MaxEntries: 4096}
+	visits, err := coresight.Walk(ctx, memory, base, limits)
+	for i, visit := range visits {
+		fmt.Printf("visit=%d parent=%d entry=%d\n", i, visit.Parent, visit.Index)
+		if visit.Component != nil {
+			printComponent(*visit.Component)
+		}
+		if visit.Err != nil {
+			fmt.Printf("%v\n", visit.Err)
+		}
+	}
+	fmt.Printf("visits=%d complete=%t\n", len(visits), err == nil)
+	return err
 }

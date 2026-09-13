@@ -27,3 +27,4 @@ an example has been implemented.
   reads DPIDR, AP IDR, and Cortex-M identity through one Arm debug owner.
 - [`simple/coresight-info`](simple/coresight-info) reads the advertised debug entry
   of a selected MEM-AP, or a known component page, through a managed SWD connection.
+  Add `-walk` for bounded ROM traversal with partial-result reporting.

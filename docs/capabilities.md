@@ -265,7 +265,7 @@ the packages do not add locking.
 The [Arm Debug Access Port guide](ports/dap.md) describes ADIv5 register
 access, posted transactions, power handshakes, and the current bench result.
 
-## CoreSight component identity
+## CoreSight component inspection
 
 `coresight.Identify` reads CIDR and PIDR at an explicit 4 KiB aligned page,
 then DEVARCH, DEVID, and DEVTYPE for class 9. It preserves unknown
@@ -280,6 +280,13 @@ tables, and skips power-domain children. It does not unlock components, or
 infer the cause of inaccessible memory. See [CoreSight component
 identity](coresight.md) for the two-session micro:bit SWD and ZCU104 JTAG
 hardware observations and their limits.
+
+ROM traversal HIL completed six identities on the micro:bit. On ZCU104 it
+returned seventeen identities and a failed visit at `0x803e0000`, then stopped.
+Both observations repeated in fresh sessions with successful owner close.
+See the [ROM traversal hardware evidence](coresight.md#rom-traversal-hardware-evidence)
+for exact selections, bounds, and the incomplete ZCU104 result. Class 9 table
+layouts and power-domain skips have hardware-independent test coverage.
 
 ## Cortex-M target operations
 
@@ -305,7 +312,8 @@ Available examples:
 - `examples/simple/cortexm-info` reports DPIDR, AP IDR, and Cortex-M CPUID.
 - `examples/simple/coresight-info` reads the MEM-AP's advertised component
   identity, or an explicitly supplied page, through a managed SWD connection
-  and selected MEM-AP.
+  and selected MEM-AP. Its `-walk` option follows ROM entries with fixed
+  depth, component, and entry bounds.
 - `examples/simple/arm-info` reports the same identities through generic
   probe discovery and one Arm debug owner, with explicit AP selection.
 

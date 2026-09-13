@@ -192,6 +192,20 @@ identification page. The example requests a 100 kHz clock and applies a
 ten-second operation deadline. The library also accepts memory clients
 reached through JTAG; the example configures SWD only.
 
+Add `-walk` to follow the advertised root with depth 8, at most 256 visits,
+and at most 4096 entry reads across the hierarchy:
+
+```sh
+go run ./examples/simple/coresight-info \
+  -provider cmsisdap -serial SERIAL -ap 0 -walk
+```
+
+`-base ADDRESS` also applies to walks. The output includes parent and entry
+indexes, available identities, per-component errors, and a `complete` field.
+Incomplete inspection exits unsuccessfully after printing its partial results
+and attempting owner cleanup. These fixed bounds keep the example small;
+library callers supply their own `WalkLimits`.
+
 ## Hardware evidence
 
 On September 12, 2026, the macOS Nostalgia bench ran:
@@ -228,3 +242,39 @@ The example passed on that micro:bit with its exact serial, both with the
 advertised address and with `-base 0xe00ff000`. These results cover the
 advertised entry and one known page on each bench, not ROM traversal,
 component register access, or physical large-address and big-endian support.
+
+## ROM traversal hardware evidence
+
+On September 12, 2026, Nostalgia ran:
+
+```sh
+OSTIOLE_ROM_HIL=1 \
+  go test -tags=integration -run '^TestHILROMWalk$' -count=1 -v ./coresight
+```
+
+The test uses the same exact probe selections and externally enabled ZCU104
+chain described above. Each path opens two fresh sessions at 100 kHz, reads
+its MEM-AP's advertised root, and walks with depth 8, 256 visits, 4096 entry
+reads, and a 120-second operation deadline.
+
+The micro:bit SWD AP0 walk completed with six identities. Its root at
+`0xf0000000` led to the nested table at `0xe00ff000`, components at
+`0xe000e000`, `0xe0001000`, and `0xe0002000`, and a component at `0xf0002000`.
+The `coresight-info -walk` example also reported six visits and `complete=true`
+using that probe's exact serial and its ten-second deadline.
+
+The ZCU104 JTAG AP1 walk was incomplete. From root `0x80000000`, it identified
+sixteen children at `0x80100000` through `0x801f0000`, then stopped on a DAP
+FAULT while reading CIDR at `0x803e0ff0`. The result retained those seventeen
+identities and a failed eighteenth visit for root entry 16. The test checks
+this access boundary; it does not count the inaccessible component as
+identified or attempt later entries. The error does not distinguish a power
+restriction from another cause of that target access fault.
+
+Both sessions reproduced each bench's result. Every owner reported successful
+close, including after the ZCU104 fault. This does not independently measure
+restored state after close. No target-memory writes, component power requests,
+unlocks, processor control, or board activation were performed. The observed
+tables were class 1. Class 9 layouts and power-domain skips have ordinary
+test coverage; large addresses and both memory byte orders also have public
+MEM-AP simulation coverage. Those cases were not exercised on hardware.
