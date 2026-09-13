@@ -50,7 +50,7 @@ debugger service.
 | `swd/sim` | Model SWD protocol entry, register transfers, fixed-frame packing, and transfer limits without hardware. |
 | `dap` | Bind SW-DP or baseline ADIv5 JTAG-DP, manage identity and power, execute ordered DP/AP transactions, and provide scalar or block MEM-AP access. |
 | `dap/sim` | Model the DP, AP, and byte-addressed target-memory state consumed by `dap`. |
-| `coresight` | Identify one explicitly addressed debug component through borrowed scalar memory, without acquiring resources or writing target memory. |
+| `coresight` | Identify debug components and decode individual ROM entries through borrowed scalar memory, without acquiring resources or writing target memory. |
 | `target/cortexm` | Read and decode the architectural Cortex-M CPUID value. |
 | `examples/...` | Demonstrate public package compositions as executable programs. |
 | `cmd/ost` | Provide a small command hierarchy over the same public packages. |
@@ -321,7 +321,9 @@ the awkward parts of posted and memory access.
 debug entry, including legacy encodings and the optional upper address word.
 It preserves the memory client's state on success and does not access target
 memory. `coresight` reads component identification through a scalar-memory
-reader. It uses DAP transfer sizes but owns no DAP or MEM-AP state. See
+reader. It also derives ROM geometry from those identities and reads
+individual entries. It uses DAP transfer sizes but owns no DAP or MEM-AP
+state. See
 [CoreSight component identity](coresight.md) for its register and failure
 boundaries.
 
