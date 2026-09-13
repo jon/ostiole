@@ -20,14 +20,17 @@ const (
 	clearStickyOverrun  = uint32(1 << 4)
 )
 
-// Connect enters SWD, reads and validates DPIDR before configuration, clears
-// supported sticky state, selects DP bank zero, and establishes the target's
-// response grammar. It keeps an inherited ORUNDETECT setting or tries to enable
-// it, and uses overrun framing only if the bit reads back as set. Release later
-// restores the setting found during bootstrap but does not restore SELECT or
-// cleared sticky state. Connect cleans up a failed attempt when possible; a
-// joined cleanup error leaves Release available for retry. Calling Connect
-// again repairs framing and rejects a changed DPIDR.
+// Connect tries JTAG-to-SWD, then retries the initial DPIDR read once
+// through dormant activation if its invalid-ACK response completed without
+// a wire error. Other identity-read errors do not trigger activation. It
+// reads and validates DPIDR before configuration, clears supported sticky
+// state, selects DP bank zero, and establishes the target's response
+// grammar. It keeps an inherited ORUNDETECT setting or tries to enable it,
+// and uses overrun framing only if the bit reads back as set. Release later
+// restores the setting found during bootstrap but does not restore SELECT
+// or cleared sticky state. Connect cleans up a failed attempt when
+// possible; a joined cleanup error leaves Release available for retry.
+// Calling Connect again repairs framing and rejects a changed DPIDR.
 func (c *Conn) Connect(ctx context.Context) (dpidr uint32, err error) {
 	if c == nil || c.wire == nil {
 		return 0, errors.New("swd: nil connection")
@@ -93,8 +96,10 @@ func (c *Conn) cleanupFailedConnect(connectErr *error) {
 	}
 }
 
-// Release restores the ORUNDETECT setting found by Connect. A failed release
-// retains enough state for another call to retry. Release is harmless on an
+// Release restores the ORUNDETECT setting found by Connect. A failed
+// release retains enough state for another call to retry. Framing repair
+// uses the same dormant fallback as Connect. Release leaves SWD selected;
+// it does not restore the prior interface mode. Release is harmless on an
 // idle or nil connection.
 func (c *Conn) Release(ctx context.Context) error {
 	if c == nil || c.wire == nil || c.state == connectionIdle {
@@ -185,7 +190,7 @@ func (c *Conn) finishRelease() {
 }
 
 func (c *Conn) bootstrap(ctx context.Context) (uint32, error) {
-	dpidr, err := c.readRaw(ctx, 0x00)
+	dpidr, err := c.readEntryIdentity(ctx)
 	if err != nil {
 		c.requireRepair()
 		return 0, fmt.Errorf("swd: read DPIDR: %w", err)

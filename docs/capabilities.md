@@ -197,9 +197,10 @@ packet, ownership, and current bench boundaries.
 | Automatic retries | No | A raw register call does not replay the requested transaction. In overrun mode it clears STICKYORUN before returning WAIT; retry policy belongs to the caller. |
 | Ordered raw queue | Yes | `swd.Batch` validates all queued DP/AP operations before traffic, sends them in order, resolves direction-specific results, and never replays the operation which first fails. |
 | Fixed-frame batching | Yes | In overrun mode the ordered queue packs complete 54-bit frames up to an optional wire limit; simple mode remains sequential. Operations in a failed physical chunk are indeterminate; later chunks remain unsent, and requested operations are never replayed. |
-| Multidrop or dormant state | No | The public connection models one entered SWD target. |
+| Dormant activation | Yes | `Connect`, and `Release` when repairing framing, try JTAG-to-dormant and dormant-to-SWD once after a completed invalid-ACK response to the initial DPIDR read. Each wire call uses at most 136 clocks. Ordinary register calls are not retried. |
+| Multidrop selection | No | The public connection models one entered SWD target. |
 | Behavioral simulation | Yes | Protocol entry and line-reset effects, live overrun response grammar, DP/AP register transfers, packed fixed frames, transfer limits, and request-phase WAIT or FAULT injection. |
-| Physical DPIDR read | HIL | Opt-in FTDI test and trivial example on Linux and macOS, plus an opt-in J-Link test on macOS. |
+| Physical DPIDR read | HIL | Opt-in FTDI test and trivial example on Linux and macOS, plus an opt-in J-Link test on macOS. Two fresh RP2350/J-Link sessions read DPIDR `0x4c013477`, reconnected with matching identity, and completed release after line-reset repair; see the SWD guide for preparation and limits. |
 
 The public `swd.Wire` boundary is implemented by FTDI, J-Link, and CMSIS-DAP
 and can be borrowed through a generic `probe.Probe` owner.

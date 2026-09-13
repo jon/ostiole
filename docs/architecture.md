@@ -187,7 +187,13 @@ commands and response status. Each adapter owns its clock and transfer limits.
 acknowledgements, data parity, line reset, the JTAG-to-SWD selection sequence,
 and the CTRL/STAT.ORUNDETECT setting which selects the response grammar.
 
-`swd.Conn.Connect` reads and validates DPIDR before configuration, clears
+`swd.Conn.Connect` tries JTAG-to-SWD first. If the initial DPIDR read has an
+invalid ACK and its trailing clocks complete, it tries JTAG-to-dormant and
+dormant-to-SWD once before reading DPIDR again. Release uses the same fallback
+when it must repair framing. Release leaves SWD selected rather than restoring
+the prior interface mode.
+
+The connection reads and validates DPIDR before configuration, clears
 supported sticky state, writes zero to SELECT, settles it through RDBUFF, then
 reads CTRL/STAT. This establishes which response grammar applies before
 ordinary register access. It keeps an inherited ORUNDETECT setting or tries to
