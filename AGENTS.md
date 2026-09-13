@@ -113,8 +113,8 @@ traffic or cleanup, or bad input reaches hardware before it is rejected.
 - Require documentation in the same commit as exported API, ownership,
   lifecycle, safety, platform, composition, or validation-claim changes.
 - Reject a pull request which adds an API without representative calls in
-  “What this does.” When an API changes, require representative calls before
-  and after the change. Verify that every example preserves the real
+  its opening description. When an API changes, require representative calls
+  before and after the change. Verify that every example preserves the real
   ownership, cleanup, and safety rules and shows the actual migration.
 - Reject pull-request prose paragraphs which are hard-wrapped in the Markdown
   source. Let GitHub wrap paragraphs for display; use source line breaks for

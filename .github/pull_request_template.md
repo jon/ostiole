@@ -1,5 +1,3 @@
-## What this does
-
 <!--
 Describe the resulting behavior and scope. For each new API, show
 representative calls. For each changed API, show representative calls before

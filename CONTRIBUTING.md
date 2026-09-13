@@ -140,8 +140,8 @@ architecture, behavioral coverage, and documentation claims. A completed
 standard Codex review must match the current pull-request head. Codex must
 reject a nontrivial commit whose message does not explain why the commit is
 needed and what behavior it establishes at that boundary. Codex must also
-reject a pull request which adds an API without representative calls in “What
-this does,” or changes an API without representative calls before and after
+reject a pull request which adds an API without representative calls in its
+opening description, or changes an API without representative calls before and after
 the change. It must also reject examples which hide ownership, cleanup, safety,
 or migration details needed to understand ordinary use, and prose paragraphs
 which are hard-wrapped in the Markdown source. On the final head, comment
@@ -170,9 +170,12 @@ hardware path.
 
 ## Pull-request descriptions
 
-Use “What this does” for the resulting behavior and scope. For every new API,
-show representative calls which make ordinary use concrete. For every changed
-API, show representative calls before and after the change so that the
+Begin with the resulting behavior and scope, without an opening heading.
+Headings, separators, and empty blocks do not satisfy the description
+requirement. Existing descriptions may retain “What this does” as the first
+section heading.
+For every new API, show representative calls which make ordinary use concrete.
+For every changed API, show representative calls before and after the change so that the
 migration is visible. The examples must preserve the same ownership, cleanup,
 and safety rules as ordinary code.
 
