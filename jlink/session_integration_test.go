@@ -77,6 +77,16 @@ func TestHILJLinkSWDDPIDR(t *testing.T) {
 	if session.ClockHz() != 100_000 || session.MaxTransferBits() != 504 {
 		t.Fatalf("J-Link SWD configuration = %d Hz, %d bits", session.ClockHz(), session.MaxTransferBits())
 	}
+	if confirmed, err := connection.Connect(ctx); err != nil || confirmed != raw {
+		t.Fatalf("reconnect DPIDR=%#08x, %v; want %#08x", confirmed, err, raw)
+	}
+	if err := connection.LineReset(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := cleanup.releaseCurrent(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Log("SWD release completed after line-reset repair")
 	t.Logf("DPIDR=%#08x version=%d designer=%#03x clock=%d max_bits=%d", raw, info.Version, info.Designer, session.ClockHz(), session.MaxTransferBits())
 }
 

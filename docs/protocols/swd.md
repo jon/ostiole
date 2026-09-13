@@ -9,8 +9,8 @@ ADIv5.2_](https://developer.arm.com/documentation/ihi0031/h) is the normative
 SWD specification. Use chapter B4 and section B5.2 for the protocol definition;
 this note is not a substitute for them. It is limited to details which are easy
 to misread and observations from hardware. It covers the point-to-point
-protocol, not SWD protocol version 2 target selection, multidrop, or
-dormant-state entry.
+protocol and dormant activation, not SWD protocol version 2 target selection
+or multidrop.
 
 ## A transfer
 
@@ -172,6 +172,36 @@ The second high run leaves SWD in line-reset state. Arm points out that the
 two low idle clocks from a normal line reset are absent from the switching
 figure; a host can supply idle clocks before reading DPIDR.
 
+IHI 0031H section B5.3 defines dormant operation. A dormant interface
+ignores ordinary SWD requests until it receives the selection alert and
+activation code. Ostiole first tries the JTAG-to-SWD sequence above. If the
+initial DPIDR read returns an invalid ACK and the host completes the
+undriven data phase and idle clocks, it tries this sequence once:
+
+1. Nine high clocks and the 31-bit JTAG-to-dormant code `0x33bbbbba`,
+   least-significant bit first.
+2. Eight high clocks and the 128-bit selection alert
+   `0x19bc0ea2e3ddafe986852d956209f392`, least-significant bit first across
+   the whole value: byte `0x92` goes first.
+3. Four low clocks, the eight-bit SWD activation code `0x1a`
+   least-significant bit first, 56 high clocks for line reset, and eight low
+   idle clocks.
+4. Another DPIDR read, followed by the ordinary bootstrap only if identity
+   validation succeeds.
+
+The three activation exchanges use 40, 136, and 76 clocks, so the fallback
+needs no larger wire transfer than existing JTAG-to-SWD entry. A parity,
+WAIT, FAULT, or transport error does not trigger this fallback. Neither does
+an invalid ACK whose trailing clocks failed. Each bootstrap has at most two
+DPIDR attempts; failed Connect may also run a separate bootstrap during
+bounded cleanup. Ordinary register calls still make one attempt.
+
+Release uses the same activation fallback when framing repair is needed and
+checks the established identity before restoring owned state. It restores
+ORUNDETECT but leaves SWD selected; it does not return the interface to
+dormant mode. Activation does not halt or reset the processor, request
+system power, or add ADIv6 AP addressing.
+
 Multidrop SWD has another boundary worth stating plainly: there is no generic
 way to ask an unselected multidrop bus which target IDs are present. The host
 must already know which IDs to try. That is a protocol limitation, not a
@@ -289,3 +319,36 @@ entry. It used 32,033 physical SWDIO calls. The experiment exercises Linux
 usbfs submission, completion notification and reaping, endpoint cancellation,
 and release on this bench; it is not a USB or SWD waveform capture and does
 not establish behavior for another host controller or FTDI product.
+
+## RP2350 dormant activation bench
+
+On macOS, a J-Link EDU Mini V2 (serial `000802011345`, firmware
+`J-Link EDU Mini V2 compiled Jun 25 2026 10:27:52`) connected to an RP2350
+over SWD at 100 kHz. Before each of two fresh Ostiole sessions, OpenOCD 0.12.0 connected
+to the debug port and shut down; its debug log showed SWD-to-dormant
+followed by dormant-to-JTAG on shutdown. The preparation used no CPU target
+or reset command:
+
+```sh
+openocd -c 'adapter driver jlink' -c 'adapter serial 000802011345' \
+  -c 'transport select swd' -c 'adapter speed 100' -c 'reset_config none' \
+  -c 'gdb_port disabled' -c 'tcl_port disabled' -c 'telnet_port disabled' \
+  -c 'swd newdap rp2350 dp -irlen 4' \
+  -c 'dap create rp2350.dap -chain-position rp2350.dp -adiv6' \
+  -c init -c shutdown
+OSTIOLE_JLINK_HIL=1 OSTIOLE_JLINK_HIL_SERIAL=000802011345 \
+  go test -tags=integration ./jlink -run '^TestHILJLinkSWDDPIDR$' -count=1 -v
+```
+
+Both sessions returned DPIDR `0x4c013477` (version 3, designer `0x23b`),
+confirmed the same identity on reconnect, and completed SWD release after an
+explicit line reset forced framing repair. The J-Link reported a 504-bit
+transfer limit. Before dormant activation was implemented, the DPIDR test
+returned an invalid ACK and cleanup remained pending. OpenOCD independently
+reproduced that invalid ACK after JTAG-to-SWD and read the correct identity
+after its dormant fallback.
+
+The runs did not independently measure the inherited ORUNDETECT value after
+release, exercise an Ostiole ADIv6 AP, or read target memory. No processor
+halt or reset was requested. OpenOCD performed its own debug-port
+initialization; the bench was not power-cycled to test startup state.
