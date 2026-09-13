@@ -63,6 +63,9 @@ func exerciseSharedMEMAP(t *testing.T, link string, bigEndian bool) {
 	if err := target.SetMEMAPCFG(sel, cfg); err != nil {
 		t.Fatal(err)
 	}
+	if err := target.SetMEMAPDebugBase(sel, 0xe00ff003, 1); err != nil {
+		t.Fatal(err)
+	}
 	port := dap.SWDP(swd.New(swdsim.New(target)))
 	if link == "JTAG" {
 		model, wire, chain := jtagModelChain(t, 8, 1)
@@ -82,6 +85,10 @@ func exerciseSharedMEMAP(t *testing.T, link string, bigEndian bool) {
 	mem, err := dap.OpenMemAP(t.Context(), dp, sel)
 	if err != nil {
 		t.Fatal(err)
+	}
+	base, present, err := mem.ReadDebugBase(t.Context())
+	if err != nil || !present || base != 0x1e00ff000 {
+		t.Fatalf("debug base: %#x, %v, %v", base, present, err)
 	}
 	exerciseSharedMemory(t, mem)
 	if err := mem.Release(t.Context()); err != nil {

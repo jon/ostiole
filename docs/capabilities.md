@@ -241,6 +241,7 @@ See [JTAG](protocols/jtag.md) for effects and ownership.
 | FAULT recovery | Yes | A FAULT is never replayed. With a known response grammar and bank-zero selection, the error includes the captured CTRL/STAT value and DAP clears only the sticky conditions reported there, then verifies that they are clear. A definitely abandoned AP write does not invalidate MEM-AP state; an uncertain effect does. Failed cleanup preserves the FAULT and blocks ordinary traffic until release repairs the port. |
 | AP enumeration | Yes | Scans all 256 ADIv5 APSEL values in bounded transactions. IDR zero means absent; a FAULT returns the confirmed discoveries with the error. The current Cortex-M bench reports AP0 as `0x24770011` and AP1 as `0x02880000`; sparse numbering is covered by simulation. The scan used 32 SWDIO calls for 1,022 fixed frames, all with OK acknowledgements. |
 | MEM-AP acquisition | Yes | `OpenMemAP` performs AP traffic, rejects an absent or non-MEM AP, and snapshots the state which `Release` restores. |
+| MEM-AP debug entry | Yes | `ReadDebugBase` decodes ADIv5 and legacy BASE formats, distinguishes absence from address zero, and reads the upper word only for a present entry with CFG.LA. It preserves the memory client on success and does not access target memory. Behavioral tests cover formats, malformed values, cancellation, failure, retry, and shared SWD/JTAG access. |
 | MEM-AP configuration | Yes | `OpenMemAP` reads CFG, models BE, LA, and LD, and includes TARHI in retryable restoration when large addresses are available. |
 | Scalar target-memory access | Yes | `ReadScalar` and `WriteScalar` support aligned 8-, 16-, and 32-bit values and verify the implementation-defined CSW.Size before using the byte lane selected by CFG.BE. CFG.LA permits addresses above 32 bits; CFG.LD makes 64-bit access eligible for the same CSW check. Oversized write values fail before traffic, and writes finish with an AP completion barrier. If the first DRW access of a failed Size64 transfer might have started, ordinary traffic remains blocked until cleanup. `ReadWord` provides the 32-bit convenience operation. |
 | MEM-AP restoration | Yes | Saves and restores CSW, TAR, and TARHI when present; failed restoration remains retryable. MEM-AP restoration remains available while debug-port cleanup is pending. If framing is unknown, `Release` re-enters the bound protocol and verifies identity before restoration. It terminates a possibly incomplete Size64 transfer through CSW before touching TAR or TARHI. If DAPABORT interrupts cleanup, the next `Release` retries every saved value. The invalidated handle remains invalid. |
@@ -295,8 +296,8 @@ Available examples:
 - `examples/trivial/swd-dpidr` reads one raw DPIDR.
 - `examples/simple/ap-id` reports DPIDR and one explicitly selected AP IDR.
 - `examples/simple/cortexm-info` reports DPIDR, AP IDR, and Cortex-M CPUID.
-- `examples/simple/coresight-info` reads one explicitly addressed component
-  identity through a managed SWD connection and selected MEM-AP.
+- `examples/simple/coresight-info` reads the MEM-AP's advertised component
+  identity, or an explicitly supplied page, through a managed SWD connection and selected MEM-AP.
 - `examples/simple/arm-info` reports the same identities through generic probe
   discovery and one Arm debug owner, with explicit AP selection.
 
@@ -317,7 +318,7 @@ the volatile DAP and MEM-AP state described above.
 ## Not currently provided
 
 There is no CMSIS-DAP HID/v1 transport, automatic probe
-discovery policy, ROM-table discovery,
+discovery policy, ROM-table traversal,
 multi-core or SoC attachment, general target control, semihosting, trace,
 debugger protocol server, firmware flashing, FPGA programming, or Windows
 host implementation.

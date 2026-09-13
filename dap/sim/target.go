@@ -205,7 +205,7 @@ func (t *Target) AddMEMAP(sel dap.APSel, idr uint32, words map[uint32]uint32) er
 		}
 	}
 	t.aps[sel] = &accessPort{
-		regs:   map[uint8]uint32{0xf4: 0, 0xfc: idr},
+		regs:   map[uint8]uint32{0xf4: 0, 0xf8: 2, 0xfc: idr},
 		memory: memory,
 		memAP:  true,
 		sizes:  1<<0 | 1<<1 | 1<<2,
@@ -438,7 +438,7 @@ func (ap *accessPort) readRegister(reg uint8) (uint32, error) {
 	if err := ap.validateLargeDataRegister(reg, "read"); err != nil {
 		return 0, err
 	}
-	if reg == 8 && ap.regs[0xf4]&(1<<1) == 0 {
+	if (reg == 8 || reg == 0xf0) && ap.regs[0xf4]&(1<<1) == 0 {
 		return 0, nil
 	}
 	if reg == 0x0c {
@@ -453,6 +453,9 @@ func (ap *accessPort) readRegister(reg uint8) (uint32, error) {
 func (ap *accessPort) writeRegister(reg uint8, value uint32) error {
 	if !ap.memAP {
 		ap.regs[reg] = value
+		return nil
+	}
+	if reg == 0xf8 || reg == 0xf0 {
 		return nil
 	}
 	if err := ap.validateLargeDataRegister(reg, "write"); err != nil {

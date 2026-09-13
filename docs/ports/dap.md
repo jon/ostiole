@@ -530,3 +530,47 @@ has a different common programmer's model and address space. Use IHI 0074F,
 not this ADIv5 note, when implementing either one. Treating ADIv6 as a few
 additional ADIv5 register constants would hide the actual compatibility
 boundary.
+
+## MEM-AP debug base
+
+`MemAP.ReadDebugBase` reads the selected AP's advertised debug entry without
+invalidating its memory client. It returns the 4 KiB identification-page
+address, a presence flag, and an error:
+
+```go
+base, present, err := memory.ReadDebugBase(ctx)
+if err != nil {
+    return err
+}
+if !present {
+    return errors.New("MEM-AP advertises no debug entry")
+}
+```
+
+The entry may identify one component or a ROM table. Pass a present address
+to `coresight.Identify` to determine its class. Address zero can be present;
+absence returns `(0, false, nil)`. A failure returns `(0, false, err)` and
+must not be treated as absence. The method uses the active MEM-AP's stored AP
+selection and CFG.LA value; callers do not supply either again. It changes
+DAP register selection but does not access target memory, change CSW/TAR,
+request component power, or add cleanup obligations. After a DAP failure,
+the existing recovery rules can invalidate the client; release it before
+acquiring another.
+
+The decoder follows BASE in section C2.6.1 of
+[Arm IHI 0031G](https://documentation-service.arm.com/static/622222b2e6f58973271ebc21).
+It supports ADIv5 presence and legacy 32-bit addresses, including the legacy
+all-ones absence value. CFG.LA enables the upper word at AP offset `0xf0`;
+without it, only `0xf8` is read. Absent entries do not cause an upper-word read.
+The decoder rejects legacy encodings with CFG.LA and nonzero reserved bits.
+Neither a decoded address nor a successful BASE read guarantees that target
+memory at that address is currently accessible.
+
+The simulator's `SetMEMAPDebugBase` sets raw low and high words, including
+malformed values for failure tests. New simulated MEM-APs advertise no entry.
+BASE writes are ignored, and the high word reads as zero without CFG.LA.
+Behavioral tests cover both address formats, absence, malformed values,
+cancellation, read failures, WAIT retries, and continued memory access.
+Shared SWD/JTAG simulations exercise large addresses in both byte orders.
+The [CoreSight guide](../coresight.md#hardware-evidence) records the advertised
+addresses and identity reads observed on the micro:bit and ZCU104 benches.

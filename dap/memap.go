@@ -210,13 +210,7 @@ func (m *MemAP) requireLargeDataCleanup(generation uint64) {
 }
 
 func (m *MemAP) checkScalar(ctx context.Context, addr uint64, size TransferSize, operation string) error {
-	if m == nil || m.dp == nil {
-		return errors.New("dap: nil MEM-AP")
-	}
-	if m.epoch != m.dp.state.apGeneration {
-		return fmt.Errorf("dap: %s target memory: MEM-AP state was invalidated by debug-port recovery", operation)
-	}
-	if err := m.dp.requireConnected(ctx); err != nil {
+	if err := m.checkActive(ctx, operation+" target memory"); err != nil {
 		return err
 	}
 	if err := validateScalarAccess(addr, size, m.largeAddress); err != nil {
@@ -226,6 +220,16 @@ func (m *MemAP) checkScalar(ctx context.Context, addr uint64, size TransferSize,
 		return fmt.Errorf("dap: %s target memory: Size64 requires CFG.LD", operation)
 	}
 	return nil
+}
+
+func (m *MemAP) checkActive(ctx context.Context, operation string) error {
+	if m == nil || m.dp == nil {
+		return errors.New("dap: nil MEM-AP")
+	}
+	if m.epoch != m.dp.state.apGeneration {
+		return fmt.Errorf("dap: %s: MEM-AP state was invalidated by debug-port recovery", operation)
+	}
+	return m.dp.requireConnected(ctx)
 }
 
 func (m *MemAP) selectSize(ctx context.Context, size TransferSize) error {
