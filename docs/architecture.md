@@ -311,7 +311,10 @@ numbers and reads no class-specific register.
 See [Arm Debug Access Ports](ports/dap.md) for the ADIv5 register protocol and
 the awkward parts of posted and memory access.
 
-`coresight` reads component identification through a scalar-memory reader. It
+`dap.MemAP.ReadDebugBase` reads and decodes the selected AP's advertised debug
+entry, including legacy encodings and the optional upper address word. It
+preserves the memory client's state on success and does not access target
+memory. `coresight` reads component identification through a scalar-memory reader. It
 uses DAP transfer sizes but owns no DAP or MEM-AP state. See
 [CoreSight component identity](coresight.md) for its register and failure
 boundaries.

@@ -45,6 +45,7 @@ func TestHILComponentIdentity(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
+					inspectAdvertisedRoot(t, ctx, memory)
 					got, err := coresight.Identify(ctx, memory, bench.base)
 					if err != nil {
 						t.Fatal(err)
@@ -91,4 +92,20 @@ func openIdentityBench(t *testing.T, ctx context.Context, selection discover.Sel
 		t.Fatal(err)
 	}
 	return c
+}
+
+func inspectAdvertisedRoot(t *testing.T, ctx context.Context, memory *dap.MemAP) {
+	t.Helper()
+	base, present, err := memory.ReadDebugBase(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !present {
+		t.Fatal("MEM-AP advertises no debug entry")
+	}
+	root, err := coresight.Identify(ctx, memory, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("advertised base=%#x CIDR=%#x PIDR=%#x", base, root.CIDR, root.PIDR)
 }

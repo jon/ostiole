@@ -2,11 +2,19 @@
 
 `coresight.Identify` reads one component's identification registers through a
 borrowed scalar-memory reader. A `dap.MemAP` implements that interface over
-SWD or JTAG. The caller supplies the address of an accessible, 4 KiB aligned
-identification page; the package does not find that address or walk ROM tables.
+SWD or JTAG. Obtain the advertised identification page from the selected
+MEM-AP with `ReadDebugBase`, or supply an explicitly known address. The package
+does not walk ROM tables.
 
 ```go
-component, err := coresight.Identify(ctx, memory, 0xe00ff000)
+base, present, err := memory.ReadDebugBase(ctx)
+if err != nil {
+    return err
+}
+if !present {
+    return errors.New("MEM-AP advertises no debug entry")
+}
+component, err := coresight.Identify(ctx, memory, base)
 if err != nil {
     return err
 }
@@ -22,8 +30,12 @@ if architecture, present := component.Architecture(); present {
 The reader remains borrowed throughout the call. When `memory` comes from
 `armdebug.Conn.OpenMemAP`, close that connection and retry failed cleanup as
 shown in [Composing Ostiole](composition.md#select-and-open-hardware-explicitly).
-A directly acquired MEM-AP must be released before its debug port. Even these
-identity reads temporarily change MEM-AP address and transfer state.
+A directly acquired MEM-AP must be released before its debug port. Reading
+BASE does not access target memory or change CSW/TAR; reading the component
+identity temporarily changes MEM-AP address and transfer state. An advertised
+address does not establish that the component is accessible. See
+[MEM-AP debug base](ports/dap.md#mem-ap-debug-base) for presence and format
+handling.
 
 The register layout follows Arm IHI 0029E, sections B2.2 and B2.3 of the
 [CoreSight Architecture Specification v3.0](https://documentation-service.arm.com/static/5f900a19f86e16515cdc041e).
@@ -61,18 +73,19 @@ SWD/DAP simulator with both MEM-AP byte orders above 4 GiB.
 ## Inspection example
 
 `examples/simple/coresight-info` opens a managed SWD connection, acquires the
-required AP, reads one identification page, and attempts owner cleanup up to
-three times. Both AP and base are required; probe filters may be omitted only
-when selection remains unique.
+required AP, obtains its debug base, reads that identification page, and
+attempts owner cleanup up to three times. AP is required; probe filters may be
+omitted only when selection remains unique. An absent debug entry produces an
+error without attempting target-memory access.
 
 ```sh
 go run ./examples/simple/coresight-info \
-  -provider cmsisdap -serial SERIAL -ap 0 -base 0xe00ff000
+  -provider cmsisdap -serial SERIAL -ap 0
 ```
 
-Use that address only on a target whose memory map places an accessible
-identification page there. The example requests a 100 kHz clock and applies a
-ten-second operation deadline. The library also accepts memory clients reached
+To inspect another known page, supply `-base ADDRESS`; this bypasses the BASE
+read. The override must name an accessible, 4 KiB aligned identification page.
+The example requests a 100 kHz clock and applies a ten-second operation deadline. The library also accepts memory clients reached
 through JTAG; the example configures SWD only.
 
 ## Hardware evidence
@@ -84,7 +97,16 @@ OSTIOLE_CORESIGHT_HIL=1 \
   go test -tags=integration -run TestHILComponentIdentity -count=1 -v ./coresight
 ```
 
-Each path opened two fresh sessions at a requested 100 kHz:
+Each path opened two fresh sessions at a requested 100 kHz. The test first
+read and identified the MEM-AP's advertised entry, then read the known
+component page below through the same client:
+
+| Path | Advertised address | Result |
+| --- | --- | --- |
+| micro:bit SWD AP0 | `0xf0000000` | CIDR `0xb105100d`, PIDR `0x02007c4001`, class 1. |
+| ZCU104 JTAG AP1 | `0x80000000` | CIDR `0xb105100d`, PIDR `0x0100193730`, class 1. |
+
+The additional explicitly addressed reads returned:
 
 | Path | Identification page | Result |
 | --- | --- | --- |
@@ -98,6 +120,7 @@ The ZCU104 used the externally enabled Arm `0x5ba00477`/IR4 and Xilinx
 `0x14730093`/IR12 chain. No board routing, component unlock, halt, reset, or
 target-memory write was performed.
 
-The example command above also passed on that micro:bit with its exact serial.
-These results cover one identification page on each bench, not ROM traversal,
+The example passed on that micro:bit with its exact serial, both with the
+advertised address and with `-base 0xe00ff000`. These results cover the
+advertised entry and one known page on each bench, not ROM traversal,
 component register access, or physical large-address and big-endian support.

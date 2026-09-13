@@ -25,5 +25,5 @@ an example has been implemented.
   identity through an explicitly selected memory access port.
 - [`simple/arm-info`](simple/arm-info) discovers an opt-in probe provider and
   reads DPIDR, AP IDR, and Cortex-M identity through one Arm debug owner.
-- [`simple/coresight-info`](simple/coresight-info) reads one explicitly
-  addressed component identity through a managed SWD connection.
+- [`simple/coresight-info`](simple/coresight-info) reads the advertised debug entry
+  of a selected MEM-AP, or a known component page, through a managed SWD connection.
