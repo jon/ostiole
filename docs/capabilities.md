@@ -82,12 +82,13 @@ SWD entry, explicit JTAG chain/TAP selection, cancellation, release ordering,
 and retryable cleanup.
 
 `armdebug.JTAGDP` copies a complete `jtag.Layout` and selects a zero-based,
-TDO-first TAP with an IDCODE and a four- or eight-bit IR. Invalid static configuration is
-rejected before discovery or activation; connection setup validates the exact
-physical chain. Board-specific chain routing remains external.
-`Config.CleanupTimeout` bounds each owned release attempt, defaulting to one
-second for SWD and thirty seconds for JTAG. DAP's independent recovery attempts
-remain separately configurable through `DAPOptions`.
+TDO-first TAP with an IDCODE and a four- or eight-bit IR. Invalid static
+configuration is rejected before discovery or activation; connection setup
+validates the exact physical chain. Board-specific chain routing remains
+external. `Config.CleanupTimeout` bounds each owned release attempt,
+defaulting to one second for SWD and thirty seconds for JTAG. DAP's
+independent recovery attempts remain separately configurable through
+`DAPOptions`.
 
 `armdebug.Open` adds registered discovery and exact selection to that ownership
 path. It refuses incomplete discovery and never tries another candidate after
@@ -298,9 +299,10 @@ Available examples:
 - `examples/simple/ap-id` reports DPIDR and one explicitly selected AP IDR.
 - `examples/simple/cortexm-info` reports DPIDR, AP IDR, and Cortex-M CPUID.
 - `examples/simple/coresight-info` reads the MEM-AP's advertised component
-  identity, or an explicitly supplied page, through a managed SWD connection and selected MEM-AP.
-- `examples/simple/arm-info` reports the same identities through generic probe
-  discovery and one Arm debug owner, with explicit AP selection.
+  identity, or an explicitly supplied page, through a managed SWD connection
+  and selected MEM-AP.
+- `examples/simple/arm-info` reports the same identities through generic
+  probe discovery and one Arm debug owner, with explicit AP selection.
 
 Available `ost` commands:
 
