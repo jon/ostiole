@@ -265,51 +265,51 @@ thirty for JTAG.
 No driver is reopened automatically after a poisoned exchange.
 
 `NewAPSel` constructs an AP selector whose zero value is invalid.
-`APSel.Address` combines it with a
-complete eight-bit register address; the resulting `APAddress` also has an
-invalid zero value. `ReadAPIDR` reads and decodes the common read-only AP
-identity. Raw AP access rejects invalid or unaligned addresses before traffic.
-Register names and effects remain specific to the selected AP class. A write
-to a MEM-AP data register can write target memory. A raw AP read or write which
-completes, or whose completion is uncertain, invalidates existing `MemAP`
-values. On SWD, `dap.DebugPort` retries the same physical request after a clean WAIT
-until its response-count limit is reached or the operation context ends. The
+`APSel.Address` combines it with a complete eight-bit register address; the
+resulting `APAddress` also has an invalid zero value. `ReadAPIDR` reads and
+decodes the common read-only AP identity. Raw AP access rejects invalid or
+unaligned addresses before traffic. Register names and effects remain
+specific to the selected AP class. A write to a MEM-AP data register can
+write target memory. A raw AP read or write which completes, or whose
+completion is uncertain, invalidates existing `MemAP` values. On SWD,
+`dap.DebugPort` retries the same physical request after a clean WAIT until
+its response-count limit is reached or the operation context ends. The
 one-argument constructor uses only the context; `WithMaxWaits` sets a limit,
-and `SetMaxWaits` changes it while the port is idle. If either boundary ends AP
-waiting, the debug port issues DAPABORT and invalidates AP-derived state.
+and `SetMaxWaits` changes it while the port is idle. If either boundary ends
+AP waiting, the debug port issues DAPABORT and invalidates AP-derived state.
 RDBUFF also settles DP writes, but a stall or FAULT at that barrier does not
 trigger AP-only recovery. A FAULT is not retried: the debug port captures
-bank-zero CTRL/STAT, clears the sticky conditions reported there, verifies the
-clear through CTRL/STAT, and returns a typed error. AP-derived state is
+bank-zero CTRL/STAT, clears the sticky conditions reported there, verifies
+the clear through CTRL/STAT, and returns a typed error. AP-derived state is
 invalidated when the failed sequence might have changed it, but not when a
-complete AP-write FAULT or WDATAERR establishes that the write was abandoned.
-A SELECT write remains provisional until later traffic establishes whether
-its data took effect. WDATAERR
-invalidates the cached selection; FAULT handling reads `0x04` only when both
-possible DP banks are zero. If FAULT cleanup, WAIT cleanup, or another transfer
-leaves framing unknown, `dap.DebugPort` invalidates AP-derived state and blocks
-every operation except cleanup. Cleanup re-enters SWD before sending another
+complete AP-write FAULT or WDATAERR establishes that the write was
+abandoned. A SELECT write remains provisional until later traffic
+establishes whether its data took effect. WDATAERR invalidates the cached
+selection; FAULT handling reads `0x04` only when both possible DP banks are
+zero. If FAULT cleanup, WAIT cleanup, or another transfer leaves framing
+unknown, `dap.DebugPort` invalidates AP-derived state and blocks every
+operation except cleanup. Cleanup re-enters SWD before sending another
 framed request and refuses to restore state if DPIDR no longer matches the
 connection being cleaned up. Failed setup uses the DPIDR read by that
 attempt; cleanup for an established connection uses its last successful
 DPIDR. `Connect` attempts this cleanup itself when setup fails; a cleanup
-failure remains pending for `Release`. Once `Release` starts, a failure likewise
-leaves only `MemAP.Release`, `DebugPort.Release`, and the cached identity
-available. `dap.MemAP` reads CFG, then uses one access port for aligned 8-,
-16-, and 32-bit target-memory reads and writes when CSW accepts the selected
-size. It also permits 64-bit transfers when CFG.LD is set and CSW accepts
-Size64, and addresses above 32 bits when CFG.LA is set. If a Size64 transfer
-fails after its first DRW access might have started, ordinary debug-port
-traffic remains blocked until the MEM-AP and debug port are released. MEM-AP
-cleanup terminates an incomplete transfer through CSW before restoring TAR or
-TARHI. Arbitrary-range reads and writes use sub-word edges and bounded word
-runs. No auto-incrementing word run crosses a 1 KiB TAR boundary. If CSW does
-not retain single address increment, block access writes TAR before each word.
-Scalar and block memory access use the same WAIT rule. An accepted write is not
-replayed; if its RDBUFF completion request returns WAIT, only that request is
-retried. If selection, framing, or cleanup becomes uncertain, the existing
-repair behavior applies. A FAULT returns the confirmed prefix instead of
-retrying the failed request.
+failure remains pending for `Release`. Once `Release` starts, a failure
+likewise leaves only `MemAP.Release`, `DebugPort.Release`, and the cached
+identity available. `dap.MemAP` reads CFG, then uses one access port for
+aligned 8-, 16-, and 32-bit target-memory reads and writes when CSW accepts
+the selected size. It also permits 64-bit transfers when CFG.LD is set and
+CSW accepts Size64, and addresses above 32 bits when CFG.LA is set. If a
+Size64 transfer fails after its first DRW access might have started,
+ordinary debug-port traffic remains blocked until the MEM-AP and debug port
+are released. MEM-AP cleanup terminates an incomplete transfer through CSW
+before restoring TAR or TARHI. Arbitrary-range reads and writes use sub-word
+edges and bounded word runs. No auto-incrementing word run crosses a 1 KiB
+TAR boundary. If CSW does not retain single address increment, block access
+writes TAR before each word. Scalar and block memory access use the same
+WAIT rule. An accepted write is not replayed; if its RDBUFF completion
+request returns WAIT, only that request is retried. If selection, framing,
+or cleanup becomes uncertain, the existing repair behavior applies. A FAULT
+returns the confirmed prefix instead of retrying the failed request.
 
 ADIv5 access-port enumeration scans all 256 APSEL values in bounded
 transactions. IDR zero means absent. The scan does not assume contiguous AP
@@ -317,11 +317,11 @@ numbers and reads no class-specific register.
 See [Arm Debug Access Ports](ports/dap.md) for the ADIv5 register protocol and
 the awkward parts of posted and memory access.
 
-`dap.MemAP.ReadDebugBase` reads and decodes the selected AP's advertised debug
-entry, including legacy encodings and the optional upper address word. It
-preserves the memory client's state on success and does not access target
-memory. `coresight` reads component identification through a scalar-memory reader. It
-uses DAP transfer sizes but owns no DAP or MEM-AP state. See
+`dap.MemAP.ReadDebugBase` reads and decodes the selected AP's advertised
+debug entry, including legacy encodings and the optional upper address word.
+It preserves the memory client's state on success and does not access target
+memory. `coresight` reads component identification through a scalar-memory
+reader. It uses DAP transfer sizes but owns no DAP or MEM-AP state. See
 [CoreSight component identity](coresight.md) for its register and failure
 boundaries.
 

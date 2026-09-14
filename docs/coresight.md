@@ -83,10 +83,11 @@ go run ./examples/simple/coresight-info \
   -provider cmsisdap -serial SERIAL -ap 0
 ```
 
-To inspect another known page, supply `-base ADDRESS`; this bypasses the BASE
-read. The override must name an accessible, 4 KiB aligned identification page.
-The example requests a 100 kHz clock and applies a ten-second operation deadline. The library also accepts memory clients reached
-through JTAG; the example configures SWD only.
+To inspect another known page, supply `-base ADDRESS`; this bypasses the
+BASE read. The override must name an accessible, 4 KiB aligned
+identification page. The example requests a 100 kHz clock and applies a
+ten-second operation deadline. The library also accepts memory clients
+reached through JTAG; the example configures SWD only.
 
 ## Hardware evidence
 

@@ -173,11 +173,11 @@ hardware path.
 Begin with the resulting behavior and scope, without an opening heading.
 Headings, separators, and empty blocks do not satisfy the description
 requirement. Existing descriptions may retain “What this does” as the first
-section heading.
-For every new API, show representative calls which make ordinary use concrete.
-For every changed API, show representative calls before and after the change so that the
-migration is visible. The examples must preserve the same ownership, cleanup,
-and safety rules as ordinary code.
+section heading. For every new API, show representative calls which make
+ordinary use concrete. For every changed API, show representative calls
+before and after the change so that the migration is visible. The examples
+must preserve the same ownership, cleanup, and safety rules as ordinary
+code.
 
 Leave each prose paragraph on one line in the Markdown source and let GitHub
 wrap it for display. Do not insert source line breaks merely to meet a column
@@ -196,6 +196,10 @@ test, lint, policy, vulnerability, or compilation checks which GitHub reports
 independently.
 
 ## Documentation
+
+Wrap repository Markdown prose at 80 columns. Code blocks and tables keep
+their own layout. This source-file rule does not apply to pull-request
+descriptions, whose paragraphs stay on one line.
 
 Every pull request must leave the public documentation consistent with the
 code. A pull request that does not change public behavior may need no

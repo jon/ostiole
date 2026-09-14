@@ -627,32 +627,32 @@ the specification details which are easiest to misread.
 
 Use `dap.DebugPort` when the application needs debug-port identity, power
 ownership, bank selection, or AP access. Call `Connect` before AP operations
-and `Release` afterward. `DebugPort.Connect` also connects its underlying SWD
-stream, and `DebugPort.Release` releases it after restoring DAP state; do not
-connect or release that stream separately. Give the debug port exclusive,
-serialized use of its `swd.Conn`; direct transfers on that connection can
-invalidate cached DAP state. DP, AP, transaction, and MEM-AP operations require
-an active connection.
-`ReadDP` and `WriteDP` take logical ADIv5 register names and manage DPBANKSEL
-without exposing a current-bank API. `NewAPSel` constructs an AP selector whose
-zero value is invalid. `APSel.Address` combines it with a complete eight-bit
-register address; the resulting `APAddress` also has an invalid zero value.
-`ReadAPIDR` reads and decodes the common read-only AP identity. `EnumerateAPs`
-scans every ADIv5 AP selector without reading class-specific registers. Raw AP
-access rejects an invalid or unaligned address before traffic. Use it only when
-the caller understands the selected AP class and will restore any state the
-access changes. A raw MEM-AP data-register write can write target memory. This
+and `Release` afterward. `DebugPort.Connect` also connects its underlying
+SWD stream, and `DebugPort.Release` releases it after restoring DAP state;
+do not connect or release that stream separately. Give the debug port
+exclusive, serialized use of its `swd.Conn`; direct transfers on that
+connection can invalidate cached DAP state. DP, AP, transaction, and MEM-AP
+operations require an active connection. `ReadDP` and `WriteDP` take logical
+ADIv5 register names and manage DPBANKSEL without exposing a current-bank
+API. `NewAPSel` constructs an AP selector whose zero value is invalid.
+`APSel.Address` combines it with a complete eight-bit register address; the
+resulting `APAddress` also has an invalid zero value. `ReadAPIDR` reads and
+decodes the common read-only AP identity. `EnumerateAPs` scans every ADIv5
+AP selector without reading class-specific registers. Raw AP access rejects
+an invalid or unaligned address before traffic. Use it only when the caller
+understands the selected AP class and will restore any state the access
+changes. A raw MEM-AP data-register write can write target memory. This
 layer owns AP read and write completion. Construct an SWD binding with
 `dap.NewDebugPort(dap.SWDP(conn))`; the operation context bounds WAIT retry.
 Adding `dap.WithMaxWaits(1)` stops at the first clean WAIT, reporting both
-`dap.ErrWait` and its underlying `swd.ErrWait`. `SetMaxWaits` changes the limit before
-`Connect` or after a successful `Release`; it rejects the change while the port
-is connected or cleanup is pending. The count is per physical request and does
-not bound host I/O. A raw AP read or write which completes, or might have
-completed, invalidates existing `MemAP` values. If the limit or context ends
-after an AP WAIT, `dap.DebugPort` issues DAPABORT; existing `dap.MemAP` values
-reject further reads, though `dap.MemAP.Release` still attempts to restore their
-saved state.
+`dap.ErrWait` and its underlying `swd.ErrWait`. `SetMaxWaits` changes the
+limit before `Connect` or after a successful `Release`; it rejects the
+change while the port is connected or cleanup is pending. The count is per
+physical request and does not bound host I/O. A raw AP read or write which
+completes, or might have completed, invalidates existing `MemAP` values. If
+the limit or context ends after an AP WAIT, `dap.DebugPort` issues DAPABORT;
+existing `dap.MemAP` values reject further reads, though `dap.MemAP.Release`
+still attempts to restore their saved state.
 
 For an explicit JTAG composition, pass `dap.JTAGDP(chain, tapIndex)` instead.
 The chain supplies the complete expected layout; the index is zero-based and
