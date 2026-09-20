@@ -75,9 +75,9 @@ func TestBankedDPAccessRejectsUnsupportedVersionWithoutTraffic(t *testing.T) {
 	}
 }
 
-func TestBankedDPAccessRejectsDPv3WithoutTraffic(t *testing.T) {
+func TestBankedDPAccessRejectsFutureVersionWithoutTraffic(t *testing.T) {
 	target := newWaitTarget()
-	target.dpidrOverride = 0x2ba03477
+	target.dpidrOverride = 0x2ba04477
 	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -85,10 +85,10 @@ func TestBankedDPAccessRejectsDPv3WithoutTraffic(t *testing.T) {
 
 	before := len(target.requests)
 	if _, err := dp.ReadDP(t.Context(), dap.DLCR); err == nil {
-		t.Fatal("DPv3 DLCR read succeeded through the ADIv5 address map")
+		t.Fatal("DPv4 DLCR read succeeded through the ADIv5 address map")
 	}
 	if got := len(target.requests); got != before {
-		t.Fatalf("requests after rejected DPv3 read = %d, want %d", got, before)
+		t.Fatalf("requests after rejected DPv4 read = %d, want %d", got, before)
 	}
 
 }
