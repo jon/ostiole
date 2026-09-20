@@ -579,6 +579,8 @@ On SW-DP version 3, `ReadDP` supports `DPIDR1`, `BASEPTR0`, and `BASEPTR1`;
 `WriteDP` supports `SELECT1`. DPIDR reads select bank zero on this version.
 These registers are rejected on earlier debug ports and baseline JTAG-DP.
 Reading the discovery registers alone does not discover or acquire an AP.
+Immediate and queued `SELECT` and `SELECT1` writes reject address bits beyond
+DPIDR1.ASIZE before traffic; the low DPBANKSEL bits remain independent.
 
 ```go
 width, err := dp.ReadDP(ctx, dap.DPIDR1)

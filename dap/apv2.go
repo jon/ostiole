@@ -71,3 +71,14 @@ func (sel APSel) String() string {
 	}
 	return "invalid AP"
 }
+
+func (dp *DebugPort) validateSelectionAddress(reg DPRegister, value uint32) error {
+	address := uint64(value &^ 15)
+	if reg == SELECT1 {
+		address = uint64(value) << 32
+	}
+	if dp.reentryID.dpidr.Version == 3 && (reg == SELECT || reg == SELECT1) && address>>dp.addressBits != 0 {
+		return fmt.Errorf("dap: %s address exceeds %d bits", reg, dp.addressBits)
+	}
+	return nil
+}
