@@ -28,3 +28,8 @@ an example has been implemented.
 - [`simple/coresight-info`](simple/coresight-info) reads the advertised debug entry
   of a selected MEM-AP, or a known component page, through a managed SWD connection.
   Add `-walk` for bounded ROM traversal with partial-result reporting.
+
+For ADIv6 SW-DP targets, `coresight-info -debug-space -walk` inspects the DP's
+advertised discovery tree. Use `-ap-base ADDRESS` instead of `-ap INDEX` to
+inspect memory through one ADIv6 MEM-AP. The same probe selection and cleanup
+rules apply. See the [RP2350 procedure](../docs/coresight.md#adiv6-and-the-rp2350).

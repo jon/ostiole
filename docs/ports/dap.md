@@ -520,16 +520,14 @@ acknowledgements, physical WAIT responses, auto-increment across 1 KiB, or
 64-bit transfers. Those are better experiments than collecting more CPUID
 values from the same board.
 
-## ADIv6 is a different job
+## ADIv6 architecture
 
-ADIv6 uses DPv3 and APv2. Arm
-[IHI 0074F, _Arm Debug Interface Architecture Specification
-ADIv6.0_](https://developer.arm.com/documentation/ihi0074/f) says directly
-that DPv3 is not fully backward compatible with earlier DP versions; APv2 also
-has a different common programmer's model and address space. Use IHI 0074F,
-not this ADIv5 note, when implementing either one. Treating ADIv6 as a few
-additional ADIv5 register constants would hide the actual compatibility
-boundary.
+ADIv6 uses DPv3 and APv2, with base-address selection and a 4 KiB AP register
+map. Ostiole supports this path over SWD; baseline JTAG-DP retains its ADIv5
+register model. See the [DPv3 registers](#dpv3-discovery-registers) and
+[debug-space inspection](#discovering-adiv6-access-ports) below. Arm
+[IHI 0074, Arm Debug Interface Architecture Specification ADIv6.0](https://developer.arm.com/documentation/ihi0074/)
+defines these registers and their distinct address spaces.
 
 ## MEM-AP debug base
 

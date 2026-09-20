@@ -278,3 +278,57 @@ unlocks, processor control, or board activation were performed. The observed
 tables were class 1. Class 9 layouts and power-domain skips have ordinary
 test coverage; large addresses and both memory byte orders also have public
 MEM-AP simulation coverage. Those cases were not exercised on hardware.
+
+## ADIv6 and the RP2350
+
+The example accepts `-ap-base` for an ADIv6 MEM-AP, or `-debug-space` to
+inspect the DP's own advertised tree. Choose exactly one of `-ap`,
+`-ap-base`, and `-debug-space`. `-base` still overrides the root within the
+selected address space.
+
+```sh
+go run ./examples/simple/coresight-info \
+  -provider jlink -serial 000802011345 -debug-space -walk
+
+go run ./examples/simple/coresight-info \
+  -provider jlink -serial 000802011345 -ap-base 0x2000 -walk
+```
+
+On September 20, 2026, Nostalgia exercised the RP2350 through J-Link EDU Mini
+V2 serial `000802011345`, with SWD requested at 100 kHz. Two fresh sessions
+for each path used:
+
+```sh
+OSTIOLE_ARMDEBUG_HIL=1 \
+  OSTIOLE_PROBE_HIL_PROVIDER=jlink \
+  OSTIOLE_PROBE_HIL_SERIAL=000802011345 \
+  OSTIOLE_ARMDEBUG_HIL_DEBUG_SPACE=1 \
+  go test -tags=integration ./armdebug -run '^TestHILArmConnection$' -count=2 -v
+
+for ap_base in 0x2000 0x4000; do
+  OSTIOLE_ARMDEBUG_HIL=1 \
+    OSTIOLE_PROBE_HIL_PROVIDER=jlink \
+    OSTIOLE_PROBE_HIL_SERIAL=000802011345 \
+    OSTIOLE_ARMDEBUG_HIL_AP_BASE="$ap_base" \
+    OSTIOLE_ARMDEBUG_HIL_WALK=1 \
+    go test -tags=integration ./armdebug -run '^TestHILArmConnection$' -count=2 -v
+done
+```
+
+The integration walks used depth 8, 64 visits, 256 entry reads, and a
+10-second deadline. The debug port reported DPIDR `0x4c013477`, DPIDR1
+`0x94` (20 address bits), and a present discovery root at address zero. Its
+class 9 ROM table led to six children, including MEM-APs at `0x2000` and
+`0x4000` with DEVARCH `0x47700a17`. The walk completed with seven identities.
+
+Both MEM-APs returned IDR `0x34770008`, CPUID `0x411fd210`, and debug base
+`0xe00ff000`. Each target-memory walk completed with seven identities.
+The example also completed all three paths with its existing depth 8,
+256-visit and 4096-entry limits.
+
+All connection cleanup calls returned successfully. Restored state was
+not independently measured after close. These runs performed no target-memory
+writes, halt, reset, component unlock, or component power requests. The walks
+cover advertised entries, not every component in the RP2350 debug address
+space. Addresses above 32 bits, memory writes, and injected failures have
+simulation coverage but were not exercised on this bench.

@@ -28,7 +28,9 @@ func run() (err error) {
 	provider := flag.String("provider", "", "exact probe provider")
 	serial := flag.String("serial", "", "exact probe serial")
 	function := flag.String("function", "", "exact probe function")
-	ap := flag.Int("ap", -1, "required MEM-AP index (0..255)")
+	apBase := flag.String("ap-base", "", "ADIv6 MEM-AP base address")
+	debugSpace := flag.Bool("debug-space", false, "inspect the ADIv6 DP debug address space")
+	ap := flag.Int("ap", -1, "ADIv5 MEM-AP index (0..255)")
 	address := flag.String("base", "", "override the MEM-AP debug base with a known identification page")
 	walk := flag.Bool("walk", false, "walk ROM tables with depth 8, 256 visits, and 4096 entry reads")
 	flag.Parse()
@@ -36,8 +38,12 @@ func run() (err error) {
 	if err != nil {
 		return err
 	}
-	if *ap < 0 || *ap > 255 || flag.NArg() != 0 {
-		return errors.New("require -ap 0..255 and no positional arguments")
+	selection, err := selectAP(*ap, *apBase, *debugSpace)
+	if err != nil {
+		return err
+	}
+	if flag.NArg() != 0 {
+		return errors.New("no positional arguments permitted")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -50,24 +56,68 @@ func run() (err error) {
 	if err != nil {
 		return err
 	}
-	memory, err := c.OpenMemAP(ctx, dap.NewAPSel(uint8(*ap)))
-	if err != nil {
-		return err
+	var memory inspectionReader
+	if *debugSpace {
+		memory = c.Port().DebugSpace()
+	} else {
+		memory, err = c.OpenMemAP(ctx, selection)
+		if err != nil {
+			return err
+		}
 	}
-	if *address == "" {
-		var present bool
-		base, present, err = memory.ReadDebugBase(ctx)
+	return inspectRoot(ctx, memory, *address, base, *walk)
+}
+
+type inspectionReader interface {
+	coresight.ScalarReader
+	ReadDebugBase(context.Context) (uint64, bool, error)
+}
+
+func inspectRoot(ctx context.Context, memory inspectionReader, override string, base uint64, walk bool) error {
+	if override == "" {
+		value, present, err := memory.ReadDebugBase(ctx)
 		if err != nil {
 			return err
 		}
 		if !present {
-			return errors.New("selected MEM-AP advertises no debug entry")
+			return errors.New("selected address space advertises no debug entry")
 		}
+		base = value
 	}
-	return inspect(ctx, memory, base, *walk)
+	return inspect(ctx, memory, base, walk)
 }
 
-func inspect(ctx context.Context, memory *dap.MemAP, base uint64, walk bool) error {
+func selectAP(index int, base string, debugSpace bool) (dap.APSel, error) {
+	choices := 0
+	if index != -1 {
+		choices++
+	}
+	if base != "" {
+		choices++
+	}
+	if debugSpace {
+		choices++
+	}
+	if choices != 1 {
+		return dap.APSel{}, errors.New("select exactly one of -ap, -ap-base, or -debug-space")
+	}
+	if debugSpace {
+		return dap.APSel{}, nil
+	}
+	if base != "" {
+		value, err := parseBase(base)
+		if err != nil {
+			return dap.APSel{}, err
+		}
+		return dap.APAt(value)
+	}
+	if index < 0 || index > 255 {
+		return dap.APSel{}, errors.New("-ap must be 0..255")
+	}
+	return dap.NewAPSel(uint8(index)), nil
+}
+
+func inspect(ctx context.Context, memory coresight.ScalarReader, base uint64, walk bool) error {
 	if walk {
 		return printWalk(ctx, memory, base)
 	}
@@ -109,7 +159,7 @@ func parseBase(value string) (uint64, error) {
 	return base, nil
 }
 
-func printWalk(ctx context.Context, memory *dap.MemAP, base uint64) error {
+func printWalk(ctx context.Context, memory coresight.ScalarReader, base uint64) error {
 	limits := coresight.WalkLimits{MaxDepth: 8, MaxComponents: 256, MaxEntries: 4096}
 	visits, err := coresight.Walk(ctx, memory, base, limits)
 	for i, visit := range visits {
