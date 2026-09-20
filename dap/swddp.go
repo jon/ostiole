@@ -241,7 +241,7 @@ func (dp *DebugPort) validateDPWrite(reg DPRegister, value uint32) (dpRegisterIn
 	if reg == DLCR && value&dlcrTurnaroundMask != 0 {
 		return dpRegisterInfo{}, errors.New("dap: write DLCR: variable turnaround requires unsupported SWD framing")
 	}
-	return info, nil
+	return info, dp.validateSelectionAddress(reg, value)
 }
 
 func (dp *DebugPort) validateBankedDPRegister(info dpRegisterInfo) error {

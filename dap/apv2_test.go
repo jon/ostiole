@@ -141,3 +141,63 @@ func checkAPv2ReleaseClearsUpperSelection(t *testing.T, fail bool) {
 		t.Fatalf("released selection reads %#x, %v; want the low AP", got, err)
 	}
 }
+
+func TestDPv3RawSelectionAddressWidth(t *testing.T) {
+	for _, width := range []uint32{12, 20, 32, 40, 48, 52} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) { checkDPv3RawSelectionAddressWidth(t, width) })
+	}
+}
+
+func checkDPv3RawSelectionAddressWidth(t *testing.T, width uint32) {
+	t.Helper()
+	target := newWaitTarget()
+	target.Target = dapsim.New(0x4c013477)
+	if err := target.SetDPRegister(dap.DPIDR1, width); err != nil {
+		t.Fatal(err)
+	}
+	dp := newDebugPort(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := dp.Release(t.Context()); err != nil {
+			t.Error(err)
+		}
+	}()
+	for _, reg := range []dap.DPRegister{dap.SELECT, dap.SELECT1} {
+		bits := width
+		if reg == dap.SELECT1 {
+			bits = 0
+			if width > 32 {
+				bits = width - 32
+			}
+		}
+		valid := uint32((uint64(1) << bits) - 1)
+		if err := dp.WriteDP(t.Context(), reg, valid); err != nil {
+			t.Fatalf("valid %s=%#x rejected: %v", reg, valid, err)
+		}
+		if _, err := dp.ReadDP(t.Context(), dap.RDBUFF); err != nil {
+			t.Fatal(err)
+		}
+		if bits >= 32 {
+			continue
+		}
+		before := len(target.requests)
+		invalid := uint32(1) << bits
+		if err := dp.WriteDP(t.Context(), reg, invalid); err == nil {
+			t.Fatalf("accepted %s bit %d", reg, bits)
+		}
+		txn := dp.NewTxn()
+		prefix := txn.ReadDP(dap.DPIDR)
+		write := txn.WriteDP(reg, invalid)
+		if err := txn.Commit(t.Context()); err == nil || write.Err() == nil {
+			t.Fatalf("queued invalid %s accepted", reg)
+		}
+		if _, err := prefix.Value(); !errors.Is(err, dap.ErrNotExecuted) {
+			t.Fatalf("invalid queue executed prefix: %v", err)
+		}
+		if len(target.requests) != before {
+			t.Fatal("invalid selection sent traffic")
+		}
+	}
+}
