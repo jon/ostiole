@@ -212,7 +212,7 @@ func observeJLinkTarget(t *testing.T, ctx context.Context, readyOnOpen bool) tar
 
 func assertAPRegister(t *testing.T, ctx context.Context, debugPort *dap.DebugPort, address uint8, want uint32) {
 	t.Helper()
-	got, err := debugPort.ReadRawAP(ctx, dap.NewAPSel(0).Address(address))
+	got, err := debugPort.ReadRawAP(ctx, dap.NewAPSel(0).Address(uint16(address)))
 	if err != nil {
 		t.Fatal(err)
 	}

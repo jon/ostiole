@@ -150,7 +150,7 @@ func TestReadMEMAPDebugBaseFailureAndRetry(t *testing.T) {
 			}
 			releaseDebugBaseTest(t, mem.Release)
 			for _, reg := range []uint8{0, 4, 8} {
-				got, readErr := dp.ReadRawAP(t.Context(), apSel(17).Address(reg))
+				got, readErr := dp.ReadRawAP(t.Context(), apSel(17).Address(uint16(reg)))
 				if readErr != nil || got != 0 {
 					t.Fatalf("restored register %#x=%#x, %v", reg, got, readErr)
 				}

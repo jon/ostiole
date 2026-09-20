@@ -40,9 +40,11 @@
 // only the architectural DAPABORT value for ABORT. Later JTAG-DP versions and
 // version detection are not implemented.
 //
-// NewAPSel constructs an access-port selector; the zero APSel is invalid.
-// APSel.Address combines a selector with a complete eight-bit ADIv5 AP address;
-// the resulting APAddress also has an invalid zero value. ReadAPIDR reads and
+// NewAPSel constructs an ADIv5 index selector; APAt constructs an ADIv6
+// base-address selector.
+// The zero APSel is invalid. APSel.Address combines a selector with a complete
+// register offset (eight bits for ADIv5, twelve for ADIv6). The resulting
+// APAddress also has an invalid zero value. ReadAPIDR reads and
 // decodes the common read-only AP identity. ReadRawAP and WriteRawAP reject
 // invalid or unaligned addresses before traffic. Raw access has the effects
 // defined by the selected AP class; writing a MEM-AP data register can write

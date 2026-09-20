@@ -55,6 +55,7 @@ type DebugPort struct {
 	cleanupTimeout time.Duration
 	identity       Identity
 	identified     bool
+	addressBits    uint8
 	reentryID      Identity
 	reentryKnown   bool
 	state          debugPortState
@@ -241,13 +242,13 @@ func (dp *DebugPort) validateDPWrite(reg DPRegister, value uint32) (dpRegisterIn
 }
 
 func (dp *DebugPort) validateBankedDPRegister(info dpRegisterInfo) error {
-	if dp.state.session != sessionConnected || !dp.identified {
+	if dp.state.session == sessionIdle || !dp.reentryKnown {
 		return errors.New("dap: banked DP access requires an active connection")
 	}
-	if dp.identity.dpidr.Version > 3 {
-		return fmt.Errorf("dap: banked DP access does not support DPv%d", dp.identity.dpidr.Version)
+	if dp.reentryID.dpidr.Version > 3 {
+		return fmt.Errorf("dap: banked DP access does not support DPv%d", dp.reentryID.dpidr.Version)
 	}
-	if dp.identity.dpidr.Version < info.minVersion {
+	if dp.reentryID.dpidr.Version < info.minVersion {
 		return fmt.Errorf("dap: %s requires DPv%d or later", info.name, info.minVersion)
 	}
 	return nil

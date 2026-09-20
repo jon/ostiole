@@ -119,6 +119,18 @@ func (dp *DebugPort) initialize(ctx context.Context, raw uint32) (Identity, uint
 	if err != nil {
 		return Identity{}, 0, err
 	}
+	if dpidr.Version == 3 {
+		width, err := dp.readDP(ctx, DPIDR1)
+		if err != nil {
+			return Identity{}, 0, err
+		}
+		dp.addressBits = uint8(width & 0x7f)
+		switch dp.addressBits {
+		case 12, 20, 32, 40, 48, 52:
+		default:
+			return Identity{}, 0, fmt.Errorf("dap: unsupported ADIv6 address width %d", dp.addressBits)
+		}
+	}
 	return info, state, nil
 }
 
@@ -168,11 +180,8 @@ func (dp *DebugPort) Release(ctx context.Context) error {
 			return fmt.Errorf("dap: restore protocol state for release: %w", err)
 		}
 	}
-	if err := dp.writeDP(releaseCtx, SELECT, 0); err != nil {
-		return err
-	}
-	if _, err := dp.readDP(releaseCtx, RDBUFF); err != nil {
-		return fmt.Errorf("dap: confirm SELECT while releasing debug port: %w", err)
+	if err := dp.selectAPAddress(releaseCtx, 0); err != nil {
+		return fmt.Errorf("dap: clear selection while releasing debug port: %w", err)
 	}
 	if err := dp.releasePower(releaseCtx); err != nil {
 		return err

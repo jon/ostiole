@@ -67,7 +67,7 @@ type txnOp struct {
 	kind           txnOpKind
 	dpReg          DPRegister
 	apSel          APSel
-	apAddr         uint8
+	apAddr         uint16
 	data           uint32
 	values         []uint32
 	preserveAP     bool
@@ -113,7 +113,7 @@ func (t *Txn) WriteDP(reg DPRegister, value uint32) *WriteResult {
 // ReadAPIDR queues a read of one access-port identification register. The
 // result value is the raw register encoding.
 func (t *Txn) ReadAPIDR(sel APSel) *ReadResult {
-	return &ReadResult{result: t.queue(txnOp{kind: txnReadAPIDR, apSel: sel, apAddr: apIDRAddress})}
+	return &ReadResult{result: t.queue(txnOp{kind: txnReadAPIDR, apSel: sel, apAddr: sel.register(apIDRAddress)})}
 }
 
 // ReadRawAP queues one posted access-port read. A read that completes or might
@@ -132,20 +132,20 @@ func (t *Txn) WriteRawAP(addr APAddress, value uint32) *WriteResult {
 }
 
 func (t *Txn) readAP(sel APSel, addr uint8) *ReadResult {
-	return &ReadResult{result: t.queue(txnOp{kind: txnReadRawAP, apSel: sel, apAddr: addr, preserveAP: true})}
+	return &ReadResult{result: t.queue(txnOp{kind: txnReadRawAP, apSel: sel, apAddr: sel.register(addr), preserveAP: true})}
 }
 
 func (t *Txn) writeAP(sel APSel, addr uint8, value uint32) *WriteResult {
-	return &WriteResult{result: t.queue(txnOp{kind: txnWriteRawAP, apSel: sel, apAddr: addr, data: value, preserveAP: true})}
+	return &WriteResult{result: t.queue(txnOp{kind: txnWriteRawAP, apSel: sel, apAddr: sel.register(addr), data: value, preserveAP: true})}
 }
 
 func (t *Txn) writeAPSequence(sel APSel, addr uint8, values []uint32) *WriteResult {
-	op := txnOp{kind: txnWriteAPSequence, apSel: sel, apAddr: addr, values: append([]uint32(nil), values...), preserveAP: true}
+	op := txnOp{kind: txnWriteAPSequence, apSel: sel, apAddr: sel.register(addr), values: append([]uint32(nil), values...), preserveAP: true}
 	return &WriteResult{result: t.queue(op)}
 }
 
 func (t *Txn) readAPSequential(sel APSel, addr uint8) *ReadResult {
-	return &ReadResult{result: t.queue(txnOp{kind: txnReadAPSequential, apSel: sel, apAddr: addr, preserveAP: true})}
+	return &ReadResult{result: t.queue(txnOp{kind: txnReadAPSequential, apSel: sel, apAddr: sel.register(addr), preserveAP: true})}
 }
 
 func (t *Txn) queue(op txnOp) *txnResult {
@@ -218,7 +218,7 @@ func (t *Txn) validate() error {
 		case txnWriteDP:
 			_, op.err = t.dp.validateDPWrite(op.dpReg, op.data)
 		case txnReadAPIDR:
-			_, op.err = validateAPSel(op.apSel)
+			_, op.err = t.dp.validateSelector(op.apSel)
 		case txnReadRawAP, txnReadAPSequential:
 			_, op.err = validateAPAddress(APAddress{sel: op.apSel, value: op.apAddr}, false)
 		case txnWriteRawAP, txnWriteAPSequence:
@@ -226,6 +226,13 @@ func (t *Txn) validate() error {
 			if op.kind == txnWriteAPSequence && len(op.values) == 0 {
 				op.err = errors.Join(op.err, errors.New("dap: empty access-port write sequence"))
 			}
+		}
+		if op.apSel != (APSel{}) {
+			_, err := t.dp.validateSelector(op.apSel)
+			op.err = errors.Join(op.err, err)
+		}
+		if op.apSel.v2 {
+			op.err = errors.New("dap: ADIv6 AP transactions are not supported")
 		}
 		if op.err != nil {
 			errs = append(errs, op.err)
@@ -341,7 +348,7 @@ func (p *swdTxnPlanner) lowerSequentialAP(start int, ops []txnOp) {
 	p.selectValue(start, value)
 	p.settleSELECT(start)
 	for i := range ops {
-		step := txnStep{req: apTransferRequest(ops[i].apAddr&0x0c, true), op: start + i, apRead: true}
+		step := txnStep{req: apTransferRequest(uint8(ops[i].apAddr&0x0c), true), op: start + i, apRead: true}
 		if i > 0 {
 			step.op--
 			step.deliver = true
@@ -360,7 +367,7 @@ func (p *swdTxnPlanner) lowerAPWriteSequence(index int, op txnOp) {
 	p.settleSELECT(index)
 	for i, data := range op.values {
 		p.steps = append(p.steps, txnStep{
-			req:              apTransferRequest(op.apAddr&0x0c, false),
+			req:              apTransferRequest(uint8(op.apAddr&0x0c), false),
 			data:             data,
 			op:               index,
 			operationStarted: i > 0,
@@ -433,7 +440,7 @@ func (p *swdTxnPlanner) lowerAP(index int, op txnOp) {
 	p.settleSELECT(index)
 	read := op.kind == txnReadAPIDR || op.kind == txnReadRawAP
 	invalidatesAP := op.kind == txnReadRawAP || op.kind == txnWriteRawAP
-	req := apTransferRequest(addr&0x0c, read)
+	req := apTransferRequest(uint8(addr&0x0c), read)
 	p.steps = append(p.steps, txnStep{
 		apRead:        op.kind == txnReadRawAP,
 		apWrite:       op.kind == txnWriteRawAP,

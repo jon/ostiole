@@ -78,7 +78,7 @@ func exerciseSharedMEMAP(t *testing.T, link string, bigEndian bool) {
 		t.Fatal(err)
 	}
 	for addr, value := range map[uint8]uint32{0: 0xa5000051, 4: 0x9988, 8: 1} {
-		if err := dp.WriteRawAP(t.Context(), sel.Address(addr), value); err != nil {
+		if err := dp.WriteRawAP(t.Context(), sel.Address(uint16(addr)), value); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -95,7 +95,7 @@ func exerciseSharedMEMAP(t *testing.T, link string, bigEndian bool) {
 		t.Fatal(err)
 	}
 	for addr, want := range map[uint8]uint32{0: 0xa5000051, 4: 0x9988, 8: 1} {
-		if got, err := dp.ReadRawAP(t.Context(), sel.Address(addr)); err != nil || got != want {
+		if got, err := dp.ReadRawAP(t.Context(), sel.Address(uint16(addr))); err != nil || got != want {
 			t.Fatalf("restored AP %#x = %#x, %v", addr, got, err)
 		}
 	}

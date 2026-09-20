@@ -62,7 +62,7 @@ func TestReadMEMAPWordOverFTDI(t *testing.T) {
 
 func assertHardwareAPRegister(t *testing.T, ctx context.Context, dp *dap.DebugPort, address uint8, want uint32) {
 	t.Helper()
-	got, err := dp.ReadRawAP(ctx, hardwareAP.Address(address))
+	got, err := dp.ReadRawAP(ctx, hardwareAP.Address(uint16(address)))
 	if err != nil {
 		t.Fatal(err)
 	}

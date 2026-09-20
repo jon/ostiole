@@ -23,7 +23,7 @@ func TestAccessAPOverFTDI(t *testing.T) {
 	defer cancel()
 
 	dp := openHardwareDebugPort(t, ctx)
-	const hardwareAPCSW = uint8(0x00)
+	const hardwareAPCSW = uint16(0x00)
 	var (
 		savedCSW uint32
 		saved    bool

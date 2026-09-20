@@ -29,7 +29,7 @@ data-register write can write target memory.
 | Connect SWD or transfer DP/AP registers | `swd.New`, `Conn.Connect`, `Conn.ReadDP`, `Conn.WriteDP`, `Conn.ReadAP`, `Conn.WriteAP`, `Conn.NewBatch`, `Conn.Release` | `examples/trivial/swd-dpidr` |
 | Enter SWD, decode a DPIDR, and manage SW-DP power | `dap.NewDebugPort`, `DebugPort.Connect`, `DebugPort.Release` | `ost dap dp id` |
 | Identify one explicitly selected AP | `DebugPort.ReadAPIDR`, `DecodeAPIDR` | `examples/simple/ap-id` |
-| Access another AP register by its full ADIv5 address | `DebugPort.ReadRawAP`, `DebugPort.WriteRawAP` | Package tests |
+| Access another AP register by its full register address | `DebugPort.ReadRawAP`, `DebugPort.WriteRawAP` | Package tests |
 | Read or write one aligned target scalar through a MEM-AP | `dap.OpenMemAP`, `MemAP.ReadScalar`, `MemAP.WriteScalar`, `MemAP.Release` | `examples/simple/cortexm-info` uses `ReadWord`. |
 | Read or write arbitrary target bytes through a MEM-AP | `dap.OpenMemAP`, `MemAP.ReadBlock`, `MemAP.WriteBlock`, `MemAP.Release` | Package tests |
 | Obtain a MEM-AP's advertised debug entry | `MemAP.ReadDebugBase` | `examples/simple/coresight-info` |
@@ -635,8 +635,10 @@ exclusive, serialized use of its `swd.Conn`; direct transfers on that
 connection can invalidate cached DAP state. DP, AP, transaction, and MEM-AP
 operations require an active connection. `ReadDP` and `WriteDP` take logical
 ADIv5 register names and manage DPBANKSEL without exposing a current-bank
-API. `NewAPSel` constructs an AP selector whose zero value is invalid.
-`APSel.Address` combines it with a complete eight-bit register address; the
+API. `NewAPSel` constructs an ADIv5 index; `APAt` constructs an ADIv6 base-address
+selector. Both return `APSel` values; the zero `APSel` remains invalid.
+`APSel.Address` combines a selector with an eight-bit ADIv5 or twelve-bit
+ADIv6 register offset; the
 resulting `APAddress` also has an invalid zero value. `ReadAPIDR` reads and
 decodes the common read-only AP identity. `EnumerateAPs` scans every ADIv5
 AP selector without reading class-specific registers. Raw AP access rejects
