@@ -3,7 +3,6 @@ package armdebug
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/jon/ostiole/dap"
 )
@@ -28,13 +27,9 @@ func (c *Conn) OpenMemAP(ctx context.Context, ap dap.APSel) (*dap.MemAP, error) 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	index, err := ap.Value()
-	if err != nil {
-		return nil, err
-	}
 	for _, owned := range c.memories {
 		if owned.selection == ap {
-			return nil, fmt.Errorf("armdebug: AP %d is already owned", index)
+			return nil, errors.New("armdebug: access port is already owned")
 		}
 	}
 	client, err := dap.OpenMemAP(ctx, c.port, ap)

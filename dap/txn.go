@@ -78,12 +78,12 @@ type txnOp struct {
 	uncertainWrite bool
 }
 
-// Txn queues an ordered, single-use sequence of ADIv5 DP and AP operations.
+// Txn queues an ordered, single-use sequence of DP and AP operations.
 // Calls sharing the transaction, its DebugPort, or the underlying connection
 // or chain must be serialized. Queued operations have the same effects,
 // WAIT behavior, and lifecycle requirements as the corresponding DebugPort
 // methods. Commit can pack their physical SWD requests while preserving
-// logical result order. JTAG completes and checks each AP operation in order.
+// logical result order. JTAG and ADIv6 complete each AP operation in order.
 type Txn struct {
 	dp        *DebugPort
 	ops       []txnOp
@@ -191,8 +191,8 @@ func (t *Txn) Commit(ctx context.Context) error {
 		t.resolveInvalid()
 		return err
 	}
-	if t.dp.jtag != nil {
-		return t.dp.jtag.executeTxn(ctx, t)
+	if t.dp.jtag != nil || t.dp.reentryID.dpidr.Version == 3 {
+		return t.dp.executeSequentialTxn(ctx, t)
 	}
 	return t.dp.conn.executeTxn(ctx, t)
 }
@@ -230,9 +230,6 @@ func (t *Txn) validate() error {
 		if op.apSel != (APSel{}) {
 			_, err := t.dp.validateSelector(op.apSel)
 			op.err = errors.Join(op.err, err)
-		}
-		if op.apSel.v2 {
-			op.err = errors.New("dap: ADIv6 AP transactions are not supported")
 		}
 		if op.err != nil {
 			errs = append(errs, op.err)
@@ -365,6 +362,10 @@ func (p *swdTxnPlanner) lowerAPWriteSequence(index int, op txnOp) {
 	value := uint32(selection)<<24 | uint32(op.apAddr&0xf0)
 	p.selectValue(index, value)
 	p.settleSELECT(index)
+	p.appendAPWriteSequence(index, op)
+}
+
+func (p *swdTxnPlanner) appendAPWriteSequence(index int, op txnOp) {
 	for i, data := range op.values {
 		p.steps = append(p.steps, txnStep{
 			req:              apTransferRequest(uint8(op.apAddr&0x0c), false),
@@ -438,11 +439,16 @@ func (p *swdTxnPlanner) lowerAP(index int, op txnOp) {
 	value := uint32(selection)<<24 | uint32(addr&0xf0)
 	p.selectValue(index, value)
 	p.settleSELECT(index)
-	read := op.kind == txnReadAPIDR || op.kind == txnReadRawAP
+	p.appendAP(index, op)
+}
+
+func (p *swdTxnPlanner) appendAP(index int, op txnOp) {
+	addr := op.apAddr
+	read := op.kind == txnReadAPIDR || op.kind == txnReadRawAP || op.kind == txnReadAPSequential
 	invalidatesAP := op.kind == txnReadRawAP || op.kind == txnWriteRawAP
 	req := apTransferRequest(uint8(addr&0x0c), read)
 	p.steps = append(p.steps, txnStep{
-		apRead:        op.kind == txnReadRawAP,
+		apRead:        op.kind == txnReadRawAP || op.kind == txnReadAPSequential,
 		apWrite:       op.kind == txnWriteRawAP,
 		req:           req,
 		data:          op.data,
@@ -456,7 +462,7 @@ func (p *swdTxnPlanner) lowerAP(index int, op txnOp) {
 		deliver:          true,
 		deliverValue:     read,
 		operationStarted: true,
-		apRead:           op.kind == txnReadRawAP,
+		apRead:           op.kind == txnReadRawAP || op.kind == txnReadAPSequential,
 		apWrite:          op.kind == txnWriteRawAP,
 		completesWrite:   op.kind == txnWriteRawAP,
 		invalidatesAP:    invalidatesAP && !op.preserveAP,

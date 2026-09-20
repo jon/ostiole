@@ -1,11 +1,12 @@
 package dap_test
 
 import (
+	"testing"
+
 	"github.com/jon/ostiole/dap"
 	dapsim "github.com/jon/ostiole/dap/sim"
 	"github.com/jon/ostiole/swd"
 	swdsim "github.com/jon/ostiole/swd/sim"
-	"testing"
 )
 
 func TestDPv3BankedIdentity(t *testing.T) {

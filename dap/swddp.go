@@ -235,6 +235,9 @@ func (dp *DebugPort) validateDPWrite(reg DPRegister, value uint32) (dpRegisterIn
 	if reg == CTRLSTAT && (value&overrunDetect != 0) != (dp.state.response == responseOverrun) {
 		return dpRegisterInfo{}, errors.New("dap: write CTRL/STAT: ORUNDETECT is owned by the SWD connection")
 	}
+	if reg == CTRLSTAT && dp.reentryID.dpidr.Version == 3 && value&(1<<24) != 0 {
+		return dpRegisterInfo{}, errors.New("dap: DP ERRMODE is not supported")
+	}
 	if reg == DLCR && value&dlcrTurnaroundMask != 0 {
 		return dpRegisterInfo{}, errors.New("dap: write DLCR: variable turnaround requires unsupported SWD framing")
 	}

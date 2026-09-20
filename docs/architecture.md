@@ -221,7 +221,7 @@ SW-DP connection establishes only DPIDR; JTAG-DP establishes only IDCODE.
 Construct the opaque binding with `dap.SWDP(conn)` or
 `dap.JTAGDP(chain, tapIndex)` and pass it to `dap.NewDebugPort`. The zero
 binding is invalid; constructors send no traffic. The debug port enters the
-bound protocol before applying ADIv5 policy.
+bound protocol before applying DAP policy.
 Public DP, AP, transaction, and MEM-AP operations
 remain blocked until that connection is active. The debug port validates
 register availability and direction for the binding. On SWD it validates
@@ -249,6 +249,11 @@ their original causes.
 Connection setup validates the context and options before protocol entry.
 Power acquisition starts only after entry establishes the identity and
 control state; failed setup and ordinary release use the same link cleanup.
+
+ADIv6 SW-DP selects AP register addresses through SELECT and SELECT1, using
+the width advertised by DPIDR1. Its transactions complete each operation
+before sending the next. ADIv6 MEM-APs use the existing restoration and
+managed ownership rules.
 
 The private JTAG executor owns DPACC/APACC framing and its delayed-response
 pipeline. It polls an accepted request to completion without replaying it,

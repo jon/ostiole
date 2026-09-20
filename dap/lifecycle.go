@@ -120,6 +120,9 @@ func (dp *DebugPort) initialize(ctx context.Context, raw uint32) (Identity, uint
 		return Identity{}, 0, err
 	}
 	if dpidr.Version == 3 {
+		if state&(1<<24) != 0 {
+			return Identity{}, 0, errors.New("dap: DP ERRMODE is not supported")
+		}
 		width, err := dp.readDP(ctx, DPIDR1)
 		if err != nil {
 			return Identity{}, 0, err
