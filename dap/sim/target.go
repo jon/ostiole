@@ -170,7 +170,9 @@ func (t *Target) SetDPRegister(reg dap.DPRegister, value uint32) error {
 }
 
 // AddAP adds an access port with the supplied identification register. It
-// rejects a zero APIDR and an existing selector.
+// rejects a zero APIDR, an existing selector, and a selector for a different
+// DAP architecture. AP fixtures require DPv0 through DPv3. For DPv3, configure
+// DPIDR1 before adding fixtures; AP bases must fit its supported address width.
 func (t *Target) AddAP(sel dap.APSel, idr uint32) error {
 	if t == nil {
 		return errors.New("dap/sim: nil target")
@@ -178,7 +180,7 @@ func (t *Target) AddAP(sel dap.APSel, idr uint32) error {
 	if idr == 0 {
 		return errors.New("dap/sim: APIDR must be nonzero")
 	}
-	selection, err := selectorValue(sel)
+	selection, err := t.selectorValue(sel)
 	if err != nil {
 		return err
 	}
@@ -190,7 +192,9 @@ func (t *Target) AddAP(sel dap.APSel, idr uint32) error {
 }
 
 // AddMEMAP adds a memory access port initialized from aligned words. It rejects
-// a non-MEM-AP identity, an existing selector, and unaligned fixtures.
+// a non-MEM-AP identity, an existing selector, unaligned fixtures, and a
+// selector for a different DAP architecture. The DP version and address-width
+// requirements are the same as AddAP.
 func (t *Target) AddMEMAP(sel dap.APSel, idr uint32, words map[uint32]uint32) error {
 	if t == nil {
 		return errors.New("dap/sim: nil target")
@@ -198,7 +202,7 @@ func (t *Target) AddMEMAP(sel dap.APSel, idr uint32, words map[uint32]uint32) er
 	if idr == 0 || dap.DecodeAPIDR(idr).Class != 8 {
 		return errors.New("dap/sim: MEM-AP requires a nonzero class-8 APIDR")
 	}
-	selection, err := selectorValue(sel)
+	selection, err := t.selectorValue(sel)
 	if err != nil {
 		return err
 	}
@@ -228,7 +232,7 @@ func (t *Target) SetMEMAPCFG(sel dap.APSel, cfg uint32) error {
 	if t == nil {
 		return errors.New("dap/sim: nil target")
 	}
-	selection, err := selectorValue(sel)
+	selection, err := t.selectorValue(sel)
 	if err != nil {
 		return err
 	}
@@ -255,7 +259,7 @@ func (t *Target) SetMEMAPSizes(sel dap.APSel, sizes ...dap.TransferSize) error {
 	if t == nil {
 		return errors.New("dap/sim: nil target")
 	}
-	selection, err := selectorValue(sel)
+	selection, err := t.selectorValue(sel)
 	if err != nil {
 		return err
 	}
@@ -285,7 +289,7 @@ func (t *Target) SetMEMAPBytes(sel dap.APSel, addr uint64, data []byte) error {
 	if t == nil {
 		return errors.New("dap/sim: nil target")
 	}
-	selection, err := selectorValue(sel)
+	selection, err := t.selectorValue(sel)
 	if err != nil {
 		return err
 	}
@@ -307,7 +311,7 @@ func (t *Target) MEMAPBytes(sel dap.APSel, addr uint64, size int) ([]byte, error
 	if t == nil {
 		return nil, errors.New("dap/sim: nil target")
 	}
-	selection, err := selectorValue(sel)
+	selection, err := t.selectorValue(sel)
 	if err != nil {
 		return nil, err
 	}
@@ -694,8 +698,18 @@ func (t *Target) writeBankedRegister(value uint32) error {
 	return nil
 }
 
-func selectorValue(sel dap.APSel) (uint64, error) {
-	if base, err := sel.BaseAddress(); err == nil {
+func (t *Target) selectorValue(sel dap.APSel) (uint64, error) {
+	if version := t.dpidr >> 12 & 15; version > 3 {
+		return 0, fmt.Errorf("dap/sim: AP fixtures do not support DPv%d", version)
+	}
+	if t.dpidr>>12&15 == 3 {
+		base, err := sel.BaseAddress()
+		if err != nil {
+			return 0, err
+		}
+		if !t.validDebugAddress(base) {
+			return 0, errors.New("dap/sim: AP base requires a configured, supported DPIDR1 address width")
+		}
 		return base, nil
 	}
 	index, err := sel.Value()

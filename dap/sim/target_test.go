@@ -424,3 +424,108 @@ func TestNilTargetRejectsAccessPortFixtures(t *testing.T) {
 		t.Fatal("AddMEMAP() succeeded on a nil target")
 	}
 }
+
+func TestTargetRejectsMismatchedAPArchitecture(t *testing.T) {
+	for _, memory := range []bool{false, true} {
+		for version := range uint32(16) {
+			checkTargetAPArchitecture(t, memory, 0x2ba00477|version<<12)
+		}
+	}
+}
+
+func checkTargetAPArchitecture(t *testing.T, memory bool, dpidr uint32) {
+	t.Helper()
+	v6, err := dap.APAt(0x2000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := New(dpidr)
+	valid, invalid := dap.NewAPSel(0), v6
+	if dpidr>>12&15 == 3 {
+		valid, invalid = invalid, valid
+		if err := target.SetDPRegister(dap.DPIDR1, 20); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add := target.AddAP
+	if memory {
+		add = func(sel dap.APSel, idr uint32) error { return target.AddMEMAP(sel, idr, nil) }
+	}
+	if err := add(invalid, 0x34770008); err == nil || len(target.aps) != 0 {
+		t.Fatalf("DPIDR=%#x memory=%v accepted %s or changed fixtures", dpidr, memory, invalid)
+	}
+	if dpidr>>12&15 > 3 {
+		if err := add(valid, 0x34770008); err == nil || len(target.aps) != 0 {
+			t.Fatalf("unsupported DPIDR=%#x memory=%v accepted a fixture", dpidr, memory)
+		}
+		return
+	}
+	if err := add(valid, 0x34770008); err != nil {
+		t.Fatal(err)
+	}
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(swdsim.New(target))))
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	id, err := dp.ReadAPIDR(t.Context(), valid)
+	if err != nil || id.Raw != 0x34770008 {
+		t.Fatalf("valid fixture is unreachable: %#x, %v", id.Raw, err)
+	}
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTargetValidatesADIv6FixtureAddressWidth(t *testing.T) {
+	for width := range uint32(128) {
+		checkADIv6FixtureAddressWidth(t, width)
+	}
+}
+
+func checkADIv6FixtureAddressWidth(t *testing.T, width uint32) {
+	t.Helper()
+	target := New(0x4c013477)
+	if err := target.SetDPRegister(dap.DPIDR1, width); err != nil {
+		t.Fatal(err)
+	}
+	validWidth := width == 12 || width == 20 || width == 32 || width == 40 || width == 48 || width == 52
+	base := uint64(0)
+	if validWidth {
+		base = uint64(1)<<width - 0x1000
+	}
+	sel, _ := dap.APAt(base)
+	for _, memory := range []bool{false, true} {
+		add := target.AddAP
+		if memory {
+			add = func(sel dap.APSel, idr uint32) error { return target.AddMEMAP(sel, idr, nil) }
+		}
+		err := add(sel, 0x34770008)
+		if (err == nil) != validWidth {
+			t.Fatalf("width=%d memory=%v fixture=%v", width, memory, err)
+		}
+		delete(target.aps, sel)
+		if validWidth {
+			outside, _ := dap.APAt(uint64(1) << width)
+			if err := add(outside, 0x34770008); err == nil {
+				t.Fatalf("width=%d accepted out-of-range AP", width)
+			}
+		}
+	}
+	if err := target.SetDebugWord(base, 7); (err == nil) != validWidth {
+		t.Fatalf("width=%d debug word=%v", width, err)
+	}
+}
+
+func TestTargetRequiresADIv6WidthBeforeAPFixtures(t *testing.T) {
+	target := New(0x4c013477)
+	sel, _ := dap.APAt(0)
+	if err := target.AddAP(sel, 0x34770008); err == nil {
+		t.Fatal("AP fixture accepted before DPIDR1")
+	}
+	if err := target.AddMEMAP(sel, 0x34770008, nil); err == nil {
+		t.Fatal("MEM-AP fixture accepted before DPIDR1")
+	}
+	if len(target.aps) != 0 {
+		t.Fatal("failed setup changed AP fixtures")
+	}
+}
