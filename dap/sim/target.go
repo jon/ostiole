@@ -33,6 +33,7 @@ const (
 
 // Target models the initial SW-DP register state.
 type Target struct {
+	debugWords  map[uint64]uint32
 	dpidr       uint32
 	ctrlStat    uint32
 	dpBanks     [16]uint32
@@ -409,6 +410,10 @@ func validateRequest(req swdsim.Request, read bool) error {
 
 func (t *Target) readAP(req swdsim.Request) (uint32, error) {
 	posted := t.rdbuff
+	if value, ok := t.debugWords[uint64(t.selectHigh)<<32|uint64(t.selectDP&^15)|uint64(req.Addr)]; ok && t.dpidr>>12&15 == 3 {
+		t.rdbuff = value
+		return posted, nil
+	}
 	ap := t.aps[t.selectedAP()]
 	if ap == nil {
 		t.rdbuff = 0

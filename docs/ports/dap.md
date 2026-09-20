@@ -643,3 +643,34 @@ Here `connection` is an open `armdebug.Conn`. Its `Close` restores acquired
 MEM-AP state before releasing the debug port and probe; retain the owner and
 retry if cleanup fails. Target-memory reads preserve the inherited access
 attributes. This does not acquire or halt the processor.
+
+## Discovering ADIv6 access ports
+
+`DebugPort.DebugSpace` borrows the DP's debug address space. Its
+`ReadDebugBase` reads BASEPTR0/1, and its aligned `Size32` reader composes with
+`coresight.Identify` and `coresight.Walk`:
+
+```go
+space := dp.DebugSpace()
+base, present, err := space.ReadDebugBase(ctx)
+if err != nil {
+    return err
+}
+if !present {
+    return errors.New("debug port advertises no discovery root")
+}
+visits, err := coresight.Walk(ctx, space, base, coresight.WalkLimits{
+    MaxDepth: 8, MaxComponents: 64, MaxEntries: 256,
+})
+```
+
+The visits retain component bases and architecture IDs. A present Arm MEM-AP
+architecture identifies an AP base that can be passed to `dap.APAt`. Keep
+partial results and the walk error if inspection stops. The walker follows
+only advertised entries within its bounds; it does not scan the address space
+or acquire component power.
+
+Inspect this space before acquiring MEM-APs: raw AP reads invalidate existing
+MEM-AP clients and can have register-specific effects. The reader owns no
+cleanup; the caller still releases the debug port. The DP's discovery base
+and a MEM-AP's debug base belong to different address spaces.

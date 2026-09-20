@@ -266,6 +266,13 @@ the packages do not add locking.
 The [Arm Debug Access Port guide](ports/dap.md) describes ADIv5 register
 access, posted transactions, power handshakes, and the current bench result.
 
+## ADIv6 debug-space inspection
+
+`DebugPort.DebugSpace` supplies a borrowed aligned-word reader for DPv3's
+debug address space and reads its advertised BASEPTR0/1 root. It composes with
+the bounded CoreSight walker to identify AP bases. Perform this inspection
+before acquiring MEM-APs; raw debug-space reads invalidate existing clients.
+
 ## CoreSight component inspection
 
 `coresight.Identify` reads CIDR and PIDR at an explicit 4 KiB aligned page,

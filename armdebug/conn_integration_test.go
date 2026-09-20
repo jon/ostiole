@@ -69,6 +69,9 @@ func TestHILArmConnection(t *testing.T) {
 
 	}
 
+	if os.Getenv("OSTIOLE_ARMDEBUG_HIL_DEBUG_SPACE") == "1" {
+		inspectDebugSpaceHIL(t, ctx, c.Port().DebugSpace())
+	}
 	if inspectMemory {
 		inspectMemoryHIL(t, ctx, c, ap)
 	}
@@ -141,4 +144,25 @@ func closeHIL(t *testing.T, c *armdebug.Conn) {
 		}
 	}
 	t.Errorf("cleanup remains pending after three attempts: %v", err)
+}
+
+func inspectDebugSpaceHIL(t *testing.T, ctx context.Context, space dap.DebugSpace) {
+	t.Helper()
+	base, present, err := space.ReadDebugBase(ctx)
+	if err != nil || !present {
+		t.Fatalf("debug root=%#x,%v,%v", base, present, err)
+	}
+	visits, err := coresight.Walk(ctx, space, base, coresight.WalkLimits{MaxDepth: 8, MaxComponents: 64, MaxEntries: 256})
+	for _, visit := range visits {
+		if visit.Component != nil {
+			t.Logf("debug-space base=%#x CIDR=%#08x PIDR=%#x DEVARCH=%#08x", visit.Component.Base, visit.Component.CIDR, visit.Component.PIDR, visit.Component.DEVARCH)
+		}
+		if visit.Err != nil {
+			t.Log(visit.Err)
+		}
+	}
+	t.Logf("debug-space visits=%d complete=%v", len(visits), err == nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 }
