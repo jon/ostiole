@@ -599,7 +599,10 @@ The caller retains the connected debug port and must release it afterward.
 ADIv5 constructor. `ReadAPIDR` selects the appropriate IDR offset. Raw
 register access accepts a twelve-bit ADIv6 offset, and rejects a selector for
 the wrong architecture or an address beyond DPIDR1.ASIZE before AP traffic.
-Queued AP operations and MEM-AP acquisition still require ADIv5.
+Queued AP operations and `OpenMemAP` also accept ADIv6 selectors. ADIv6
+transactions complete each operation before sending the next; ADIv5 SWD
+retains its packed execution. The debug port rejects active DP ERRMODE, and
+MEM-AP acquisition rejects error modes which can suppress or defer errors.
 
 ```go
 ap, err := dap.APAt(0x2000)
@@ -617,3 +620,26 @@ fmt.Printf("AP IDR=%#08x\n", id.Raw)
 remain unchanged; callers with a typed byte offset change
 `ap.Address(offset)` to `ap.Address(uint16(offset))`. `Value` returns only an
 ADIv5 index; use `BaseAddress` for an ADIv6 selector.
+
+The same managed owner can acquire an ADIv6 MEM-AP:
+
+```go
+ap, err := dap.APAt(0x2000)
+if err != nil {
+    return err
+}
+memory, err := connection.OpenMemAP(ctx, ap)
+if err != nil {
+    return err
+}
+processor, err := cortexm.Identify(ctx, memory)
+if err != nil {
+    return err
+}
+fmt.Printf("CPUID=%#08x\n", processor.Raw)
+```
+
+Here `connection` is an open `armdebug.Conn`. Its `Close` restores acquired
+MEM-AP state before releasing the debug port and probe; retain the owner and
+retry if cleanup fails. Target-memory reads preserve the inherited access
+attributes. This does not acquire or halt the processor.

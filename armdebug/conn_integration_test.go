@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jon/ostiole/armdebug"
+	"github.com/jon/ostiole/coresight"
 	"github.com/jon/ostiole/dap"
 	"github.com/jon/ostiole/discover"
 	_ "github.com/jon/ostiole/discover/probes"
@@ -67,7 +68,18 @@ func TestHILArmConnection(t *testing.T) {
 		}
 
 	}
+
+	if inspectMemory {
+		inspectMemoryHIL(t, ctx, c, ap)
+	}
+}
+
+func memorySelectionHIL(t *testing.T) (dap.APSel, bool) {
+	t.Helper()
 	if selected := os.Getenv("OSTIOLE_ARMDEBUG_HIL_AP_BASE"); selected != "" {
+		if os.Getenv("OSTIOLE_ARMDEBUG_HIL_AP") != "" {
+			t.Fatal("select either an AP index or base")
+		}
 		base, err := strconv.ParseUint(selected, 0, 64)
 		if err != nil {
 			t.Fatal(err)
@@ -76,19 +88,8 @@ func TestHILArmConnection(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		id, err := c.Port().ReadAPIDR(ctx, sel)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Logf("AP@%#x IDR=%#08x", base, id.Raw)
+		return sel, true
 	}
-	if inspectMemory {
-		inspectMemoryHIL(t, ctx, c, ap)
-	}
-}
-
-func memorySelectionHIL(t *testing.T) (dap.APSel, bool) {
-	t.Helper()
 	selected := os.Getenv("OSTIOLE_ARMDEBUG_HIL_AP")
 	if selected == "" {
 		return dap.APSel{}, false
@@ -102,10 +103,6 @@ func memorySelectionHIL(t *testing.T) (dap.APSel, bool) {
 
 func inspectMemoryHIL(t *testing.T, ctx context.Context, c *armdebug.Conn, ap dap.APSel) {
 	t.Helper()
-	index, err := ap.Value()
-	if err != nil {
-		t.Fatal(err)
-	}
 	id, err := c.Port().ReadAPIDR(ctx, ap)
 	if err != nil {
 		t.Fatal(err)
@@ -118,7 +115,20 @@ func inspectMemoryHIL(t *testing.T, ctx context.Context, c *armdebug.Conn, ap da
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("AP%d IDR=%#08x CPUID=%#08x", index, id.Raw, processor.Raw)
+	base, present, err := memory.ReadDebugBase(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("%s IDR=%#08x CPUID=%#08x debug_base=%#x present=%v", ap, id.Raw, processor.Raw, base, present)
+	if present && os.Getenv("OSTIOLE_ARMDEBUG_HIL_WALK") == "1" {
+		visits, err := coresight.Walk(ctx, memory, base, coresight.WalkLimits{MaxDepth: 8, MaxComponents: 64, MaxEntries: 256})
+		for _, visit := range visits {
+			t.Logf("ROM component=%+v error=%v", visit.Component, visit.Err)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func closeHIL(t *testing.T, c *armdebug.Conn) {

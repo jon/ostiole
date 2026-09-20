@@ -69,9 +69,6 @@ type MemAP struct {
 // It performs AP traffic. A returned MemAP must be paired with MemAP.Release.
 // The debug port must be connected and must not have cleanup pending.
 func OpenMemAP(ctx context.Context, dp *DebugPort, sel APSel) (*MemAP, error) {
-	if sel.v2 {
-		return nil, errors.New("dap: ADIv6 MEM-AP access is not supported")
-	}
 	selection, err := validateAPSel(sel)
 	if err != nil {
 		return nil, err
@@ -92,6 +89,9 @@ func OpenMemAP(ctx context.Context, dp *DebugPort, sel APSel) (*MemAP, error) {
 	}
 	csw, err := dp.readAP(ctx, sel, memAPCSW)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateMemAPErrorMode(sel, cfg, csw); err != nil {
 		return nil, err
 	}
 	var tarhi uint32
@@ -416,4 +416,11 @@ func (m *MemAP) prepareRelease(ctx context.Context) (context.Context, context.Ca
 		return nil, nil, fmt.Errorf("dap: restore protocol state for MEM-AP release: %w", err)
 	}
 	return releaseCtx, cancel, nil
+}
+
+func validateMemAPErrorMode(sel APSel, cfg, csw uint32) error {
+	if sel.v2 && (cfg&0xf00 > 0x100 || csw&(3<<16) != 0) {
+		return errors.New("dap: unsupported ADIv6 MEM-AP error handling")
+	}
+	return nil
 }

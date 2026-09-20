@@ -60,3 +60,14 @@ func (dp *DebugPort) selectAPAddress(ctx context.Context, address uint64) error 
 	}
 	return dp.confirmPendingSELECT(ctx)
 }
+
+// String formats an ADIv5 index or an ADIv6 base address.
+func (sel APSel) String() string {
+	if sel.v2 {
+		return fmt.Sprintf("AP@%#x", sel.base)
+	}
+	if sel.index != 0 {
+		return fmt.Sprintf("AP%d", sel.index-1)
+	}
+	return "invalid AP"
+}

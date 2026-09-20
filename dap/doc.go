@@ -78,8 +78,9 @@
 //
 // A Txn queues an ordered group of DP and AP operations. Commit validates the
 // complete queue, settles any earlier immediate DP write, then sends queued
-// traffic through a private SWD or JTAG executor. SWD retains its packed frames;
-// JTAG executes logical operations sequentially and checks CTRL/STAT after each
+// traffic through a private SWD or JTAG executor. ADIv5 SWD retains packed
+// frames; ADIv6 and JTAG complete each logical AP operation in order. JTAG
+// checks CTRL/STAT after each
 // AP operation, because its acknowledgement combines OK and FAULT.
 // ReadResult.Value reports data from a queued read; WriteResult.Err reports
 // completion of a queued write. DP writes and AP operations settle

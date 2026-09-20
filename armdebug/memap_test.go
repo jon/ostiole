@@ -7,6 +7,7 @@ import (
 
 	"github.com/jon/ostiole/armdebug"
 	"github.com/jon/ostiole/dap"
+	dapsim "github.com/jon/ostiole/dap/sim"
 	"github.com/jon/ostiole/probe"
 	swdsim "github.com/jon/ostiole/swd/sim"
 )
@@ -122,5 +123,49 @@ func TestMemAPCleanupFailureKeepsProbe(t *testing.T) {
 	b.wireErr = nil
 	if err := c.Close(); err != nil || b.closes != 1 {
 		t.Fatalf("cleanup retry: %v", err)
+	}
+}
+
+func TestOwnedAPv2Memory(t *testing.T) {
+	b := newBench()
+	b.target.Target = dapsim.New(0x4c013477)
+	if err := b.target.SetDPRegister(dap.DPIDR1, 20); err != nil {
+		t.Fatal(err)
+	}
+	sel, err := dap.APAt(0x2000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.target.AddMEMAP(sel, 0x34770008, map[uint32]uint32{0x100: 7}); err != nil {
+		t.Fatal(err)
+	}
+	c, err := armdebug.Connect(t.Context(), probe.New(probe.Info{}, b), config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	mem, err := c.OpenMemAP(t.Context(), sel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := mem.ReadWord(t.Context(), 0x100); err != nil || got != 7 {
+		t.Fatalf("read=%#x,%v", got, err)
+	}
+	before := b.transfers
+	if _, err := c.OpenMemAP(t.Context(), sel); err == nil || b.transfers != before {
+		t.Fatal("duplicate AP reached hardware")
+	}
+	failure := errors.New("restore failed")
+	b.target.beforeWrite = func(req swdsim.Request, selected, value uint32) error {
+		if req.AP && req.Addr == 4 && selected&^15 == 0x2d00 {
+			return failure
+		}
+		return nil
+	}
+	if err := c.Close(); !errors.Is(err, failure) || b.closes != 0 {
+		t.Fatalf("close=%v, probe closes=%d", err, b.closes)
+	}
+	b.target.beforeWrite = nil
+	if err := c.Close(); err != nil || b.closes != 1 {
+		t.Fatalf("retry=%v, probe closes=%d", err, b.closes)
 	}
 }
