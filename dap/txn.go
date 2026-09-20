@@ -293,13 +293,14 @@ type txnStep struct {
 }
 
 type swdTxnPlanner struct {
+	dp            *DebugPort
 	selectDP      selectState
 	selectPending bool
 	steps         []txnStep
 }
 
 func newSWDTxnPlanner(dp *DebugPort) *swdTxnPlanner {
-	return &swdTxnPlanner{selectDP: dp.state.selectDP, selectPending: dp.state.selectPending}
+	return &swdTxnPlanner{dp: dp, selectDP: dp.state.selectDP, selectPending: dp.state.selectPending}
 }
 
 func (p *swdTxnPlanner) plan(ops []txnOp) []txnStep {
@@ -379,7 +380,7 @@ func (p *swdTxnPlanner) lowerAPWriteSequence(index int, op txnOp) {
 }
 
 func (p *swdTxnPlanner) lowerDP(index int, op txnOp) {
-	info, _ := describeDPRegister(op.dpReg)
+	info, _ := p.dp.validateDPRegister(op.dpReg, op.kind == txnWriteDP)
 	if !info.bankIndependent {
 		p.selectBank(index, info.bank)
 	}

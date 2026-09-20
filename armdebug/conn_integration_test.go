@@ -57,6 +57,15 @@ func TestHILArmConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("provider=%s probe=%+v DPIDR=%#08x requested_clock_hz=100000", selection.Provider, c.Info(), id)
+	if id>>12&15 == 3 {
+		for _, reg := range []dap.DPRegister{dap.DPIDR1, dap.BASEPTR0, dap.BASEPTR1, dap.DPIDR} {
+			value, err := c.Port().ReadDP(ctx, reg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("%s=%#08x", reg, value)
+		}
+	}
 	if inspectMemory {
 		inspectMemoryHIL(t, ctx, c, ap)
 	}

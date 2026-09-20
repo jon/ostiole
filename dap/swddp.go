@@ -101,9 +101,9 @@ func (dp *DebugPort) SetMaxWaits(maxWaits uint) error {
 	return nil
 }
 
-// ReadDP reads one logical ADIv5 debug-port register. Bank-independent and
+// ReadDP reads one logical debug-port register. Bank-independent and
 // bank-zero registers remain distinct. Nonzero banks require an active SW-DP
-// DPv1 or DPv2 connection. Baseline JTAG-DP has no banked DP registers or DPIDR;
+// DPv1, DPv2, or DPv3 connection. Baseline JTAG-DP has no banked DP registers or DPIDR;
 // it supplies IDCODE instead. The debug port must be connected.
 func (dp *DebugPort) ReadDP(ctx context.Context, reg DPRegister) (uint32, error) {
 	if err := dp.requireOperational(ctx); err != nil {
@@ -149,7 +149,7 @@ func (dp *DebugPort) readDPRegister(ctx context.Context, reg DPRegister, info dp
 	return value, nil
 }
 
-// WriteDP writes one logical ADIv5 debug-port register. The binding owns
+// WriteDP writes one logical debug-port register. The binding owns
 // CTRL/STAT.ORUNDETECT: preserve its SWD value and keep it clear for JTAG.
 // JTAG pushed-operation and transaction-counter modes are rejected, as are
 // unsupported SWD turnaround settings. Release does
@@ -194,7 +194,7 @@ func (dp *DebugPort) validateDPRegister(reg DPRegister, write bool) (dpRegisterI
 	if reg == IDCODE {
 		return dpRegisterInfo{}, errors.New("dap: IDCODE is unavailable on SW-DP")
 	}
-	info, ok := describeDPRegister(reg)
+	info, ok := dp.describeRegister(reg)
 	if !ok {
 		return dpRegisterInfo{}, fmt.Errorf("dap: invalid DP register %#04x", uint16(reg))
 	}
@@ -210,6 +210,14 @@ func (dp *DebugPort) validateDPRegister(reg DPRegister, write bool) (dpRegisterI
 		}
 	}
 	return info, nil
+}
+
+func (dp *DebugPort) describeRegister(reg DPRegister) (dpRegisterInfo, bool) {
+	info, ok := describeDPRegister(reg)
+	if reg == DPIDR && dp.reentryID.dpidr.Version == 3 {
+		info.bankIndependent = false
+	}
+	return info, ok
 }
 
 func (dp *DebugPort) validateDPWrite(reg DPRegister, value uint32) (dpRegisterInfo, error) {
@@ -236,8 +244,8 @@ func (dp *DebugPort) validateBankedDPRegister(info dpRegisterInfo) error {
 	if dp.state.session != sessionConnected || !dp.identified {
 		return errors.New("dap: banked DP access requires an active connection")
 	}
-	if dp.identity.dpidr.Version > 2 {
-		return fmt.Errorf("dap: ADIv5 banked DP access does not support DPv%d", dp.identity.dpidr.Version)
+	if dp.identity.dpidr.Version > 3 {
+		return fmt.Errorf("dap: banked DP access does not support DPv%d", dp.identity.dpidr.Version)
 	}
 	if dp.identity.dpidr.Version < info.minVersion {
 		return fmt.Errorf("dap: %s requires DPv%d or later", info.name, info.minVersion)
@@ -294,7 +302,7 @@ func (dp *DebugPort) recordDPWriteState(reg DPRegister, value uint32) {
 }
 
 func (dp *DebugPort) recordDPRead(reg DPRegister, value uint32) {
-	if reg != DPIDR {
+	if dpRegisterOffset(reg) != 0 {
 		dp.state.settleDPWrite()
 	}
 	if reg == CTRLSTAT && dp.state.selectDP.valid && dp.state.dpBank() == 0 {

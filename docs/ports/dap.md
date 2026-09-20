@@ -574,3 +574,25 @@ cancellation, read failures, WAIT retries, and continued memory access.
 Shared SWD/JTAG simulations exercise large addresses in both byte orders.
 The [CoreSight guide](../coresight.md#hardware-evidence) records the advertised
 addresses and identity reads observed on the micro:bit and ZCU104 benches.
+
+## DPv3 discovery registers
+
+On SW-DP version 3, `ReadDP` supports `DPIDR1`, `BASEPTR0`, and `BASEPTR1`;
+`WriteDP` supports `SELECT1`. DPIDR reads select bank zero on this version.
+These registers are rejected on earlier debug ports and baseline JTAG-DP.
+Reading the discovery registers alone does not discover or acquire an AP.
+
+```go
+width, err := dp.ReadDP(ctx, dap.DPIDR1)
+if err != nil {
+    return err
+}
+base, err := dp.ReadDP(ctx, dap.BASEPTR0)
+if err != nil {
+    return err
+}
+fmt.Printf("DPIDR1=%#08x BASEPTR0=%#08x\n", width, base)
+```
+
+The caller retains the connected debug port and must release it afterward.
+AP addressing and MEM-AP access currently use the ADIv5 register layout.

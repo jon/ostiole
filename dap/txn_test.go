@@ -949,9 +949,9 @@ func TestDebugPortTransactionRejectsOverrunChangeBeforeWireTraffic(t *testing.T)
 	}
 }
 
-func TestDebugPortTransactionRejectsDPv3BankWithoutTraffic(t *testing.T) {
+func TestDebugPortTransactionRejectsFutureBankWithoutTraffic(t *testing.T) {
 	target := newWaitTarget()
-	target.dpidrOverride = 0x2ba03477
+	target.dpidrOverride = 0x2ba04477
 	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -961,13 +961,13 @@ func TestDebugPortTransactionRejectsDPv3BankWithoutTraffic(t *testing.T) {
 	txn := dp.NewTxn()
 	result := txn.ReadDP(dap.DLCR)
 	if err := txn.Commit(t.Context()); err == nil {
-		t.Fatal("transaction accepted an ADIv5 banked address on DPv3")
+		t.Fatal("transaction accepted an ADIv5 banked address on DPv4")
 	}
 	if got := len(target.requests); got != before {
-		t.Fatalf("requests after rejected DPv3 transaction = %d, want %d", got, before)
+		t.Fatalf("requests after rejected DPv4 transaction = %d, want %d", got, before)
 	}
 	if _, err := result.Value(); err == nil || errors.Is(err, dap.ErrNotExecuted) {
-		t.Fatalf("DPv3 result error = %v, want address validation error", err)
+		t.Fatalf("DPv4 result error = %v, want address validation error", err)
 	}
 }
 

@@ -1,4 +1,4 @@
-// Package sim provides behavioral ADIv5 targets for the SWD simulator.
+// Package sim provides behavioral ADIv5 and ADIv6 targets for the SWD simulator.
 package sim
 
 import (
@@ -33,13 +33,16 @@ const (
 
 // Target models the initial SW-DP register state.
 type Target struct {
-	dpidr     uint32
-	ctrlStat  uint32
-	dpBanks   [16]uint32
-	dpBankSet [16]bool
-	selectDP  uint32
-	rdbuff    uint32
-	aps       map[dap.APSel]*accessPort
+	dpidr       uint32
+	ctrlStat    uint32
+	dpBanks     [16]uint32
+	dpIDBanks   [4]uint32
+	dpIDBankSet [4]bool
+	selectHigh  uint32
+	dpBankSet   [16]bool
+	selectDP    uint32
+	rdbuff      uint32
+	aps         map[dap.APSel]*accessPort
 }
 
 type accessPort struct {
@@ -95,6 +98,9 @@ func (t *Target) ObserveLineReset() {
 		return
 	}
 	t.dpBanks[1] = 0
+	if t.dpidr>>12&15 == 3 {
+		t.selectDP &^= 15
+	}
 	if t.OverrunDetectEnabled() {
 		t.ctrlStat |= stickyOverrun
 	}
@@ -134,6 +140,9 @@ func isStickyExempt(req swdsim.Request, selectDP uint32) bool {
 func (t *Target) SetDPRegister(reg dap.DPRegister, value uint32) error {
 	if t == nil {
 		return errors.New("dap/sim: nil target")
+	}
+	if reg >= dap.DPIDR1 && reg <= dap.BASEPTR1 {
+		return t.setIdentityRegister(reg, value)
 	}
 	var bank uint8
 	switch reg {
@@ -345,7 +354,7 @@ func (t *Target) Read(ctx context.Context, req swdsim.Request) (uint32, error) {
 	}
 	switch req.Addr {
 	case 0x00:
-		return t.dpidr, nil
+		return t.readIdentityRegister(), nil
 	case 0x04:
 		bank := uint8(t.selectDP & 0x0f)
 		if bank == 0 {
@@ -379,16 +388,7 @@ func (t *Target) Write(ctx context.Context, req swdsim.Request, value uint32) er
 	case 0x00:
 		t.clearSticky(value)
 	case 0x04:
-		bank := uint8(t.selectDP & 0x0f)
-		switch bank {
-		case 0:
-			t.setPower(value)
-		case 1:
-			if value&dlcrTurnaroundMask != 0 {
-				return errors.New("dap/sim: variable SWD turnaround is not modeled")
-			}
-			t.dpBanks[bank] = value
-		}
+		return t.writeBankedRegister(value)
 	case 0x08:
 		t.selectDP = value
 	default:
@@ -639,4 +639,42 @@ func (t *Target) setPower(value uint32) {
 	if requests&systemPowerRequest != 0 {
 		t.ctrlStat |= systemPowerAck
 	}
+}
+
+func (t *Target) setIdentityRegister(reg dap.DPRegister, value uint32) error {
+	bank := int(reg-dap.DPIDR1) + 1
+	if t.dpidr>>12&15 != 3 || t.dpIDBankSet[bank] {
+		return fmt.Errorf("dap/sim: %s fixture unavailable", reg)
+	}
+	t.dpIDBanks[bank], t.dpIDBankSet[bank] = value, true
+	return nil
+}
+
+func (t *Target) readIdentityRegister() uint32 {
+	bank := t.selectDP & 15
+	if t.dpidr>>12&15 == 3 && bank != 0 {
+		if bank < 4 {
+			return t.dpIDBanks[bank]
+		}
+		return 0
+	}
+	return t.dpidr
+}
+
+func (t *Target) writeBankedRegister(value uint32) error {
+	bank := uint8(t.selectDP & 0x0f)
+	switch bank {
+	case 0:
+		t.setPower(value)
+	case 5:
+		if t.dpidr>>12&15 == 3 {
+			t.selectHigh = value
+		}
+	case 1:
+		if value&dlcrTurnaroundMask != 0 {
+			return errors.New("dap/sim: variable SWD turnaround is not modeled")
+		}
+		t.dpBanks[bank] = value
+	}
+	return nil
 }

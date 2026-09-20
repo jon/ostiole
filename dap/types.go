@@ -2,11 +2,11 @@ package dap
 
 import "fmt"
 
-// DPRegister identifies one logical ADIv5 debug-port register. Registers which
+// DPRegister identifies one logical debug-port register. Registers which
 // share a physical SWD offset remain distinct values.
 type DPRegister uint16
 
-// ADIv5 debug-port registers.
+// Debug-port registers. DPIDR1, BASEPTR0, BASEPTR1, and SELECT1 require DPv3.
 const (
 	DPIDR DPRegister = iota + 1
 	ABORT
@@ -19,6 +19,10 @@ const (
 	RESEND
 	RDBUFF
 	IDCODE
+	DPIDR1
+	BASEPTR0
+	BASEPTR1
+	SELECT1
 )
 
 type dpRegisterInfo struct {
@@ -54,6 +58,14 @@ func describeDPRegister(reg DPRegister) (dpRegisterInfo, bool) {
 
 func describeBankedDPRegister(reg DPRegister) (dpRegisterInfo, bool) {
 	switch reg {
+	case DPIDR1:
+		return dpRegisterInfo{name: "DPIDR1", bank: 1, readable: true, minVersion: 3}, true
+	case BASEPTR0:
+		return dpRegisterInfo{name: "BASEPTR0", bank: 2, readable: true, minVersion: 3}, true
+	case BASEPTR1:
+		return dpRegisterInfo{name: "BASEPTR1", bank: 3, readable: true, minVersion: 3}, true
+	case SELECT1:
+		return dpRegisterInfo{name: "SELECT1", offset: 4, bank: 5, writable: true, minVersion: 3}, true
 	case DLCR:
 		return dpRegisterInfo{name: "DLCR", offset: 0x04, bank: 1, readable: true, writable: true, minVersion: 1}, true
 	case TARGETID:

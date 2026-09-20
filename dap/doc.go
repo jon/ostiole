@@ -33,7 +33,7 @@
 // direct transfers can invalidate its cached register selection and response
 // state.
 //
-// ReadDP and WriteDP accept logical ADIv5 register names. They distinguish
+// ReadDP and WriteDP accept logical debug-port register names. They distinguish
 // operations which share a physical offset and enforce direction and availability.
 // SWD manages DPBANKSEL without exposing a current-bank operation. Baseline
 // JTAG supports readable SELECT, rejects banked registers and DPIDR, and accepts
