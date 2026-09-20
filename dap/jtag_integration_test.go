@@ -99,7 +99,7 @@ func exerciseJTAGDPMemory(t *testing.T, ctx context.Context, discovered bool) (u
 	t.Logf("AP1 IDR=%#08x", idr.Raw)
 	saved := make(map[uint8]uint32)
 	for _, addr := range []uint8{0, 4} {
-		saved[addr], err = dp.ReadRawAP(ctx, sel.Address(addr))
+		saved[addr], err = dp.ReadRawAP(ctx, sel.Address(uint16(addr)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -123,7 +123,7 @@ func exerciseJTAGDPMemory(t *testing.T, ctx context.Context, discovered bool) (u
 		t.Fatal(err)
 	}
 	for addr, want := range saved {
-		got, err := dp.ReadRawAP(ctx, sel.Address(addr))
+		got, err := dp.ReadRawAP(ctx, sel.Address(uint16(addr)))
 		if err != nil || got != want {
 			t.Fatalf("restored AP1 register %#x = %#08x, expected %#08x: %v", addr, got, want, err)
 		}

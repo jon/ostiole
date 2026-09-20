@@ -65,6 +65,22 @@ func TestHILArmConnection(t *testing.T) {
 			}
 			t.Logf("%s=%#08x", reg, value)
 		}
+
+	}
+	if selected := os.Getenv("OSTIOLE_ARMDEBUG_HIL_AP_BASE"); selected != "" {
+		base, err := strconv.ParseUint(selected, 0, 64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sel, err := dap.APAt(base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, err := c.Port().ReadAPIDR(ctx, sel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("AP@%#x IDR=%#08x", base, id.Raw)
 	}
 	if inspectMemory {
 		inspectMemoryHIL(t, ctx, c, ap)

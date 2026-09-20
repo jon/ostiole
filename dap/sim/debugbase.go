@@ -15,7 +15,7 @@ func (t *Target) SetMEMAPDebugBase(sel dap.APSel, low, high uint32) error {
 	if t == nil {
 		return errors.New("dap/sim: nil target")
 	}
-	selection, err := sel.Value()
+	selection, err := selectorValue(sel)
 	if err != nil {
 		return err
 	}

@@ -595,4 +595,25 @@ fmt.Printf("DPIDR1=%#08x BASEPTR0=%#08x\n", width, base)
 ```
 
 The caller retains the connected debug port and must release it afterward.
-AP addressing and MEM-AP access currently use the ADIv5 register layout.
+`dap.APAt(base)` constructs an ADIv6 selector; `NewAPSel(index)` remains the
+ADIv5 constructor. `ReadAPIDR` selects the appropriate IDR offset. Raw
+register access accepts a twelve-bit ADIv6 offset, and rejects a selector for
+the wrong architecture or an address beyond DPIDR1.ASIZE before AP traffic.
+Queued AP operations and MEM-AP acquisition still require ADIv5.
+
+```go
+ap, err := dap.APAt(0x2000)
+if err != nil {
+    return err
+}
+id, err := dp.ReadAPIDR(ctx, ap)
+if err != nil {
+    return err
+}
+fmt.Printf("AP IDR=%#08x\n", id.Raw)
+```
+
+`APSel.Address` now accepts `uint16` rather than `uint8`. Untyped constants
+remain unchanged; callers with a typed byte offset change
+`ap.Address(offset)` to `ap.Address(uint16(offset))`. `Value` returns only an
+ADIv5 index; use `BaseAddress` for an ADIv6 selector.

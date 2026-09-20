@@ -177,7 +177,7 @@ func (t *Target) AddAP(sel dap.APSel, idr uint32) error {
 	if idr == 0 {
 		return errors.New("dap/sim: APIDR must be nonzero")
 	}
-	selection, err := sel.Value()
+	selection, err := selectorValue(sel)
 	if err != nil {
 		return err
 	}
@@ -197,7 +197,7 @@ func (t *Target) AddMEMAP(sel dap.APSel, idr uint32, words map[uint32]uint32) er
 	if idr == 0 || dap.DecodeAPIDR(idr).Class != 8 {
 		return errors.New("dap/sim: MEM-AP requires a nonzero class-8 APIDR")
 	}
-	selection, err := sel.Value()
+	selection, err := selectorValue(sel)
 	if err != nil {
 		return err
 	}
@@ -227,7 +227,7 @@ func (t *Target) SetMEMAPCFG(sel dap.APSel, cfg uint32) error {
 	if t == nil {
 		return errors.New("dap/sim: nil target")
 	}
-	selection, err := sel.Value()
+	selection, err := selectorValue(sel)
 	if err != nil {
 		return err
 	}
@@ -254,7 +254,7 @@ func (t *Target) SetMEMAPSizes(sel dap.APSel, sizes ...dap.TransferSize) error {
 	if t == nil {
 		return errors.New("dap/sim: nil target")
 	}
-	selection, err := sel.Value()
+	selection, err := selectorValue(sel)
 	if err != nil {
 		return err
 	}
@@ -284,7 +284,7 @@ func (t *Target) SetMEMAPBytes(sel dap.APSel, addr uint64, data []byte) error {
 	if t == nil {
 		return errors.New("dap/sim: nil target")
 	}
-	selection, err := sel.Value()
+	selection, err := selectorValue(sel)
 	if err != nil {
 		return err
 	}
@@ -306,7 +306,7 @@ func (t *Target) MEMAPBytes(sel dap.APSel, addr uint64, size int) ([]byte, error
 	if t == nil {
 		return nil, errors.New("dap/sim: nil target")
 	}
-	selection, err := sel.Value()
+	selection, err := selectorValue(sel)
 	if err != nil {
 		return nil, err
 	}
@@ -409,12 +409,15 @@ func validateRequest(req swdsim.Request, read bool) error {
 
 func (t *Target) readAP(req swdsim.Request) (uint32, error) {
 	posted := t.rdbuff
-	ap := t.aps[dap.NewAPSel(uint8(t.selectDP>>24))]
+	ap := t.aps[t.selectedAP()]
 	if ap == nil {
 		t.rdbuff = 0
 		return posted, nil
 	}
-	reg := t.apReg(req)
+	reg, err := t.apReg(req)
+	if err != nil {
+		return 0, err
+	}
 	value, err := ap.readRegister(reg)
 	if err != nil {
 		return 0, err
@@ -424,11 +427,15 @@ func (t *Target) readAP(req swdsim.Request) (uint32, error) {
 }
 
 func (t *Target) writeAP(req swdsim.Request, value uint32) error {
-	ap := t.aps[dap.NewAPSel(uint8(t.selectDP>>24))]
+	ap := t.aps[t.selectedAP()]
 	if ap == nil {
 		return nil
 	}
-	return ap.writeRegister(t.apReg(req), value)
+	reg, err := t.apReg(req)
+	if err != nil {
+		return err
+	}
+	return ap.writeRegister(reg, value)
 }
 
 func (ap *accessPort) readRegister(reg uint8) (uint32, error) {
@@ -592,9 +599,12 @@ func (ap *accessPort) writeMemoryValue(addr uint64, width int, value uint64) {
 	}
 }
 
-func (t *Target) apReg(req swdsim.Request) uint8 {
+func (t *Target) apReg(req swdsim.Request) (uint8, error) {
+	if t.dpidr>>12&15 == 3 && t.selectDP&0xf00 != 0xd00 {
+		return 0, errors.New("dap/sim: AP register outside modeled register window")
+	}
 	bank := uint8(t.selectDP>>4) & 0x0f
-	return bank<<4 | req.Addr
+	return bank<<4 | req.Addr, nil
 }
 
 func transferSizeEncoding(size dap.TransferSize) (uint8, bool) {
@@ -677,4 +687,21 @@ func (t *Target) writeBankedRegister(value uint32) error {
 		t.dpBanks[bank] = value
 	}
 	return nil
+}
+
+func selectorValue(sel dap.APSel) (uint64, error) {
+	if base, err := sel.BaseAddress(); err == nil {
+		return base, nil
+	}
+	index, err := sel.Value()
+	return uint64(index), err
+}
+
+func (t *Target) selectedAP() dap.APSel {
+	if t.dpidr>>12&15 == 3 {
+		address := uint64(t.selectHigh)<<32 | uint64(t.selectDP&^0xfff)
+		sel, _ := dap.APAt(address)
+		return sel
+	}
+	return dap.NewAPSel(uint8(t.selectDP >> 24))
 }

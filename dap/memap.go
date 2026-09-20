@@ -69,6 +69,9 @@ type MemAP struct {
 // It performs AP traffic. A returned MemAP must be paired with MemAP.Release.
 // The debug port must be connected and must not have cleanup pending.
 func OpenMemAP(ctx context.Context, dp *DebugPort, sel APSel) (*MemAP, error) {
+	if sel.v2 {
+		return nil, errors.New("dap: ADIv6 MEM-AP access is not supported")
+	}
 	selection, err := validateAPSel(sel)
 	if err != nil {
 		return nil, err

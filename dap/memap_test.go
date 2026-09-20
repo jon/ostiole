@@ -848,7 +848,7 @@ func TestNilMEMAPClient(t *testing.T) {
 
 func assertAPRegister(t *testing.T, dp *dap.DebugPort, address uint8, want uint32) {
 	t.Helper()
-	got, err := dp.ReadRawAP(t.Context(), apSel(0).Address(address))
+	got, err := dp.ReadRawAP(t.Context(), apSel(0).Address(uint16(address)))
 	if err != nil {
 		t.Fatal(err)
 	}

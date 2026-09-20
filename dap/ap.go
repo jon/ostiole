@@ -7,9 +7,11 @@ import (
 )
 
 // APSel identifies one access port. Its zero value is invalid; construct a
-// selector with NewAPSel.
+// selector with NewAPSel or APAt.
 type APSel struct {
 	index uint16
+	base  uint64
+	v2    bool
 }
 
 // NewAPSel returns the selector for one ADIv5 access port.
@@ -17,11 +19,11 @@ func NewAPSel(value uint8) APSel {
 	return APSel{index: uint16(value) + 1}
 }
 
-// Value returns the architectural selector value. The zero APSel returns an
-// error.
+// Value returns an ADIv5 selector value.
+// It returns an error for ADIv6 or zero selectors.
 func (sel APSel) Value() (uint8, error) {
-	if sel.index == 0 {
-		return 0, errors.New("dap: zero APSel is invalid")
+	if sel.index == 0 || sel.v2 {
+		return 0, errors.New("dap: selector has no ADIv5 APSEL value")
 	}
 	return uint8(sel.index - 1), nil
 }
@@ -30,19 +32,20 @@ func (sel APSel) Value() (uint8, error) {
 // invalid; derive an address from an APSel with Address.
 type APAddress struct {
 	sel   APSel
-	value uint8
+	value uint16
 }
 
-// Address returns a complete ADIv5 access-port register address without
+// Address returns a complete access-port register address without
 // sending traffic. The operation which uses the address reports an error if
-// value is not four-byte aligned or sel is the zero value.
-func (sel APSel) Address(value uint8) APAddress {
+// value is not four-byte aligned, exceeds the register window (256 bytes for
+// ADIv5, 4 KiB for ADIv6), or sel is invalid.
+func (sel APSel) Address(value uint16) APAddress {
 	return APAddress{sel: sel, value: value}
 }
 
 const apIDRAddress = uint8(0xfc)
 
-// APIDRInfo contains the fields of an ADIv5 access-port identification
+// APIDRInfo contains the fields of an Arm access-port identification
 // register.
 type APIDRInfo struct {
 	Raw      uint32
@@ -100,22 +103,22 @@ func (dp *DebugPort) ReadRawAP(ctx context.Context, addr APAddress) (uint32, err
 }
 
 func (dp *DebugPort) readAP(ctx context.Context, sel APSel, addr uint8) (uint32, error) {
-	_, value, err := dp.readAPEffect(ctx, sel, addr)
+	_, value, err := dp.readAPEffect(ctx, sel, sel.register(addr))
 	return value, err
 }
 
-func (dp *DebugPort) readAPEffect(ctx context.Context, sel APSel, addr uint8) (bool, uint32, error) {
-	if err := validateRawAPAddress(addr, false); err != nil {
+func (dp *DebugPort) readAPEffect(ctx context.Context, sel APSel, addr uint16) (bool, uint32, error) {
+	if _, err := validateAPAddress(APAddress{sel: sel, value: addr}, false); err != nil {
 		return false, 0, err
 	}
 	if err := dp.selectAP(ctx, sel, addr); err != nil {
 		return false, 0, err
 	}
 	if dp.jtag != nil {
-		result := dp.jtag.accessAP(ctx, apTransferRequest(addr&0x0c, true), 0)
+		result := dp.jtag.accessAP(ctx, apTransferRequest(uint8(addr&0x0c), true), 0)
 		return result.outcome != transferUnsent && result.outcome != transferRejected, result.data, jtagResultError(result)
 	}
-	return dp.conn.readAP(ctx, addr)
+	return dp.conn.readAP(ctx, uint8(addr&0x0c))
 }
 
 // WriteRawAP writes the register at one complete access-port address and waits
@@ -142,28 +145,31 @@ func (dp *DebugPort) WriteRawAP(ctx context.Context, addr APAddress, value uint3
 }
 
 func (dp *DebugPort) writeAP(ctx context.Context, sel APSel, addr uint8, value uint32) error {
-	_, err := dp.writeAPEffect(ctx, sel, addr, value)
+	_, err := dp.writeAPEffect(ctx, sel, sel.register(addr), value)
 	return err
 }
 
-func (dp *DebugPort) writeAPEffect(ctx context.Context, sel APSel, addr uint8, value uint32) (bool, error) {
-	if err := validateRawAPAddress(addr, true); err != nil {
+func (dp *DebugPort) writeAPEffect(ctx context.Context, sel APSel, addr uint16, value uint32) (bool, error) {
+	if _, err := validateAPAddress(APAddress{sel: sel, value: addr}, true); err != nil {
 		return false, err
 	}
 	if err := dp.selectAP(ctx, sel, addr); err != nil {
 		return false, err
 	}
 	if dp.jtag != nil {
-		result := dp.jtag.accessAP(ctx, apTransferRequest(addr&0x0c, false), value)
+		result := dp.jtag.accessAP(ctx, apTransferRequest(uint8(addr&0x0c), false), value)
 		return result.outcome != transferUnsent && result.outcome != transferRejected, jtagResultError(result)
 	}
-	return dp.conn.writeAP(ctx, addr, value)
+	return dp.conn.writeAP(ctx, uint8(addr&0x0c), value)
 }
 
-func (dp *DebugPort) selectAP(ctx context.Context, sel APSel, addr uint8) error {
-	selection, err := validateAPSel(sel)
+func (dp *DebugPort) selectAP(ctx context.Context, sel APSel, addr uint16) error {
+	selection, err := dp.validateSelector(sel)
 	if err != nil {
 		return err
+	}
+	if sel.v2 {
+		return dp.selectAPAddress(ctx, selection+uint64(addr))
 	}
 	value := uint32(selection)<<24 | uint32(addr&0xf0)
 	if !dp.state.selectDP.valid || dp.state.selectDP.value != value {
@@ -174,25 +180,39 @@ func (dp *DebugPort) selectAP(ctx context.Context, sel APSel, addr uint8) error 
 	return dp.confirmPendingSELECT(ctx)
 }
 
-func validateAPSel(sel APSel) (uint8, error) {
-	return sel.Value()
+func validateAPSel(sel APSel) (uint64, error) {
+	if sel.v2 {
+		return sel.base, nil
+	}
+	index, err := sel.Value()
+	return uint64(index), err
 }
 
-func validateAPAddress(addr APAddress, write bool) (uint8, error) {
+func validateAPAddress(addr APAddress, write bool) (uint16, error) {
 	if _, err := validateAPSel(addr.sel); err != nil {
 		return 0, err
 	}
-	if err := validateRawAPAddress(addr.value, write); err != nil {
+	limit := uint16(0xff)
+	if addr.sel.v2 {
+		limit = 0xfff
+	}
+	if addr.value > limit {
+		return 0, fmt.Errorf("dap: AP register offset %#x exceeds %#x", addr.value, limit)
+	}
+	if write && addr.value == addr.sel.register(apIDRAddress) {
+		return 0, errors.New("dap: APIDR is read-only")
+	}
+	if err := validateRawAPAddress(addr.value, false); err != nil {
 		return 0, err
 	}
 	return addr.value, nil
 }
 
-func validateRawAPAddress(addr uint8, write bool) error {
+func validateRawAPAddress(addr uint16, write bool) error {
 	if addr&3 != 0 {
 		return fmt.Errorf("dap: unaligned AP address %#02x", addr)
 	}
-	if write && addr == apIDRAddress {
+	if write && addr == uint16(apIDRAddress) {
 		return errors.New("dap: APIDR is read-only")
 	}
 	return nil

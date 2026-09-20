@@ -264,8 +264,10 @@ bounds each independent recovery attempt: one second by default for SWD,
 thirty for JTAG.
 No driver is reopened automatically after a poisoned exchange.
 
-`NewAPSel` constructs an AP selector whose zero value is invalid.
-`APSel.Address` combines it with a complete eight-bit register address; the
+`NewAPSel` constructs an ADIv5 index; `APAt` constructs an ADIv6 base-address
+selector. Both return `APSel` values; the zero `APSel` remains invalid.
+`APSel.Address` combines a selector with an eight-bit ADIv5 or twelve-bit
+ADIv6 register offset; the
 resulting `APAddress` also has an invalid zero value. `ReadAPIDR` reads and
 decodes the common read-only AP identity. Raw AP access rejects invalid or
 unaligned addresses before traffic. Register names and effects remain
