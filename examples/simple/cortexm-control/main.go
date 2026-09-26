@@ -69,6 +69,16 @@ func control(ctx context.Context, core *cortexm.Target) error {
 		return err
 	}
 	fmt.Printf("CPUID=%#08x halted\n", core.Identity().Raw)
+	for _, reg := range []struct {
+		name string
+		id   cortexm.Register
+	}{{"PC", cortexm.PC}, {"SP", cortexm.SP}, {"R0", cortexm.R0}, {"R4", cortexm.R4}} {
+		value, err := core.ReadRegister(ctx, reg.id)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%s=%#08x\n", reg.name, value)
+	}
 	if err := core.Resume(ctx); err != nil {
 		return err
 	}

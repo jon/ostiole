@@ -304,8 +304,8 @@ layouts and power-domain skips have hardware-independent test coverage.
 | Physical identity read | HIL | Opt-in FTDI/SWD/DAP/MEM-AP integration test. |
 | Cortex-M0 acquisition and halt/resume | HIL | Two CMSIS-DAP micro:bit sessions at a requested 1 MHz stopped a CPU counter during halt and observed progress after resume and release. Both restored initially disabled debug and running state before Arm debug owner close. Earlier sessions preserved initially enabled debug. Cleanup failures remain covered only by behavioral tests; see the [control evidence](cortexm.md#hardware-evidence). |
 | Step | No | No single-step API exists. |
-| Register reads | Yes | Halted Cortex-M0 R0–R12, SP, LR, PC, XPSR, MSP, and PSP through `ReadRegister`. Behavioral tests cover transfer completion and cleanup; no physical register evidence yet. |
-| Register writes | Yes | Halted Cortex-M0 writes except XPSR; aligned SP/MSP/PSP and even PC values. Writes persist after release. Behavioral tests cover staging, uncertain selection, and pending cleanup. No physical register-write evidence yet. |
+| Register reads | Yes | Halted Cortex-M0 R0–R12, SP, LR, PC, XPSR, MSP, and PSP through `ReadRegister`. Two fresh CMSIS-DAP micro:bit sessions read all 19 registers; transfer failures and cleanup have behavioral coverage. |
+| Register writes | Yes | Halted Cortex-M0 writes except XPSR; aligned SP/MSP/PSP and even PC values. Writes persist after release. Behavioral tests cover staging, uncertain selection, and pending cleanup. Two micro:bit sessions wrote and restored R4, SP, MSP, PSP, and PC before resuming; see the [register bench](cortexm.md#register-bench). |
 | Reset | No | No architectural or pin-reset operation exists. |
 | Breakpoints or watchpoints | No | No target instrumentation API exists. |
 | Firmware or runtime loading | No | No ELF loader, image-placement policy, or flash driver exists. |
@@ -328,7 +328,7 @@ Available examples:
   probe discovery and one Arm debug owner, with explicit AP selection.
 
 `examples/simple/cortexm-control` separately demonstrates effectful Cortex-M0
-halt/resume and requires `-allow-control`.
+halt/resume with PC, SP, R0, and R4 reads, and requires `-allow-control`.
 
 Available `ost` commands:
 
