@@ -23,7 +23,7 @@ USB host access
       Arm Debug Port and MEM-AP
         |
         v
-      Cortex-M identity
+      Cortex-M identity and Cortex-M0 control
         |
         v
       examples and ost
@@ -51,7 +51,7 @@ debugger service.
 | `dap` | Bind SW-DP or baseline ADIv5 JTAG-DP, manage identity and power, execute ordered DP/AP transactions, and provide scalar or block MEM-AP access. |
 | `dap/sim` | Model the DP, AP, and byte-addressed target-memory state consumed by `dap`. |
 | `coresight` | Identify debug components and walk ROM tables through borrowed scalar memory, with explicit bounds and no resource acquisition or target-memory writes. |
-| `target/cortexm` | Identify Cortex-M processors and acquire Cortex-M0 halting debug over borrowed word memory. |
+| `target/cortexm` | Identify Cortex-M processors and own Cortex-M0 halting debug over borrowed word memory. |
 | `examples/...` | Demonstrate public package compositions as executable programs. |
 | `cmd/ost` | Provide a small command hierarchy over the same public packages. |
 
@@ -334,10 +334,12 @@ children with power-domain metadata and reports an incomplete result. It
 uses DAP transfer sizes but owns no DAP or MEM-AP state. See [CoreSight
 component identity](coresight.md) for its register and failure boundaries.
 
-`target/cortexm` identifies processors through a word reader. Acquisition of
-Cortex-M0 halting debug also requires completed word writes. Release the target
-before the memory owner. See [Cortex-M control](cortexm.md) for effects and
-restoration limits.
+`target/cortexm` identifies processors through a word reader. Cortex-M0
+control also requires a word writer that waits for each access to complete.
+The target owns DHCSR control and its halt requests, and must be released
+before the memory owner.
+It does not know about USB, adapters, or wire protocols. See
+[Cortex-M control](cortexm.md) for restoration and failure boundaries.
 
 ## Host implementations
 
@@ -378,10 +380,11 @@ replaceable while exercising the public protocol and DAP layers.
 
 ## Safety effects
 
-The current examples and `ost` inspection commands do not reset or halt the
-target, write target memory, or change persistent state. The `dap.MemAP` API
-does expose scalar and block target-memory writes; applications choose the
-affected addresses and own the consequences.
+The inspection examples and `ost` commands do not reset or halt the target,
+write target memory, or change persistent state. The Cortex-M0 target API
+enables halting debug and controls execution.
+The `dap.MemAP` API does expose scalar and block target-memory writes;
+applications choose the affected addresses and own the consequences.
 
 The layers are not entirely passive:
 

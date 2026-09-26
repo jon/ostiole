@@ -302,15 +302,15 @@ layouts and power-domain skips have hardware-independent test coverage.
 | --- | --- | --- |
 | CPUID read and decode | Yes | Accepts any aligned-word reader and validates a plausible Arm Cortex-M identity. |
 | Physical identity read | HIL | Opt-in FTDI/SWD/DAP/MEM-AP integration test. |
-| Cortex-M0 acquisition | Yes | Enables halting debug through borrowed word memory, preserves inherited control, and retains failed restoration for retry. Other cores and active stepping or interrupt masking are rejected before writes. |
-| Halt, resume, or step | No | No target run-control API exists. |
+| Cortex-M0 acquisition and halt/resume | Yes | Borrowed word memory, inherited-halt protection, bounded operations, and retryable cleanup. Behavioral failure tests pass; physical control evidence is not yet recorded. |
+| Step | No | No single-step API exists. |
 | Register access | No | CPUID decoding is not a general core-register interface. |
 | Reset | No | No architectural or pin-reset operation exists. |
 | Breakpoints or watchpoints | No | No target instrumentation API exists. |
 | Firmware or runtime loading | No | No ELF loader, image-placement policy, or flash driver exists. |
 
-The package identifies Cortex-M processors and acquires Cortex-M0 halting
-debug. See [Cortex-M control](cortexm.md) for effects and cleanup limits.
+Identity covers Cortex-M; acquired control currently accepts Cortex-M0 only.
+See [Cortex-M control](cortexm.md) for its effects and cleanup limits.
 
 ## Executable surfaces
 
@@ -336,7 +336,8 @@ ost dap ap id --ap N
 ost target cortex-m id --ap N
 ```
 
-These hardware operations are read-only with respect to target memory and do
+The inspection examples and these commands are read-only with respect to
+target memory and do
 not halt or reset the target. They still claim the adapter, clock SWD, and use
 the volatile DAP and MEM-AP state described above.
 
