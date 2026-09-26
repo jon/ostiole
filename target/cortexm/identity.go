@@ -1,5 +1,5 @@
 // Package cortexm identifies Cortex-M processors and provides Cortex-M0
-// halting debug and register reads through target memory.
+// halting debug and register access through target memory.
 package cortexm
 
 import (

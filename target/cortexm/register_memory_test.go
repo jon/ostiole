@@ -23,6 +23,7 @@ type registerMemory struct {
 	transfers        int
 	beforeStatus     func()
 	afterSelector    func()
+	processStack     bool
 }
 
 func newRegisterMemory() *registerMemory {
@@ -30,6 +31,7 @@ func newRegisterMemory() *registerMemory {
 	for i := range m.registers {
 		m.registers[i] = 0x12340000 + uint32(i)*4
 	}
+	m.registers[13] = m.registers[17]
 	return m
 }
 
@@ -109,10 +111,18 @@ func (m *registerMemory) WriteWord(ctx context.Context, addr, value uint32) erro
 
 func (m *registerMemory) complete() {
 	selector := m.selector & 0xffff
+	bank := uint32(17)
+	if m.processStack {
+		bank = 18
+	}
+	if selector == 13 {
+		selector = bank
+	}
 	if m.selector&(1<<16) != 0 {
 		m.registers[selector] = m.data
 	} else {
 		m.data = m.registers[selector]
 	}
+	m.registers[13] = m.registers[bank]
 	m.pending = false
 }

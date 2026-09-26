@@ -64,7 +64,7 @@ The package does not restore those indicators or clear DFSR event flags.
 
 The implementation follows Arm DDI 0419E, sections C1.5 and C1.6.3–C1.6.5 of the
 [Armv6-M Architecture Reference Manual](https://documentation-service.arm.com/static/5f8ff05ef86e16515cdbf826).
-It does not implement reset, single-step, register writes, breakpoints, or
+It does not implement reset, single-step, breakpoints, or
 watchpoints.
 
 ## Register reads
@@ -95,6 +95,27 @@ cleanup, even if a later status read would show ready. The target cannot prove
 that the original transfer completed. Retain both owners; there is no forced
 cleanup operation for this state. These failures have behavioral test coverage,
 not physical failure-injection evidence.
+
+## Register writes
+
+`WriteRegister` writes the same register set except XPSR, which is read-only.
+SP, MSP, and PSP require word-aligned values; PC requires bit zero clear. PC
+writes change the debug return address without changing Thumb state. Writing
+SP changes whichever stack bank is active. The API rejects invalid identifiers
+and values before traffic; it does not check whether an address is mapped or
+suitable for the program.
+
+```go
+err := core.WriteRegister(ctx, cortexm.R4, 42)
+```
+
+A write stages DCRDR, selects the register, and waits for transfer completion.
+An error after attempting to stage data leaves only `Release` available. If
+selection was attempted, the register may have changed even when the call
+returns an error. Release settles a pending transfer without replaying it.
+Successful writes are intentional changes to processor state: release does
+not roll them back, and resumed execution uses the changed values. An inherited
+halt permits writes but still does not grant permission to resume.
 
 ## Composition
 

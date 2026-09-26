@@ -37,7 +37,7 @@ data-register write can write target memory.
 | Inspect ROM entries or a bounded component hierarchy | `Component.ROMTable`, `ROMTable.ReadEntry`, `coresight.Walk` | `examples/simple/coresight-info -walk` |
 | Identify a Cortex-M through any compatible word reader | `cortexm.Identify` | `examples/simple/cortexm-info` |
 | Acquire, halt, and resume a Cortex-M0 | `cortexm.Acquire`, `Target.Halt`, `Target.Resume`, `Target.Release` | `examples/simple/cortexm-control` |
-| Read a halted Cortex-M0 register | `Target.ReadRegister` | [Register reads](cortexm.md#register-reads) |
+| Read or write a halted Cortex-M0 register | `Target.ReadRegister`, `Target.WriteRegister` | [Register reads](cortexm.md#register-reads), [writes](cortexm.md#register-writes) |
 | Test SWD and DAP behavior without hardware | `swd/sim`, `dap/sim` | Package tests |
 
 The examples are intentionally small, executable compositions of public
@@ -747,7 +747,8 @@ Use `target/cortexm` when the desired result is processor identity. It accepts
 the word-reader behavior supplied by `dap.MemAP`, so target code remains
 independent of the host, adapter, and wire protocol. `cortexm.Acquire` also
 uses `WriteWord` to enable Cortex-M0 halting debug. Use `ReadRegister` for
-halted core registers so the target can track transfer completion. Release it before
+halted core registers and `WriteRegister` for intentional changes. The target
+tracks transfer completion but does not roll back writes. Release it before
 its memory owner and retain both after failed target restoration. See
 [Cortex-M control](cortexm.md) for the full composition and effects.
 
