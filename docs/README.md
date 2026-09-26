@@ -19,7 +19,7 @@ today and how to assemble them without duplicating lower-level behavior.
 - [CoreSight component inspection](coresight.md) describes identification
   registers, ROM entry decoding, bounded traversal, and the inspection example.
 - [Cortex-M control](cortexm.md) describes Cortex-M0 acquisition, halt/resume,
-  and restoration over borrowed word memory.
+  restoration, and the explicitly gated control example.
 - [Composition](composition.md) maps common tasks to the narrowest public
   package that implements them and gives coding agents a selection checklist.
 - [Capabilities](capabilities.md) distinguishes implemented behavior from

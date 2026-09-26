@@ -381,8 +381,8 @@ replaceable while exercising the public protocol and DAP layers.
 ## Safety effects
 
 The inspection examples and `ost` commands do not reset or halt the target,
-write target memory, or change persistent state. The Cortex-M0 target API
-enables halting debug and controls execution.
+write target memory, or change persistent state. The explicitly gated
+`cortexm-control` example enables debug and halts and resumes Cortex-M0.
 The `dap.MemAP` API does expose scalar and block target-memory writes;
 applications choose the affected addresses and own the consequences.
 

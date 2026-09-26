@@ -302,7 +302,7 @@ layouts and power-domain skips have hardware-independent test coverage.
 | --- | --- | --- |
 | CPUID read and decode | Yes | Accepts any aligned-word reader and validates a plausible Arm Cortex-M identity. |
 | Physical identity read | HIL | Opt-in FTDI/SWD/DAP/MEM-AP integration test. |
-| Cortex-M0 acquisition and halt/resume | Yes | Borrowed word memory, inherited-halt protection, bounded operations, and retryable cleanup. Behavioral failure tests pass; physical control evidence is not yet recorded. |
+| Cortex-M0 acquisition and halt/resume | HIL | Two fresh CMSIS-DAP micro:bit sessions at a requested 100 kHz stopped a CPU counter during halt and observed progress after resume and release. Both preserved initially enabled debug and running state before Arm debug owner close. Initially disabled debug and cleanup failures are covered only by behavioral tests; see the [control evidence](cortexm.md#hardware-evidence). |
 | Step | No | No single-step API exists. |
 | Register access | No | CPUID decoding is not a general core-register interface. |
 | Reset | No | No architectural or pin-reset operation exists. |
@@ -325,6 +325,9 @@ Available examples:
   depth, component, and entry bounds.
 - `examples/simple/arm-info` reports the same identities through generic
   probe discovery and one Arm debug owner, with explicit AP selection.
+
+`examples/simple/cortexm-control` separately demonstrates effectful Cortex-M0
+halt/resume and requires `-allow-control`.
 
 Available `ost` commands:
 

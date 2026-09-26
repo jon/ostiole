@@ -85,6 +85,65 @@ err = errors.Join(err, cleanupErr)
 // On failure retain both owners for a later cleanup attempt.
 ```
 
+The [control example](../examples/simple/cortexm-control/main.go) selects one
+probe and AP, halts, resumes, then releases the target before closing the
+connection. It requires explicit consent to control execution:
+
+```sh
+go run ./examples/simple/cortexm-control \
+  -provider cmsisdap -serial SERIAL -ap 0 -allow-control
+```
+
 Hardware-independent tests model DHCSR control and execution state, including
 partial writes, canceled operations, ignored writes, failed cleanup, and
 retry. They do not establish physical halt/resume behavior on a bench program.
+
+## Hardware procedure
+
+The opt-in integration test selects the CMSIS-DAP micro:bit with serial
+`9900360140124e4500279015000000360000000097969901`, AP0, and a requested
+100 kHz clock. It requires a known firmware program with an aligned 32-bit RAM
+counter incremented by the CPU at least once per 200 milliseconds. The counter
+must not be updated by DMA or another processor. Loading firmware is outside
+the test.
+
+The [counter firmware](../target/cortexm/testdata/counter/README.md) supplies
+a loop that increments the counter at `0x20000000`, with build instructions
+and a separate programming procedure. Loading it replaces the target program
+and resets the processor.
+
+```sh
+OSTIOLE_CORTEXM_HIL_CONTROL=1 \
+OSTIOLE_CORTEXM_HIL_PROGRAM='program name and build identity' \
+OSTIOLE_CORTEXM_HIL_COUNTER=0xRAM_ADDRESS \
+go test -tags integration ./target/cortexm -run '^TestHILCortexM0Control$' -v
+```
+
+Two fresh sessions check counter progress before control, no progress during
+a halt, and renewed progress after resume and after release from a second
+halt. The test compares inherited debug-enable and halt status before closing
+the Arm debug owner. It refuses an already-halted bench. These observations
+do not establish peripheral behavior, register preservation, reset, stepping,
+or restoration after a physical transport failure.
+
+## Hardware evidence
+
+On September 26, 2026, Nostalgia (macOS) completed the control test in two
+fresh sessions on the selected micro:bit, with Cortex-M0 CPUID `0x410cc200`.
+OpenOCD 0.12.0 programmed and verified the counter image using the procedure
+above. The Intel HEX image's SHA-256 was
+`ee294cc06ab6e8228161b49506675b065c0148b26421cf1f83c8e45e35cd4e5d`.
+
+In both sessions, the CPU counter advanced before acquisition, remained
+unchanged across ten samples 20 milliseconds apart while halted, and advanced
+after resume and after release from a second halt. The halted values were
+`0x014c4757` and `0x017ebe6c`. Both target releases and Arm debug owner closes
+completed. DHCSR showed debug enabled and the processor running before
+acquisition and after release in each session; the first read also consumed
+the sticky reset indicator.
+
+This run covers inherited enabled debug on one micro:bit. It does not verify
+enabling and restoring initially disabled debug, restoration after closing
+the Arm debug owner, or cleanup after a physical transport failure. Earlier
+attempts with Ostiole and OpenOCD could not read DPIDR; the cause of that
+connection failure and its recovery remain unknown.
