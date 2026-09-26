@@ -140,7 +140,8 @@ err = errors.Join(err, cleanupErr)
 ```
 
 The [control example](../examples/simple/cortexm-control/main.go) selects one
-probe and AP, halts, resumes, then releases the target before closing the
+probe and AP, halts, prints PC, SP, R0, and R4, resumes, then releases the
+target before closing the
 connection. It requires explicit consent to control execution:
 
 ```sh
@@ -206,3 +207,36 @@ startup at 100 kHz. The later 1 MHz run covers initially disabled debug on the
 same board. Neither run verifies state after closing the Arm debug owner or
 cleanup after a physical transport failure. Peripheral behavior, register
 preservation, reset, and stepping are outside this test.
+
+### Register bench
+
+`TestHILCortexM0Registers` uses the same micro:bit, AP0, and 1 MHz clock. It
+requires the exact counter image above and checks its vectors and instruction
+words before acquiring the processor. A second gate authorizes register writes:
+
+```sh
+OSTIOLE_CORTEXM_HIL_CONTROL=1 \
+OSTIOLE_CORTEXM_HIL_REGISTERS=1 \
+OSTIOLE_CORTEXM_HIL_PROGRAM=sha256:ee294cc06ab6e8228161b49506675b065c0148b26421cf1f83c8e45e35cd4e5d \
+go test -tags integration ./target/cortexm -run '^TestHILCortexM0Registers$' -count=1 -v
+```
+
+On September 26, 2026, both fresh sessions passed on Nostalgia with CPUID
+`0x410cc200`. Each read R0–R12, SP, LR, PC, XPSR, MSP, and PSP while halted.
+R4 accepted `0x55aa55aa` and `0xaa55aa55`; SP, MSP, PSP, and PC accepted
+temporary aligned values. SP and MSP aliased as expected for this firmware.
+The test restored each written value and compared all 19 registers with the
+saved snapshot before resuming.
+
+The CPU counter remained unchanged across ten samples 20 milliseconds apart
+after register restoration, then advanced after resume and release. DHCSR was
+`0x01000000` before acquisition and after release in both sessions, with debug
+disabled and the processor running. Both target releases and Arm owner closes
+completed. If register restoration cannot be confirmed, the test retains both owners
+without requesting resume.
+
+These sessions exercised register transfers while halted, not execution using
+the temporary PC or stack values. Writes to the other general registers and LR,
+process-stack selection, inherited halts, and failure cleanup have behavioral
+test coverage only. XPSR writes, stepping, reset, and state after Arm owner
+close were not tested.

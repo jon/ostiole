@@ -139,7 +139,8 @@ The `arm-info`, `coresight-info`, and `cortexm-control` examples accept
 
 The inspection examples and `ost` commands avoid reset, halt, target-memory
 writes, and persistent changes. The separately gated `cortexm-control` example
-enables halting debug and halts and resumes a Cortex-M0. The `dap.MemAP` API
+enables halting debug, halts a Cortex-M0, reads PC, SP, R0, and R4, then resumes
+it. The `dap.MemAP` API
 does expose effectful scalar writes; callers choose the addresses and own the consequences.
 Establishing an ADIv5 connection also changes volatile debug-port control
 state; the connection releases its own power requests before return.
