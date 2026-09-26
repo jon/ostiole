@@ -91,7 +91,7 @@ connection. It requires explicit consent to control execution:
 
 ```sh
 go run ./examples/simple/cortexm-control \
-  -provider cmsisdap -serial SERIAL -ap 0 -allow-control
+  -provider cmsisdap -serial SERIAL -ap 0 -clock 1000000 -allow-control
 ```
 
 Hardware-independent tests model DHCSR control and execution state, including
@@ -102,7 +102,9 @@ retry. They do not establish physical halt/resume behavior on a bench program.
 
 The opt-in integration test selects the CMSIS-DAP micro:bit with serial
 `9900360140124e4500279015000000360000000097969901`, AP0, and a requested
-100 kHz clock. It requires a known firmware program with an aligned 32-bit RAM
+1 MHz clock. The nRF51 needs at least 125 kHz during debug activation after
+power-on; see the [startup evidence](protocols/cmsisdap.md#nrf51-startup-clock).
+It requires a known firmware program with an aligned 32-bit RAM
 counter incremented by the CPU at least once per 200 milliseconds. The counter
 must not be updated by DMA or another processor. Loading firmware is outside
 the test.
@@ -128,22 +130,25 @@ or restoration after a physical transport failure.
 
 ## Hardware evidence
 
-On September 26, 2026, Nostalgia (macOS) completed the control test in two
-fresh sessions on the selected micro:bit, with Cortex-M0 CPUID `0x410cc200`.
-OpenOCD 0.12.0 programmed and verified the counter image using the procedure
-above. The Intel HEX image's SHA-256 was
+On September 26, 2026, Nostalgia (macOS) completed two control sessions at
+1 MHz on the selected micro:bit, with Cortex-M0 CPUID `0x410cc200`. The
+counter image had been programmed and verified with OpenOCD 0.12.0. Its
+Intel HEX SHA-256 was
 `ee294cc06ab6e8228161b49506675b065c0148b26421cf1f83c8e45e35cd4e5d`.
+After a physical replug, Ostiole's read-only test connected first at 1 MHz,
+then the control test ran without any intervening OpenOCD session.
 
-In both sessions, the CPU counter advanced before acquisition, remained
-unchanged across ten samples 20 milliseconds apart while halted, and advanced
-after resume and after release from a second halt. The halted values were
-`0x014c4757` and `0x017ebe6c`. Both target releases and Arm debug owner closes
-completed. DHCSR showed debug enabled and the processor running before
-acquisition and after release in each session; the first read also consumed
-the sticky reset indicator.
+In both control sessions, the CPU counter advanced before acquisition,
+remained unchanged across ten samples 20 milliseconds apart while halted,
+and advanced after resume and after release from a second halt. The halted
+values were `0x0d8abd3d` and `0x0db618ae`. DHCSR was `0x01000000` before
+acquisition and after release in each session: debug was initially disabled,
+acquisition enabled it, and release restored disabled debug with the processor
+running. Both target releases and Arm debug owner closes completed.
 
-This run covers inherited enabled debug on one micro:bit. It does not verify
-enabling and restoring initially disabled debug, restoration after closing
-the Arm debug owner, or cleanup after a physical transport failure. Earlier
-attempts with Ostiole and OpenOCD could not read DPIDR; the cause of that
-connection failure and its recovery remain unknown.
+An earlier pair of sessions at 100 kHz, after OpenOCD had activated the
+interface, preserved initially enabled debug. Those sessions do not establish
+startup at 100 kHz. The later 1 MHz run covers initially disabled debug on the
+same board. Neither run verifies state after closing the Arm debug owner or
+cleanup after a physical transport failure. Peripheral behavior, register
+preservation, reset, and stepping are outside this test.

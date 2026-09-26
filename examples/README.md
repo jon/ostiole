@@ -37,3 +37,8 @@ For ADIv6 SW-DP targets, `coresight-info -debug-space -walk` inspects the DP's
 advertised discovery tree. Use `-ap-base ADDRESS` instead of `-ap INDEX` to
 inspect memory through one ADIv6 MEM-AP. The same probe selection and cleanup
 rules apply. See the [RP2350 procedure](../docs/coresight.md#adiv6-and-the-rp2350).
+
+The `arm-info`, `coresight-info`, and `cortexm-control` examples accept
+`-clock` in Hz and default to 1 MHz. This also suits the micro:bit
+nRF51: its debug interface needs at least 125 kHz during startup. See the
+[startup evidence](../docs/protocols/cmsisdap.md#nrf51-startup-clock).

@@ -132,6 +132,10 @@ root. See [Linux USB access](docs/linux-usb.md) for udev rules and a bounded
 
 Debug and programming interfaces can reset processors, halt execution, modify
 memory, reconfigure programmable logic, and change persistent device state.
+The SWD inspection examples and `ost` commands request a 1 MHz clock ceiling.
+The `arm-info`, `coresight-info`, and `cortexm-control` examples accept
+`-clock` in Hz for targets that require another rate.
+
 The inspection examples and `ost` commands avoid reset, halt, target-memory
 writes, and persistent changes. The separately gated `cortexm-control` example
 enables halting debug and halts and resumes a Cortex-M0. The `dap.MemAP` API
@@ -142,7 +146,7 @@ state; the connection releases its own power requests before return.
 ## SWD DPIDR example
 
 The program expects exactly one supported FTDI H-series attachment and uses
-MPSSE port A at 400 kHz. Connect it to a powered SWD target as follows:
+MPSSE port A at 1 MHz. Connect it to a powered SWD target as follows:
 
 | Adapter signal | Target signal |
 | --- | --- |
