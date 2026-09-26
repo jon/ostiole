@@ -305,7 +305,7 @@ layouts and power-domain skips have hardware-independent test coverage.
 | Cortex-M0 acquisition and halt/resume | HIL | Two CMSIS-DAP micro:bit sessions at a requested 1 MHz stopped a CPU counter during halt and observed progress after resume and release. Both restored initially disabled debug and running state before Arm debug owner close. Earlier sessions preserved initially enabled debug. Cleanup failures remain covered only by behavioral tests; see the [control evidence](cortexm.md#hardware-evidence). |
 | Step | No | No single-step API exists. |
 | Register reads | Yes | Halted Cortex-M0 R0–R12, SP, LR, PC, XPSR, MSP, and PSP through `ReadRegister`. Behavioral tests cover transfer completion and cleanup; no physical register evidence yet. |
-| Register writes | No | No core-register write API exists. |
+| Register writes | Yes | Halted Cortex-M0 writes except XPSR; aligned SP/MSP/PSP and even PC values. Writes persist after release. Behavioral tests cover staging, uncertain selection, and pending cleanup. No physical register-write evidence yet. |
 | Reset | No | No architectural or pin-reset operation exists. |
 | Breakpoints or watchpoints | No | No target instrumentation API exists. |
 | Firmware or runtime loading | No | No ELF loader, image-placement policy, or flash driver exists. |
