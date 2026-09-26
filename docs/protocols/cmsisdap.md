@@ -134,3 +134,38 @@ the v2 opener rejected it before claiming an interface. No CMSIS-DAP command
 or target traffic was sent.
 
 The Linux bench still exercises only passive v1 rejection.
+
+## nRF51 startup clock
+
+The nRF51 on the micro:bit requires at least 125 kHz when entering debug
+interface mode after power-on. Nordic also specifies at least 150 SWCLK cycles
+with SWDIO high to guarantee that the DAP captures 50 cycles while its power
+domain starts; see section 11.1.2 of the
+[nRF51 reference manual](https://docs-be.nordicsemi.com/bundle/nRF51-Series/raw/resource/enus/nRF51_RM_v3.0.1.pdf).
+A slower clock can work once another debugger has activated the interface.
+The CMSIS-DAP driver accepts the caller's clock ceiling; it does not know the
+target's startup requirements or silently raise that ceiling.
+
+On Nostalgia, Ostiole connected first after a physical micro:bit replug at 1 MHz
+and passed both read-only sessions. At 100 kHz, both Ostiole and OpenOCD 0.12.0
+failed to read DPIDR after replug, though Ostiole passed after OpenOCD activated
+the interface at 1 MHz. Only the test's requested clock changed; the CMSIS-DAP
+driver was unchanged. DPIDR was `0x0bb11477`, AP0 IDR was `0x04770021`, and
+CPUID was `0x410cc200`. Both sessions restored AP0 CSW and TAR and closed their
+owners.
+
+The read-only HIL now requests 1 MHz:
+
+```sh
+OSTIOLE_CMSISDAP_HIL=1 \
+OSTIOLE_CMSISDAP_HIL_SERIAL=9900360140124e4500279015000000360000000097969901 \
+go test -tags integration ./cmsisdap \
+  -run '^TestHILCMSISDAPSWDReadOnlyStateRestoration$' -count=1 -v
+```
+
+For a startup check, physically unplug/replug before running the command and
+leave other debuggers stopped. Reopening a session alone does not reproduce
+power-on state. The earlier 100 kHz evidence above covers an active interface;
+it does not establish startup from power-on. The new result covers one board
+and firmware revision, with no measurement of the attained clock or guarantee
+of target-specific activation timing on other devices.

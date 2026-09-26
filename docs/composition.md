@@ -36,6 +36,7 @@ data-register write can write target memory.
 | Identify one debug component through scalar memory | `coresight.Identify` | `examples/simple/coresight-info` |
 | Inspect ROM entries or a bounded component hierarchy | `Component.ROMTable`, `ROMTable.ReadEntry`, `coresight.Walk` | `examples/simple/coresight-info -walk` |
 | Identify a Cortex-M through any compatible word reader | `cortexm.Identify` | `examples/simple/cortexm-info` |
+| Acquire, halt, and resume a Cortex-M0 | `cortexm.Acquire`, `Target.Halt`, `Target.Resume`, `Target.Release` | `examples/simple/cortexm-control` |
 | Test SWD and DAP behavior without hardware | `swd/sim`, `dap/sim` | Package tests |
 
 The examples are intentionally small, executable compositions of public
@@ -49,7 +50,7 @@ Arm SW-DP. Pass an explicit port configuration:
 
 ```go
 connected, err := armdebug.Connect(ctx, opened, armdebug.Config{
-    Port: armdebug.SWDP(probe.SWDConfig{MaxClockHz: 100_000}),
+    Port: armdebug.SWDP(probe.SWDConfig{MaxClockHz: 1_000_000}),
 })
 if connected != nil {
     defer func() { err = errors.Join(err, connected.Close()) }()
@@ -100,7 +101,10 @@ The generic `examples/simple/arm-info` program uses this ownership path:
 go run ./examples/simple/arm-info -provider cmsisdap -serial SERIAL -ap 0
 ```
 
-It requests a 100 kHz SW-DP, reads DPIDR, AP IDR, and Cortex-M identity, and
+It defaults to a 1 MHz SW-DP; `-clock` selects the requested ceiling in Hz.
+The default meets the micro:bit nRF51's
+[startup clock requirement](protocols/cmsisdap.md#nrf51-startup-clock).
+It reads DPIDR, AP IDR, and Cortex-M identity, and
 attempts owner cleanup up to three times. It does not halt, reset, or write
 target memory. Probe filters may be omitted only when selection remains unique;
 the AP argument is required.
@@ -123,7 +127,7 @@ For an owned Arm debug connection, `armdebug.Open` combines discovery and
 
 ```go
 connected, err := armdebug.Open(ctx, selection, armdebug.Config{
-    Port: armdebug.SWDP(probe.SWDConfig{MaxClockHz: 100_000}),
+    Port: armdebug.SWDP(probe.SWDConfig{MaxClockHz: 1_000_000}),
 })
 ```
 
@@ -233,7 +237,7 @@ An application with a `probe.SWDBackend` can transfer it to a generic owner:
 ```go
 opened := probe.New(info, backend)
 defer func() { err = errors.Join(err, opened.Close()) }()
-wire, err := opened.SWD(ctx, probe.SWDConfig{MaxClockHz: 100_000})
+wire, err := opened.SWD(ctx, probe.SWDConfig{MaxClockHz: 1_000_000})
 if err != nil {
     return err
 }
@@ -322,7 +326,7 @@ return a cleanup function even when `connection.Connect` fails:
 
 ```go
 func connectCMSISDAPSWD(ctx context.Context, device *usb.Device) (_ uint32, cleanup func() error, err error) {
-    session, err := cmsisdap.Open(ctx, device, cmsisdap.WithSWD(100_000))
+    session, err := cmsisdap.Open(ctx, device, cmsisdap.WithSWD(1_000_000))
     if err != nil {
         if session != nil {
             return 0, session.Close, err
@@ -414,7 +418,7 @@ after a complete scan error before retrying SWD cleanup.
 
 ```go
 func connectJLinkSWD(ctx context.Context, device *usb.Device) (_ uint32, cleanup func() error, err error) {
-    session, err := jlink.Open(ctx, device, jlink.WithSWD(100_000))
+    session, err := jlink.Open(ctx, device, jlink.WithSWD(1_000_000))
     if err != nil {
         closeErr := device.Close()
         if closeErr != nil {
@@ -430,7 +434,7 @@ func connectJLinkSWD(ctx context.Context, device *usb.Device) (_ uint32, cleanup
         defer cancel()
         if connectionOwned {
             if session.ClockHz() == 0 {
-                if err := session.ConfigureSWD(cleanupCtx, 100_000); err != nil {
+                if err := session.ConfigureSWD(cleanupCtx, 1_000_000); err != nil {
                     if !errors.Is(err, jlink.ErrSessionPoisoned) {
                         return err
                     }
@@ -705,7 +709,8 @@ Use `dap.MemAP` for aligned 8-, 16-, or 32-bit target-memory reads and writes
 through an explicitly selected MEM-AP. Support for the non-word sizes is
 implementation-defined, so each access verifies that CSW accepted its size
 before touching memory. CFG.LD makes 64-bit access possible; CFG.LA permits
-addresses above 32 bits. `target/cortexm` uses `ReadWord` for its 32-bit reads.
+addresses above 32 bits. `ReadWord` and `WriteWord` supply aligned 32-bit
+convenience calls over the scalar operations.
 
 `MemAP.ReadBlock` accepts empty, unaligned, and mixed-width ranges. It uses the
 same configured WAIT policy as the scalar and raw DAP operations. If selection,
@@ -739,7 +744,10 @@ CSW, then release and reconnect the debug port.
 
 Use `target/cortexm` when the desired result is processor identity. It accepts
 the word-reader behavior supplied by `dap.MemAP`, so target code remains
-independent of the host, adapter, and wire protocol.
+independent of the host, adapter, and wire protocol. `cortexm.Acquire` also
+uses `WriteWord` to enable Cortex-M0 halting debug. Release that target before
+its memory owner and retain both after failed target restoration. See
+[Cortex-M control](cortexm.md) for the full composition and effects.
 
 ## Release in reverse order
 

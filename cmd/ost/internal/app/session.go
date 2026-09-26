@@ -48,7 +48,7 @@ func openSWDTransport(ctx context.Context) (*swdSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	channel, err := ftdi.Open(ctx, device, ftdi.Config{Port: ftdi.PortA, MaxClockHz: 400_000})
+	channel, err := ftdi.Open(ctx, device, ftdi.Config{Port: ftdi.PortA, MaxClockHz: 1_000_000})
 	if err != nil {
 		closeOwner := device.Close
 		if channel != nil {

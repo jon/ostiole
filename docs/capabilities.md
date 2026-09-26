@@ -114,7 +114,7 @@ does not prove that the board connects those pins to a debug target.
 | FT232H | Yes | Port A; full MPSSE and SWD HIL on Linux and macOS. |
 | FT2232H | Yes | Ports A and B using the standard H-series interface and endpoint layout. |
 | FT4232H | Yes | Ports A and B using the standard H-series interface and endpoint layout. |
-| Explicit clock | Yes | `MaxClockHz` is a ceiling; `Channel.ClockHz` reports the attainable configured rate. Examples request 400 kHz. |
+| Explicit clock | Yes | `MaxClockHz` is a ceiling; `Channel.ClockHz` reports the attainable configured rate. SWD examples request 1 MHz. |
 | MPSSE lifecycle | Yes | Claim, reset bit mode, purge stale traffic, synchronize, and configure the clock with target pins as inputs. Close drains pending bulk OUT work before resetting bit mode, setting the latency timer to 16 ms, purging the receive and transmit paths, releasing, and closing. |
 | SWD bit streams | Yes | Direction-safe output and input runs. Enough maximum-packet-sized IN transfers remain posted to cover the worst-case response admitted by the shared 8,192-clock wire limit, including FTDI status bytes. That requires seventeen requests for a 512-byte endpoint and 133 for a 64-byte endpoint. The receive path consumes them in submission order, replenishes each before delivering its payload, and discards status-only packets independently of OUT completion. |
 | Ambiguous transfer handling | Yes | A USB error, including an asynchronous receive failure, invalid transfer count, malformed FTDI packet, or surplus payload poisons the channel. A call which observes the poisoned channel returns the first cause and matches `ErrChannelPoisoned`; later SWD traffic requires a fresh channel. `Close` remains available and retryable. |
@@ -178,7 +178,7 @@ requires a supported v2 interface when SWD is activated.
 | Ownership and cleanup | Yes | Successful open owns the USB device. After failed SWD configuration, `Open` makes a bounded cleanup attempt; if a synchronized disconnect remains pending, it returns the session with the error. After a poisoned exchange, `Close` reports the abandoned port and continues USB cleanup without sending another command. Interface release remains retryable, and device close runs once. When failed open returns no session, the caller closes the device to finish or repeat cleanup. |
 | Passive v1 rejection | HIL | The Linux all-device inventory reported the `0d28:0204` DAPLink product and serial. HIL selected it by serial, then rejected it from the v2 path before interface claim. Its command interface is HID; no CMSIS-DAP command or target traffic was sent. |
 | v2 metadata reopen | HIL | The macOS all-device inventory found a `0d28:0204` micro:bit by its `BBC micro:bit CMSIS-DAP` product string. Two fresh sessions returned protocol `2.1.0`, firmware `0257`, packet size 64, packet count 5, and capabilities `0x11`. No target command was sent. |
-| SWD target access | HIL | Two fresh sessions against the same micro:bit used `ConfigureSWD` and `WithSWD` at 100 kHz. Both returned DPIDR `0x0bb11477`, AP0 IDR `0x04770021`, and CPUID `0x410cc200`; `DHCSR.S_HALT` was unchanged. Each restored the saved AP0 CSW and TAR before releasing the debug port and disconnecting. OpenOCD 0.12.0 independently selected the same serial and v2 bulk interface, returned the same DPIDR and AP0 IDR, and identified the target as Cortex-M0. This is read-only evidence from one probe and target; CMSIS-DAP does not report the attained clock. |
+| SWD target access | HIL | Two fresh sessions against the same micro:bit used `ConfigureSWD` and `WithSWD` at 100 kHz. Both returned DPIDR `0x0bb11477`, AP0 IDR `0x04770021`, and CPUID `0x410cc200`; `DHCSR.S_HALT` was unchanged. Each restored the saved AP0 CSW and TAR before releasing the debug port and disconnecting. OpenOCD 0.12.0 independently selected the same serial and v2 bulk interface, returned the same DPIDR and AP0 IDR, and identified the target as Cortex-M0. That 100 kHz run used an active debug interface. A later 1 MHz run connected first after physical replug and repeated both sessions; see [nRF51 startup](protocols/cmsisdap.md#nrf51-startup-clock). CMSIS-DAP does not report the attained clock. |
 | JTAG or SWO | No | The current session does not connect JTAG or use the optional SWO endpoint. |
 
 The [CMSIS-DAP v2 session guide](protocols/cmsisdap.md) gives the descriptor,
@@ -245,7 +245,7 @@ See [JTAG](protocols/jtag.md) for effects and ownership.
 | MEM-AP acquisition | Yes | `OpenMemAP` performs AP traffic, rejects an absent or non-MEM AP, and snapshots the state which `Release` restores. |
 | MEM-AP debug entry | Yes | `ReadDebugBase` decodes ADIv5 and legacy BASE formats, distinguishes absence from address zero, and reads the upper word only for a present entry with CFG.LA. It preserves the memory client on success and does not access target memory. Behavioral tests cover formats, malformed values, cancellation, failure, retry, and shared SWD/JTAG access. |
 | MEM-AP configuration | Yes | `OpenMemAP` reads CFG, models BE, LA, and LD, and includes TARHI in retryable restoration when large addresses are available. |
-| Scalar target-memory access | Yes | `ReadScalar` and `WriteScalar` support aligned 8-, 16-, and 32-bit values and verify the implementation-defined CSW.Size before using the byte lane selected by CFG.BE. CFG.LA permits addresses above 32 bits; CFG.LD makes 64-bit access eligible for the same CSW check. Oversized write values fail before traffic, and writes finish with an AP completion barrier. If the first DRW access of a failed Size64 transfer might have started, ordinary traffic remains blocked until cleanup. `ReadWord` provides the 32-bit convenience operation. |
+| Scalar target-memory access | Yes | `ReadScalar` and `WriteScalar` support aligned 8-, 16-, and 32-bit values and verify the implementation-defined CSW.Size before using the byte lane selected by CFG.BE. CFG.LA permits addresses above 32 bits; CFG.LD makes 64-bit access eligible for the same CSW check. Oversized write values fail before traffic, and writes finish with an AP completion barrier. If the first DRW access of a failed Size64 transfer might have started, ordinary traffic remains blocked until cleanup. `ReadWord` and `WriteWord` provide 32-bit convenience operations. |
 | MEM-AP restoration | Yes | Saves and restores CSW, TAR, and TARHI when present; failed restoration remains retryable. MEM-AP restoration remains available while debug-port cleanup is pending. If framing is unknown, `Release` re-enters the bound protocol and verifies identity before restoration. It terminates a possibly incomplete Size64 transfer through CSW before touching TAR or TARHI. If DAPABORT interrupts cleanup, the next `Release` retries every saved value. The invalidated handle remains invalid. |
 | Managed target-memory writes | Yes | `WriteScalar` and `WriteBlock` are effectful. The caller selects the address; the API checks alignment and range, not whether that address is safe to modify. `WriteRawAP` remains an unmanaged escape hatch. |
 | Block reads | Yes | Accepts empty, unaligned, and mixed-width ranges. No auto-incrementing word run crosses a 1 KiB TAR boundary. If the MEM-AP does not accept single address increment, the reader writes TAR before each word. It uses the ordinary DAP WAIT policy. If selection, framing, or cleanup becomes uncertain, repair is required. A FAULT returns only the confirmed prefix. Cancellation and transport or protocol failures can also interrupt the read. Unread destination bytes remain untouched. |
@@ -302,14 +302,15 @@ layouts and power-domain skips have hardware-independent test coverage.
 | --- | --- | --- |
 | CPUID read and decode | Yes | Accepts any aligned-word reader and validates a plausible Arm Cortex-M identity. |
 | Physical identity read | HIL | Opt-in FTDI/SWD/DAP/MEM-AP integration test. |
-| Halt, resume, or step | No | No target run-control API exists. |
+| Cortex-M0 acquisition and halt/resume | HIL | Two CMSIS-DAP micro:bit sessions at a requested 1 MHz stopped a CPU counter during halt and observed progress after resume and release. Both restored initially disabled debug and running state before Arm debug owner close. Earlier sessions preserved initially enabled debug. Cleanup failures remain covered only by behavioral tests; see the [control evidence](cortexm.md#hardware-evidence). |
+| Step | No | No single-step API exists. |
 | Register access | No | CPUID decoding is not a general core-register interface. |
 | Reset | No | No architectural or pin-reset operation exists. |
 | Breakpoints or watchpoints | No | No target instrumentation API exists. |
 | Firmware or runtime loading | No | No ELF loader, image-placement policy, or flash driver exists. |
 
-The package identifies a processor; it is not yet a complete Cortex-M target
-driver.
+Identity covers Cortex-M; acquired control currently accepts Cortex-M0 only.
+See [Cortex-M control](cortexm.md) for its effects and cleanup limits.
 
 ## Executable surfaces
 
@@ -325,6 +326,9 @@ Available examples:
 - `examples/simple/arm-info` reports the same identities through generic
   probe discovery and one Arm debug owner, with explicit AP selection.
 
+`examples/simple/cortexm-control` separately demonstrates effectful Cortex-M0
+halt/resume and requires `-allow-control`.
+
 Available `ost` commands:
 
 ```text
@@ -335,7 +339,8 @@ ost dap ap id --ap N
 ost target cortex-m id --ap N
 ```
 
-These hardware operations are read-only with respect to target memory and do
+The inspection examples and these commands are read-only with respect to
+target memory and do
 not halt or reset the target. They still claim the adapter, clock SWD, and use
 the volatile DAP and MEM-AP state described above.
 

@@ -101,13 +101,13 @@ func observeCMSISDAPTarget(t *testing.T, ctx context.Context, readyOnOpen bool) 
 	t.Helper()
 	var options []cmsisdap.Option
 	if readyOnOpen {
-		options = append(options, cmsisdap.WithSWD(100_000))
+		options = append(options, cmsisdap.WithSWD(1_000_000))
 	}
 	session := openCMSISDAPSession(t, ctx, options...)
 	cleanup := newCMSISDAPCleanup(t)
 	cleanup.retain("CMSIS-DAP session", func(context.Context) error { return session.Close() })
 	if !readyOnOpen {
-		if err := session.ConfigureSWD(ctx, 100_000); err != nil {
+		if err := session.ConfigureSWD(ctx, 1_000_000); err != nil {
 			t.Fatal(err)
 		}
 	}

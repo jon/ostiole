@@ -128,6 +128,12 @@ func (m *MemAP) ReadWord(ctx context.Context, addr uint32) (uint32, error) {
 	return uint32(value), err
 }
 
+// WriteWord writes one aligned 32-bit target word and waits for AP completion.
+// It has the same effects and failure rules as WriteScalar with Size32.
+func (m *MemAP) WriteWord(ctx context.Context, addr, value uint32) error {
+	return m.WriteScalar(ctx, uint64(addr), Size32, uint64(value))
+}
+
 // ReadScalar performs one aligned, sized target-memory read. The returned
 // value is right-justified regardless of target byte order or address lane.
 func (m *MemAP) ReadScalar(ctx context.Context, addr uint64, size TransferSize) (uint64, error) {
