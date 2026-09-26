@@ -62,10 +62,39 @@ disabled debug waits until the processor is running.
 DHCSR reads consume the sticky reset and instruction-retirement indicators.
 The package does not restore those indicators or clear DFSR event flags.
 
-The implementation follows Arm DDI 0419E, sections C1.5 and C1.6.3 of the
+The implementation follows Arm DDI 0419E, sections C1.5 and C1.6.3–C1.6.5 of the
 [Armv6-M Architecture Reference Manual](https://documentation-service.arm.com/static/5f8ff05ef86e16515cdbf826).
-It does not implement reset, single-step, general register access, breakpoints,
-or watchpoints.
+It does not implement reset, single-step, register writes, breakpoints, or
+watchpoints.
+
+## Register reads
+
+`ReadRegister` reads R0–R12, SP, LR, PC, XPSR, MSP, or PSP from a halted
+processor. SP selects the current stack pointer; MSP and PSP select its banks.
+PC is the debug return address. An inherited halt permits inspection without
+acquiring permission to resume. Invalid `Register` identifiers, including
+zero, are rejected before memory traffic.
+
+```go
+pc, err := core.ReadRegister(ctx, cortexm.PC)
+```
+
+Reads write DCRSR and replace DCRDR; these transfer registers are not restored.
+The target waits for S_REGRDY before and after selecting a register, with the
+same five-second bound as control operations. It does not require observing
+S_REGRDY clear, since a transfer may finish before the first status read.
+
+A failed transfer leaves only `Release` available. Release waits for any
+pending transfer, including one found busy before selection, before resuming
+or disabling debug. It never replays a selector write whose completion is
+uncertain. A failed precondition or cancellation before selection leaves the
+target usable when no transfer is pending. An error returns no register value.
+
+Reset or loss of Debug state during a pending transfer prevents automatic
+cleanup, even if a later status read would show ready. The target cannot prove
+that the original transfer completed. Retain both owners; there is no forced
+cleanup operation for this state. These failures have behavioral test coverage,
+not physical failure-injection evidence.
 
 ## Composition
 

@@ -71,7 +71,8 @@ add posted access-port reads and a Cortex-M identity read through a MEM-AP.
 They compose the public packages explicitly without duplicating their framing.
 The `target/cortexm` package reads and decodes the architectural CPUID value
 through any compatible target-word reader. It also provides acquired Cortex-M0
-halt/resume control over word memory; see [Cortex-M control](docs/cortexm.md).
+halt/resume control and halted register reads over word memory; see
+[Cortex-M control](docs/cortexm.md).
 
 The FTDI path uses the standard H-series MPSSE port and endpoint layout.
 Descriptor-driven FTDI port binding is not implemented yet. J-Link instead
