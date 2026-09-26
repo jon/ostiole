@@ -1,4 +1,5 @@
-// Package cortexm identifies Cortex-M processors through target memory.
+// Package cortexm identifies Cortex-M processors and controls Cortex-M0
+// halting debug through target memory.
 package cortexm
 
 import (

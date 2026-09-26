@@ -245,7 +245,7 @@ See [JTAG](protocols/jtag.md) for effects and ownership.
 | MEM-AP acquisition | Yes | `OpenMemAP` performs AP traffic, rejects an absent or non-MEM AP, and snapshots the state which `Release` restores. |
 | MEM-AP debug entry | Yes | `ReadDebugBase` decodes ADIv5 and legacy BASE formats, distinguishes absence from address zero, and reads the upper word only for a present entry with CFG.LA. It preserves the memory client on success and does not access target memory. Behavioral tests cover formats, malformed values, cancellation, failure, retry, and shared SWD/JTAG access. |
 | MEM-AP configuration | Yes | `OpenMemAP` reads CFG, models BE, LA, and LD, and includes TARHI in retryable restoration when large addresses are available. |
-| Scalar target-memory access | Yes | `ReadScalar` and `WriteScalar` support aligned 8-, 16-, and 32-bit values and verify the implementation-defined CSW.Size before using the byte lane selected by CFG.BE. CFG.LA permits addresses above 32 bits; CFG.LD makes 64-bit access eligible for the same CSW check. Oversized write values fail before traffic, and writes finish with an AP completion barrier. If the first DRW access of a failed Size64 transfer might have started, ordinary traffic remains blocked until cleanup. `ReadWord` provides the 32-bit convenience operation. |
+| Scalar target-memory access | Yes | `ReadScalar` and `WriteScalar` support aligned 8-, 16-, and 32-bit values and verify the implementation-defined CSW.Size before using the byte lane selected by CFG.BE. CFG.LA permits addresses above 32 bits; CFG.LD makes 64-bit access eligible for the same CSW check. Oversized write values fail before traffic, and writes finish with an AP completion barrier. If the first DRW access of a failed Size64 transfer might have started, ordinary traffic remains blocked until cleanup. `ReadWord` and `WriteWord` provide 32-bit convenience operations. |
 | MEM-AP restoration | Yes | Saves and restores CSW, TAR, and TARHI when present; failed restoration remains retryable. MEM-AP restoration remains available while debug-port cleanup is pending. If framing is unknown, `Release` re-enters the bound protocol and verifies identity before restoration. It terminates a possibly incomplete Size64 transfer through CSW before touching TAR or TARHI. If DAPABORT interrupts cleanup, the next `Release` retries every saved value. The invalidated handle remains invalid. |
 | Managed target-memory writes | Yes | `WriteScalar` and `WriteBlock` are effectful. The caller selects the address; the API checks alignment and range, not whether that address is safe to modify. `WriteRawAP` remains an unmanaged escape hatch. |
 | Block reads | Yes | Accepts empty, unaligned, and mixed-width ranges. No auto-incrementing word run crosses a 1 KiB TAR boundary. If the MEM-AP does not accept single address increment, the reader writes TAR before each word. It uses the ordinary DAP WAIT policy. If selection, framing, or cleanup becomes uncertain, repair is required. A FAULT returns only the confirmed prefix. Cancellation and transport or protocol failures can also interrupt the read. Unread destination bytes remain untouched. |
@@ -302,14 +302,15 @@ layouts and power-domain skips have hardware-independent test coverage.
 | --- | --- | --- |
 | CPUID read and decode | Yes | Accepts any aligned-word reader and validates a plausible Arm Cortex-M identity. |
 | Physical identity read | HIL | Opt-in FTDI/SWD/DAP/MEM-AP integration test. |
+| Cortex-M0 acquisition | Yes | Enables halting debug through borrowed word memory, preserves inherited control, and retains failed restoration for retry. Other cores and active stepping or interrupt masking are rejected before writes. |
 | Halt, resume, or step | No | No target run-control API exists. |
 | Register access | No | CPUID decoding is not a general core-register interface. |
 | Reset | No | No architectural or pin-reset operation exists. |
 | Breakpoints or watchpoints | No | No target instrumentation API exists. |
 | Firmware or runtime loading | No | No ELF loader, image-placement policy, or flash driver exists. |
 
-The package identifies a processor; it is not yet a complete Cortex-M target
-driver.
+The package identifies Cortex-M processors and acquires Cortex-M0 halting
+debug. See [Cortex-M control](cortexm.md) for effects and cleanup limits.
 
 ## Executable surfaces
 
