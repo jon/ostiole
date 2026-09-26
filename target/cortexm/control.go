@@ -39,6 +39,8 @@ type Target struct {
 	haltOwned       bool
 	haltUncertain   bool
 	resumeUncertain bool
+	registerPending bool
+	registerLost    bool
 }
 
 // Acquire enables Cortex-M0 halting debug without requesting a halt. It reads
@@ -117,6 +119,8 @@ func (t *Target) Identity() Identity {
 // memory and cannot repair a disconnected or invalidated memory client. It
 // never repeats a completed resume. An unconfirmed control change, or a new halt while
 // restoring disabled debug, can prevent cleanup until execution resumes.
+// Pending register transfers must settle first. Reset or loss of Debug state
+// during a transfer prevents automatic cleanup.
 func (t *Target) Release(ctx context.Context) error {
 	if t == nil || t.memory == nil {
 		return nil
@@ -127,6 +131,11 @@ func (t *Target) Release(ctx context.Context) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, controlTimeout)
 	defer cancel()
+	if t.registerPending {
+		if err := t.waitRegister(ctx); err != nil {
+			return err
+		}
+	}
 	if t.changed {
 		if err := t.restore(ctx); err != nil {
 			return fmt.Errorf("cortexm: restore debug control: %w", err)
