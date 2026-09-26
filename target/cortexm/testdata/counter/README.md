@@ -23,13 +23,16 @@ using an external programmer. Programming is bench preparation, separate from
 the Ostiole [control test](../../../../docs/cortexm.md#hardware-procedure).
 
 For the selected micro:bit, use OpenOCD's CMSIS-DAP v2 transport and nRF51
-flash driver:
+flash driver at 1 MHz. The nRF51 requires at least 125 kHz when entering
+debug interface mode after power-on; 100 kHz can work after another debugger
+has already activated it. See the
+[startup evidence](../../../../docs/protocols/cmsisdap.md#nrf51-startup-clock).
 
 ```sh
 openocd -f interface/cmsis-dap.cfg \
   -c 'cmsis_dap_backend usb_bulk' \
   -c 'adapter serial 9900360140124e4500279015000000360000000097969901' \
-  -f target/nrf51.cfg -c 'adapter speed 100' \
+  -f target/nrf51.cfg -c 'adapter speed 1000' \
   -c 'gdb_port disabled; tcl_port disabled; telnet_port disabled' \
   -c 'program /tmp/ostiole-counter.hex verify reset exit'
 ```

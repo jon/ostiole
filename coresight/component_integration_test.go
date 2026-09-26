@@ -32,7 +32,7 @@ func TestHILComponentIdentity(t *testing.T) {
 		base      uint64
 		class     uint8
 	}{
-		{"microbit", discover.Selection{Provider: "cmsisdap", Serial: "9900360140124e4500279015000000360000000097969901"}, armdebug.SWDP(probe.SWDConfig{MaxClockHz: 100_000}), 0, 0xe00ff000, 1},
+		{"microbit", discover.Selection{Provider: "cmsisdap", Serial: "9900360140124e4500279015000000360000000097969901"}, armdebug.SWDP(probe.SWDConfig{MaxClockHz: 1_000_000}), 0, 0xe00ff000, 1},
 		{"zcu104", discover.Selection{Provider: "ftdi", Serial: "01691", Function: "A"}, armdebug.JTAGDP(probe.JTAGConfig{MaxClockHz: 100_000}, jtag.Layout{arm, xilinx}, 0), 1, 0x80410000, 9},
 	} {
 		t.Run(bench.name, func(t *testing.T) {
@@ -53,7 +53,7 @@ func TestHILComponentIdentity(t *testing.T) {
 					if got.Class() != bench.class {
 						t.Fatalf("class=%#x, want %#x", got.Class(), bench.class)
 					}
-					t.Logf("session=%d AP%d 100 kHz identity=%+v", session, bench.ap, got)
+					t.Logf("session=%d AP%d identity=%+v", session, bench.ap, got)
 				}) {
 					return
 				}

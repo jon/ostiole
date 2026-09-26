@@ -28,7 +28,11 @@ func run() (err error) {
 	serial := flag.String("serial", "", "exact probe serial")
 	function := flag.String("function", "", "exact probe function")
 	ap := flag.Int("ap", -1, "required MEM-AP index (0..255)")
+	clock := flag.Uint64("clock", 1_000_000, "maximum SWD clock in Hz")
 	flag.Parse()
+	if *clock < 1000 || *clock > 1<<32-1 {
+		return errors.New("require -clock 1000..4294967295 Hz")
+	}
 	if *ap < 0 || *ap > 255 || flag.NArg() != 0 {
 		return errors.New("require -ap 0..255 and no positional arguments")
 	}
@@ -36,7 +40,7 @@ func run() (err error) {
 	defer cancel()
 	c, err := armdebug.Open(ctx, discover.Selection{
 		Provider: discover.ProviderID(*provider), Serial: *serial, Function: *function,
-	}, armdebug.Config{Port: armdebug.SWDP(probe.SWDConfig{MaxClockHz: 100_000})})
+	}, armdebug.Config{Port: armdebug.SWDP(probe.SWDConfig{MaxClockHz: uint32(*clock)})})
 	if c != nil {
 		defer func() { err = errors.Join(err, closeConnection(c)) }()
 	}

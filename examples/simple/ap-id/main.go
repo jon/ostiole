@@ -57,7 +57,7 @@ func readIdentity(ctx context.Context) (_ identity, err error) {
 	if err != nil {
 		return identity{}, err
 	}
-	ch, err := ftdi.Open(ctx, dev, ftdi.Config{Port: ftdi.PortA, MaxClockHz: 400_000})
+	ch, err := ftdi.Open(ctx, dev, ftdi.Config{Port: ftdi.PortA, MaxClockHz: 1_000_000})
 	if err != nil {
 		closeOwner := dev.Close
 		if ch != nil {
