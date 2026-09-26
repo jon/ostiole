@@ -131,13 +131,13 @@ root. See [Linux USB access](docs/linux-usb.md) for udev rules and a bounded
 ## Safety
 
 Debug and programming interfaces can reset processors, halt execution, modify
-memory, reconfigure programmable logic, and change persistent device state. The
-shipped examples and `ost` commands avoid reset, halt, target-memory writes, and
-persistent changes. The Cortex-M0 target API enables halting debug and controls
-execution. The `dap.MemAP` API exposes effectful scalar writes; callers choose
-the addresses and own the consequences. Establishing an ADIv5 connection also
-changes volatile debug-port control state; the connection releases its own power
-requests before return.
+memory, reconfigure programmable logic, and change persistent device state.
+The inspection examples and `ost` commands avoid reset, halt, target-memory
+writes, and persistent changes. The separately gated `cortexm-control` example
+enables halting debug and halts and resumes a Cortex-M0. The `dap.MemAP` API
+does expose effectful scalar writes; callers choose the addresses and own the consequences.
+Establishing an ADIv5 connection also changes volatile debug-port control
+state; the connection releases its own power requests before return.
 
 ## SWD DPIDR example
 
