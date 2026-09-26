@@ -36,6 +36,7 @@ data-register write can write target memory.
 | Identify one debug component through scalar memory | `coresight.Identify` | `examples/simple/coresight-info` |
 | Inspect ROM entries or a bounded component hierarchy | `Component.ROMTable`, `ROMTable.ReadEntry`, `coresight.Walk` | `examples/simple/coresight-info -walk` |
 | Identify a Cortex-M through any compatible word reader | `cortexm.Identify` | `examples/simple/cortexm-info` |
+| Acquire Cortex-M0 halting debug | `cortexm.Acquire`, `Target.Release` | [Cortex-M control](cortexm.md) |
 | Test SWD and DAP behavior without hardware | `swd/sim`, `dap/sim` | Package tests |
 
 The examples are intentionally small, executable compositions of public
@@ -705,7 +706,8 @@ Use `dap.MemAP` for aligned 8-, 16-, or 32-bit target-memory reads and writes
 through an explicitly selected MEM-AP. Support for the non-word sizes is
 implementation-defined, so each access verifies that CSW accepted its size
 before touching memory. CFG.LD makes 64-bit access possible; CFG.LA permits
-addresses above 32 bits. `target/cortexm` uses `ReadWord` for its 32-bit reads.
+addresses above 32 bits. `ReadWord` and `WriteWord` supply aligned 32-bit
+convenience calls over the scalar operations.
 
 `MemAP.ReadBlock` accepts empty, unaligned, and mixed-width ranges. It uses the
 same configured WAIT policy as the scalar and raw DAP operations. If selection,
@@ -739,7 +741,9 @@ CSW, then release and reconnect the debug port.
 
 Use `target/cortexm` when the desired result is processor identity. It accepts
 the word-reader behavior supplied by `dap.MemAP`, so target code remains
-independent of the host, adapter, and wire protocol.
+independent of the host, adapter, and wire protocol. `cortexm.Acquire` also
+uses `WriteWord` to enable Cortex-M0 halting debug. Release the target before
+its memory owner; see [Cortex-M control](cortexm.md) for the full lifecycle.
 
 ## Release in reverse order
 
