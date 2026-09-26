@@ -33,7 +33,11 @@ func run() (err error) {
 	ap := flag.Int("ap", -1, "ADIv5 MEM-AP index (0..255)")
 	address := flag.String("base", "", "override the MEM-AP debug base with a known identification page")
 	walk := flag.Bool("walk", false, "walk ROM tables with depth 8, 256 visits, and 4096 entry reads")
+	clock := flag.Uint64("clock", 1_000_000, "maximum SWD clock in Hz")
 	flag.Parse()
+	if *clock < 1000 || *clock > 1<<32-1 {
+		return errors.New("require -clock 1000..4294967295 Hz")
+	}
 	base, err := parseBase(*address)
 	if err != nil {
 		return err
@@ -49,7 +53,7 @@ func run() (err error) {
 	defer cancel()
 	c, err := armdebug.Open(ctx, discover.Selection{
 		Provider: discover.ProviderID(*provider), Serial: *serial, Function: *function,
-	}, armdebug.Config{Port: armdebug.SWDP(probe.SWDConfig{MaxClockHz: 100_000})})
+	}, armdebug.Config{Port: armdebug.SWDP(probe.SWDConfig{MaxClockHz: uint32(*clock)})})
 	if c != nil {
 		defer func() { err = errors.Join(err, closeConnection(c)) }()
 	}

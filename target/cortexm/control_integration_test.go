@@ -80,7 +80,7 @@ func controlHIL(t *testing.T, counter uint32, program string) {
 		t.Fatalf("DHCSR before=%#x after=%#x", before, after)
 	}
 	checkCounterHIL(t, ctx, memory, counter, "released", false)
-	t.Logf("micro:bit CMSIS-DAP 100 kHz AP0 CPUID=%#x program=%q counter=%#x DHCSR before=%#x after=%#x",
+	t.Logf("micro:bit CMSIS-DAP 1 MHz AP0 CPUID=%#x program=%q counter=%#x DHCSR before=%#x after=%#x",
 		core.Identity().Raw, program, counter, before, after)
 }
 
@@ -127,7 +127,7 @@ func openControlBench(t *testing.T, ctx context.Context) *armdebug.Conn {
 		t.Fatal(err)
 	}
 	c, err := armdebug.Open(ctx, discover.Selection{Binding: candidate.Info().Binding}, armdebug.Config{
-		Port: armdebug.SWDP(probe.SWDConfig{MaxClockHz: 100_000}),
+		Port: armdebug.SWDP(probe.SWDConfig{MaxClockHz: 1_000_000}),
 	})
 	if err != nil {
 		if c != nil {

@@ -23,20 +23,29 @@ func main() {
 	}
 }
 
-func run() (err error) {
+func run() error {
 	provider := flag.String("provider", "", "required probe provider")
 	serial := flag.String("serial", "", "required probe serial")
 	ap := flag.Int("ap", -1, "required MEM-AP index (0..255)")
 	allow := flag.Bool("allow-control", false, "allow enabling debug, halting, and resuming the processor")
+	clock := flag.Uint64("clock", 1_000_000, "maximum SWD clock in Hz")
 	flag.Parse()
+	if *clock < 1000 || *clock > 1<<32-1 {
+		return errors.New("require -clock 1000..4294967295 Hz")
+	}
 	if !*allow || *provider == "" || *serial == "" || *ap < 0 || *ap > 255 || flag.NArg() != 0 {
 		return errors.New("require -allow-control, -provider, -serial, and -ap 0..255")
 	}
+	selection := discover.Selection{Provider: discover.ProviderID(*provider), Serial: *serial}
+	return runControl(selection, dap.NewAPSel(uint8(*ap)), uint32(*clock))
+}
+
+func runControl(selection discover.Selection, ap dap.APSel, clock uint32) (err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	c, err := armdebug.Open(ctx, discover.Selection{
-		Provider: discover.ProviderID(*provider), Serial: *serial,
-	}, armdebug.Config{Port: armdebug.SWDP(probe.SWDConfig{MaxClockHz: 100_000})})
+	c, err := armdebug.Open(ctx, selection, armdebug.Config{
+		Port: armdebug.SWDP(probe.SWDConfig{MaxClockHz: clock}),
+	})
 	var core *cortexm.Target
 	if c != nil {
 		defer func() { err = errors.Join(err, release(core, c)) }()
@@ -44,7 +53,7 @@ func run() (err error) {
 	if err != nil {
 		return err
 	}
-	memory, err := c.OpenMemAP(ctx, dap.NewAPSel(uint8(*ap)))
+	memory, err := c.OpenMemAP(ctx, ap)
 	if err != nil {
 		return err
 	}

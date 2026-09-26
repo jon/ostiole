@@ -50,7 +50,7 @@ Arm SW-DP. Pass an explicit port configuration:
 
 ```go
 connected, err := armdebug.Connect(ctx, opened, armdebug.Config{
-    Port: armdebug.SWDP(probe.SWDConfig{MaxClockHz: 100_000}),
+    Port: armdebug.SWDP(probe.SWDConfig{MaxClockHz: 1_000_000}),
 })
 if connected != nil {
     defer func() { err = errors.Join(err, connected.Close()) }()
@@ -101,7 +101,10 @@ The generic `examples/simple/arm-info` program uses this ownership path:
 go run ./examples/simple/arm-info -provider cmsisdap -serial SERIAL -ap 0
 ```
 
-It requests a 100 kHz SW-DP, reads DPIDR, AP IDR, and Cortex-M identity, and
+It defaults to a 1 MHz SW-DP; `-clock` selects the requested ceiling in Hz.
+The default meets the micro:bit nRF51's
+[startup clock requirement](protocols/cmsisdap.md#nrf51-startup-clock).
+It reads DPIDR, AP IDR, and Cortex-M identity, and
 attempts owner cleanup up to three times. It does not halt, reset, or write
 target memory. Probe filters may be omitted only when selection remains unique;
 the AP argument is required.
@@ -124,7 +127,7 @@ For an owned Arm debug connection, `armdebug.Open` combines discovery and
 
 ```go
 connected, err := armdebug.Open(ctx, selection, armdebug.Config{
-    Port: armdebug.SWDP(probe.SWDConfig{MaxClockHz: 100_000}),
+    Port: armdebug.SWDP(probe.SWDConfig{MaxClockHz: 1_000_000}),
 })
 ```
 
@@ -234,7 +237,7 @@ An application with a `probe.SWDBackend` can transfer it to a generic owner:
 ```go
 opened := probe.New(info, backend)
 defer func() { err = errors.Join(err, opened.Close()) }()
-wire, err := opened.SWD(ctx, probe.SWDConfig{MaxClockHz: 100_000})
+wire, err := opened.SWD(ctx, probe.SWDConfig{MaxClockHz: 1_000_000})
 if err != nil {
     return err
 }
@@ -323,7 +326,7 @@ return a cleanup function even when `connection.Connect` fails:
 
 ```go
 func connectCMSISDAPSWD(ctx context.Context, device *usb.Device) (_ uint32, cleanup func() error, err error) {
-    session, err := cmsisdap.Open(ctx, device, cmsisdap.WithSWD(100_000))
+    session, err := cmsisdap.Open(ctx, device, cmsisdap.WithSWD(1_000_000))
     if err != nil {
         if session != nil {
             return 0, session.Close, err
@@ -415,7 +418,7 @@ after a complete scan error before retrying SWD cleanup.
 
 ```go
 func connectJLinkSWD(ctx context.Context, device *usb.Device) (_ uint32, cleanup func() error, err error) {
-    session, err := jlink.Open(ctx, device, jlink.WithSWD(100_000))
+    session, err := jlink.Open(ctx, device, jlink.WithSWD(1_000_000))
     if err != nil {
         closeErr := device.Close()
         if closeErr != nil {
@@ -431,7 +434,7 @@ func connectJLinkSWD(ctx context.Context, device *usb.Device) (_ uint32, cleanup
         defer cancel()
         if connectionOwned {
             if session.ClockHz() == 0 {
-                if err := session.ConfigureSWD(cleanupCtx, 100_000); err != nil {
+                if err := session.ConfigureSWD(cleanupCtx, 1_000_000); err != nil {
                     if !errors.Is(err, jlink.ErrSessionPoisoned) {
                         return err
                     }

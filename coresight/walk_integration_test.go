@@ -33,7 +33,7 @@ func TestHILROMWalk(t *testing.T) {
 	arm, _ := jtag.IDCODE(4, 0x5ba00477)
 	xilinx, _ := jtag.IDCODE(12, 0x14730093)
 	for _, bench := range []romBench{
-		{"microbit", discover.Selection{Provider: "cmsisdap", Serial: "9900360140124e4500279015000000360000000097969901"}, armdebug.SWDP(probe.SWDConfig{MaxClockHz: 100_000}), 0, 6, 0},
+		{"microbit", discover.Selection{Provider: "cmsisdap", Serial: "9900360140124e4500279015000000360000000097969901"}, armdebug.SWDP(probe.SWDConfig{MaxClockHz: 1_000_000}), 0, 6, 0},
 		{"zcu104", discover.Selection{Provider: "ftdi", Serial: "01691", Function: "A"}, armdebug.JTAGDP(probe.JTAGConfig{MaxClockHz: 100_000}, jtag.Layout{arm, xilinx}, 0), 1, 18, 0x803e0000},
 	} {
 		t.Run(bench.name, func(t *testing.T) {
@@ -69,7 +69,7 @@ func observeROMWalk(t *testing.T, bench romBench, session int) {
 			t.Logf("visit=%d parent=%d entry=%d base=%#x: %v", i, v.Parent, v.Index, v.Entry.Base, v.Err)
 		}
 	}
-	t.Logf("session=%d AP%d 100 kHz root=%#x visits=%d complete=%t error=%v", session, bench.ap, base, len(visits), err == nil, err)
+	t.Logf("session=%d AP%d root=%#x visits=%d complete=%t error=%v", session, bench.ap, base, len(visits), err == nil, err)
 	checkROMWalkObservation(t, bench, visits, err)
 }
 

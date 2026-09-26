@@ -186,11 +186,11 @@ go run ./examples/simple/coresight-info \
   -provider cmsisdap -serial SERIAL -ap 0
 ```
 
-To inspect another known page, supply `-base ADDRESS`; this bypasses the
-BASE read. The override must name an accessible, 4 KiB aligned
-identification page. The example requests a 100 kHz clock and applies a
-ten-second operation deadline. The library also accepts memory clients
-reached through JTAG; the example configures SWD only.
+To inspect another known page, supply `-base ADDRESS`; this bypasses the BASE
+read. The override must name an accessible, 4 KiB aligned identification page.
+The example defaults to a 1 MHz clock, accepts `-clock` in Hz, and applies a
+ten-second operation deadline. The library also accepts memory clients reached
+through JTAG; the example configures SWD only.
 
 Add `-walk` to follow the advertised root with depth 8, at most 256 visits,
 and at most 4096 entry reads across the hierarchy:
@@ -253,9 +253,9 @@ OSTIOLE_ROM_HIL=1 \
 ```
 
 The test uses the same exact probe selections and externally enabled ZCU104
-chain described above. Each path opens two fresh sessions at 100 kHz, reads
-its MEM-AP's advertised root, and walks with depth 8, 256 visits, 4096 entry
-reads, and a 120-second operation deadline.
+chain described above. In that run, each path opened two fresh sessions at
+100 kHz, read its MEM-AP's advertised root, and walked with depth 8, 256
+visits, 4096 entry reads, and a 120-second operation deadline.
 
 The micro:bit SWD AP0 walk completed with six identities. Its root at
 `0xf0000000` led to the nested table at `0xe00ff000`, components at
@@ -332,3 +332,15 @@ writes, halt, reset, component unlock, or component power requests. The walks
 cover advertised entries, not every component in the RP2350 debug address
 space. Addresses above 32 bits, memory writes, and injected failures have
 simulation coverage but were not exercised on this bench.
+
+On September 26, the micro:bit identity and ROM-walk tests repeated both
+sessions at a requested 1 MHz and reproduced the identities and six visits
+above. Both tests and the SWD example now use 1 MHz by default to meet the
+nRF51's [startup clock requirement](protocols/cmsisdap.md#nrf51-startup-clock).
+The ZCU104 test clock remains 100 kHz. Run only the micro:bit paths with:
+
+```sh
+OSTIOLE_CORESIGHT_HIL=1 OSTIOLE_ROM_HIL=1 \
+go test -tags integration ./coresight \
+  -run 'TestHIL(ComponentIdentity|ROMWalk)/microbit' -count=1 -v
+```
