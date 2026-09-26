@@ -70,9 +70,8 @@ The [examples](examples) begin with a raw SWD debug-port identity read, then
 add posted access-port reads and a Cortex-M identity read through a MEM-AP.
 They compose the public packages explicitly without duplicating their framing.
 The `target/cortexm` package reads and decodes the architectural CPUID value
-through any compatible target-word reader. `cortexm.Acquire` enables Cortex-M0
-halting debug over borrowed word memory and retains its restoration state;
-see [Cortex-M control](docs/cortexm.md).
+through any compatible target-word reader. It also provides acquired Cortex-M0
+halt/resume control over word memory; see [Cortex-M control](docs/cortexm.md).
 
 The FTDI path uses the standard H-series MPSSE port and endpoint layout.
 Descriptor-driven FTDI port binding is not implemented yet. J-Link instead
@@ -132,12 +131,13 @@ root. See [Linux USB access](docs/linux-usb.md) for udev rules and a bounded
 ## Safety
 
 Debug and programming interfaces can reset processors, halt execution, modify
-memory, reconfigure programmable logic, and change persistent device state.
-The shipped examples and `ost` commands avoid reset, halt, target-memory
-writes, and persistent changes. The `dap.MemAP` API does expose effectful
-scalar writes; callers choose the addresses and own the consequences.
-Establishing an ADIv5 connection also changes volatile debug-port control
-state; the connection releases its own power requests before return.
+memory, reconfigure programmable logic, and change persistent device state. The
+shipped examples and `ost` commands avoid reset, halt, target-memory writes, and
+persistent changes. The Cortex-M0 target API enables halting debug and controls
+execution. The `dap.MemAP` API exposes effectful scalar writes; callers choose
+the addresses and own the consequences. Establishing an ADIv5 connection also
+changes volatile debug-port control state; the connection releases its own power
+requests before return.
 
 ## SWD DPIDR example
 

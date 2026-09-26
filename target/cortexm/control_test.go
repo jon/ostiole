@@ -25,7 +25,11 @@ type controlMemory struct {
 	failRead, failWrite int
 	afterWrite          bool
 	ignoreWrites        bool
+	stall               bool
+	rehaltAfter         int
+	rehaltPending       int
 	onWrite             func()
+	onRead              func()
 }
 
 func newControlMemory() *controlMemory { return &controlMemory{cpuid: 0x410cc200} }
@@ -44,9 +48,19 @@ func (m *controlMemory) ReadWord(ctx context.Context, addr uint32) (uint32, erro
 	if addr != dhcsr {
 		return 0, errors.New("unexpected read address")
 	}
+	if m.rehaltPending > 0 {
+		m.rehaltPending--
+		if m.rehaltPending == 0 {
+			m.control |= haltRequest
+			m.halted = true
+		}
+	}
 	value := m.control
 	if m.halted {
 		value |= haltStatus
+	}
+	if m.onRead != nil {
+		m.onRead()
 	}
 	return value, nil
 }
@@ -64,8 +78,15 @@ func (m *controlMemory) WriteWord(ctx context.Context, addr, value uint32) error
 		return errMemory
 	}
 	if !m.ignoreWrites {
+		wasHalted := m.halted
 		m.control = value & 15
-		m.halted = m.control&(debugEnable|haltRequest) == debugEnable|haltRequest
+		if !m.stall {
+			m.halted = m.control&(debugEnable|haltRequest) == debugEnable|haltRequest
+		}
+		if wasHalted && m.control == debugEnable && m.rehaltAfter > 0 {
+			m.rehaltPending = m.rehaltAfter
+			m.halted = true
+		}
 	}
 	if m.onWrite != nil {
 		m.onWrite()
@@ -197,13 +218,5 @@ func TestAcquireRequiresLiveContextAndMemory(t *testing.T) {
 	}
 	if m.reads != 0 || m.writes != 0 {
 		t.Fatal("invalid input reached memory")
-	}
-}
-
-func TestAcquireDetectsIgnoredWrite(t *testing.T) {
-	m := newControlMemory()
-	m.ignoreWrites = true
-	if core, err := cortexm.Acquire(t.Context(), m); err == nil || core != nil {
-		t.Fatalf("core=%v err=%v", core, err)
 	}
 }

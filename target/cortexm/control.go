@@ -31,11 +31,14 @@ type Memory interface {
 // exclusive control of the processor's debug registers until Release succeeds,
 // then release the memory owner. The zero value is inactive.
 type Target struct {
-	memory   Memory
-	identity Identity
-	saved    uint32
-	closing  bool
-	changed  bool
+	memory          Memory
+	identity        Identity
+	saved           uint32
+	closing         bool
+	changed         bool
+	haltOwned       bool
+	haltUncertain   bool
+	resumeUncertain bool
 }
 
 // Acquire enables Cortex-M0 halting debug without requesting a halt. It reads
@@ -112,8 +115,8 @@ func (t *Target) Identity() Identity {
 // Nil and released targets need no cleanup. Use a fresh context after operation
 // cancellation; each attempt is capped at five seconds. Release requires usable
 // memory and cannot repair a disconnected or invalidated memory client. It
-// refuses to disable debug while a new halt is observed; cleanup remains
-// pending until execution resumes.
+// never repeats a completed resume. An uncertain control write, or a new halt while
+// restoring disabled debug, can prevent cleanup until execution resumes.
 func (t *Target) Release(ctx context.Context) error {
 	if t == nil || t.memory == nil {
 		return nil
