@@ -5,8 +5,8 @@ changes under `.github/`.
 
 ## Code Review Rules
 
-- Grant the smallest explicit token permissions and pin every external Action
-  to a full commit SHA.
+- Grant the smallest explicit token permissions and pin every external Action to
+  a full commit SHA.
 - Never expose repository secrets or write-capable tokens to untrusted pull
   request code. A `pull_request_target` workflow must not check out, source,
   evaluate, or execute the pull-request head or interpolate untrusted text into

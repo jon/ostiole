@@ -4,47 +4,47 @@ Serial Wire Debug (SWD) uses one clock and one bidirectional data signal. The
 packet format is small; most of the trouble is knowing who owns SWDIO on each
 clock and remembering that everything goes least-significant bit first.
 
-Arm [IHI 0031H, _Arm Debug Interface Architecture Specification ADIv5.0 to
-ADIv5.2_](https://developer.arm.com/documentation/ihi0031/h) is the normative
-SWD specification. Use chapter B4 and section B5.2 for the protocol definition;
-this note is not a substitute for them. It is limited to details which are easy
-to misread and observations from hardware. It covers the point-to-point
-protocol and dormant activation, not SWD protocol version 2 target selection
-or multidrop.
+Arm
+[IHI 0031H, _Arm Debug Interface Architecture Specification ADIv5.0 to ADIv5.2_](https://developer.arm.com/documentation/ihi0031/h)
+is the normative SWD specification. Use chapter B4 and section B5.2 for the
+protocol definition; this note is not a substitute for them. It is limited to
+details which are easy to misread and observations from hardware. It covers the
+point-to-point protocol and dormant activation, not SWD protocol version 2
+target selection or multidrop.
 
 ## A transfer
 
 IHI 0031H sections B4.1 and B4.2 define the complete transfer. Every transfer
 begins with an eight-bit request sent by the host:
 
-| Wire bit | Name | Value |
-| ---: | --- | --- |
-| 0 | Start | 1 |
-| 1 | APnDP | 0 for DP, 1 for AP |
-| 2 | RnW | 0 for write, 1 for read |
-| 3 | A2 | Register address bit 2 |
-| 4 | A3 | Register address bit 3 |
-| 5 | Parity | Even parity over APnDP, RnW, A2, and A3 |
-| 6 | Stop | 0 |
-| 7 | Park | 1 |
+| Wire bit | Name   | Value                                   |
+| -------: | ------ | --------------------------------------- |
+|        0 | Start  | 1                                       |
+|        1 | APnDP  | 0 for DP, 1 for AP                      |
+|        2 | RnW    | 0 for write, 1 for read                 |
+|        3 | A2     | Register address bit 2                  |
+|        4 | A3     | Register address bit 3                  |
+|        5 | Parity | Even parity over APnDP, RnW, A2, and A3 |
+|        6 | Stop   | 0                                       |
+|        7 | Park   | 1                                       |
 
-For example, a DPIDR read is `0xa5` on the host side. It is clocked bit 0
-first, so the wire sees `1 0 1 0 0 1 0 1`.
+For example, a DPIDR read is `0xa5` on the host side. It is clocked bit 0 first,
+so the wire sees `1 0 1 0 0 1 0 1`.
 
 The host releases SWDIO for one turnaround clock and the target returns a
-three-bit acknowledgement. The default turnaround is one clock, although
-DLCR can describe another value on implementations which support it.
+three-bit acknowledgement. The default turnaround is one clock, although DLCR
+can describe another value on implementations which support it.
 
-The acknowledgement notation in IHI 0031H is easy to misread. The prose calls
-OK `0b001`, but Table B4-1 prints OK as `0b100` under the heading `ACK[0:2]`.
-Those are the same three bits viewed in opposite ways: the numeric value is
-sent least-significant bit first.
+The acknowledgement notation in IHI 0031H is easy to misread. The prose calls OK
+`0b001`, but Table B4-1 prints OK as `0b100` under the heading `ACK[0:2]`. Those
+are the same three bits viewed in opposite ways: the numeric value is sent
+least-significant bit first.
 
 | Response | Numeric value | Bits seen on SWDIO |
-| --- | ---: | --- |
-| OK | `0b001` | `1 0 0` |
-| WAIT | `0b010` | `0 1 0` |
-| FAULT | `0b100` | `0 0 1` |
+| -------- | ------------: | ------------------ |
+| OK       |       `0b001` | `1 0 0`            |
+| WAIT     |       `0b010` | `0 1 0`            |
+| FAULT    |       `0b100` | `0 0 1`            |
 
 After OK, a read continues directly into 32 data bits and one parity bit from
 the target. The target then releases SWDIO for a turnaround clock. A write has
@@ -54,9 +54,9 @@ the request. There is no second acknowledgement after write data. If its parity
 is bad, the DP abandons the write, records WDATAERR, and reports the sticky
 condition on a later request.
 
-If the host is going to stop SWCLK after a transfer, IHI 0031H requires at
-least eight idle clocks while the host drives SWDIO low. Starting the next
-request immediately is also valid.
+If the host is going to stop SWCLK after a transfer, IHI 0031H requires at least
+eight idle clocks while the host drives SWDIO low. Starting the next request
+immediately is also valid.
 
 ## WAIT, FAULT, and overrun detection
 
@@ -64,9 +64,9 @@ WAIT means that the request was not accepted. IHI 0031H requires the host to
 repeat the same request; it does not license replaying some larger operation
 which happens to contain it. The WAIT response still includes its specified
 turnaround. The host may repeat the request immediately; IHI 0031H does not
-require a separate retry delay. A DPIDR read, a bank-zero CTRL/STAT read, and
-an ABORT write are the three exceptions which must complete without WAIT or
-FAULT. A read from offset `0x04` in another DP bank may return WAIT or FAULT.
+require a separate retry delay. A DPIDR read, a bank-zero CTRL/STAT read, and an
+ABORT write are the three exceptions which must complete without WAIT or FAULT.
+A read from offset `0x04` in another DP bank may return WAIT or FAULT.
 
 Immediate replay assumes that the host completed the WAIT response and the
 target is waiting for another packet header. If the wire fails while clocking
@@ -80,25 +80,25 @@ protocol error, not a fourth response code. When no valid response is detected,
 the host leaves SWDIO undriven for at least the possible data phase before it
 tries a line reset.
 
-Once the response grammar is known, a complete FAULT response after one or
-more WAITs still ends at a request boundary. Return FAULT without DAPABORT;
-the earlier WAITs do not make it a framing error.
+Once the response grammar is known, a complete FAULT response after one or more
+WAITs still ends at a request boundary. Return FAULT without DAPABORT; the
+earlier WAITs do not make it a framing error.
 
 There is one important change when `CTRL/STAT.ORUNDETECT` is set. With overrun
 detection disabled, WAIT and FAULT end after the acknowledgement and trailing
-turnaround. With it enabled, every response has a data phase, including WAIT
-and FAULT. A host cannot turn on ORUNDETECT as a register-level feature and
-keep using the simpler transfer grammar; it will lose alignment on the first
-non-OK response. Fixed frames avoid that ambiguity by clocking the request,
+turnaround. With it enabled, every response has a data phase, including WAIT and
+FAULT. A host cannot turn on ORUNDETECT as a register-level feature and keep
+using the simpler transfer grammar; it will lose alignment on the first non-OK
+response. Fixed frames avoid that ambiguity by clocking the request,
 acknowledgement, data phase, turnaround, and idle clocks as one unit.
 
 With the default one-clock turnaround and eight idle clocks, either fixed
-response is 54 clocks. Several complete frames can share one transport
-exchange; that changes the host/probe boundary, not the SWD packet format. A
-WAIT in such an exchange sets STICKYORUN, so the target abandons later requests
-and returns FAULT for them. The host can clear STICKYORUN and resume at the
-request which returned WAIT. If a later request instead appears to complete,
-its effect is no longer safe to guess.
+response is 54 clocks. Several complete frames can share one transport exchange;
+that changes the host/probe boundary, not the SWD packet format. A WAIT in such
+an exchange sets STICKYORUN, so the target abandons later requests and returns
+FAULT for them. The host can clear STICKYORUN and resume at the request which
+returned WAIT. If a later request instead appears to complete, its effect is no
+longer safe to guess.
 
 In overrun mode, WAIT sets STICKYORUN and later requests can be abandoned. The
 host clears STICKYORUN through ABORT before retrying the exact request which
@@ -114,23 +114,22 @@ WDATAERR FAULT means the old ORUNDETECT value still applies. Cancellation or
 retry exhaustion before one of those outcomes leaves the response grammar
 unknown.
 
-A host must establish which grammar applies before it starts replaying
-requests which return WAIT. CTRL/STAT reads cannot return WAIT or FAULT, but
-offset `0x04` names CTRL/STAT only while `SELECT.DPBANKSEL` is zero. A host
-which inherits unknown DP state cannot simply read `0x04` and trust bit zero.
+A host must establish which grammar applies before it starts replaying requests
+which return WAIT. CTRL/STAT reads cannot return WAIT or FAULT, but offset
+`0x04` names CTRL/STAT only while `SELECT.DPBANKSEL` is zero. A host which
+inherits unknown DP state cannot simply read `0x04` and trust bit zero.
 
 One workable bootstrap is to read DPIDR, clear the supported sticky conditions
 with ABORT, write zero to SELECT once without retrying, read RDBUFF to settle
-that write, then read CTRL/STAT.
-ABORT is bank-independent and cannot return WAIT or FAULT; clearing sticky
-state first prevents an inherited error from faulting SELECT. The host cannot
-trust the new SELECT value until later traffic shows whether the write data
-took effect. DPIDR and ABORT do not settle that question because sticky state
-cannot make them return FAULT. RDBUFF is bank-independent, so it can settle the
-write without relying on the requested bank. If it returns FAULT with
-WDATAERR, the DP might have abandoned the SELECT data and kept the previous
-bank. Re-enter SWD before trying again. Only after RDBUFF returns OK is `0x04`
-known to name CTRL/STAT.
+that write, then read CTRL/STAT. ABORT is bank-independent and cannot return
+WAIT or FAULT; clearing sticky state first prevents an inherited error from
+faulting SELECT. The host cannot trust the new SELECT value until later traffic
+shows whether the write data took effect. DPIDR and ABORT do not settle that
+question because sticky state cannot make them return FAULT. RDBUFF is
+bank-independent, so it can settle the write without relying on the requested
+bank. If it returns FAULT with WDATAERR, the DP might have abandoned the SELECT
+data and kept the previous bank. Re-enter SWD before trying again. Only after
+RDBUFF returns OK is `0x04` known to name CTRL/STAT.
 
 A WAIT or FAULT during this bootstrap leaves the response grammar unknown:
 ORUNDETECT might be set, in which case the response has a data phase the host
@@ -147,18 +146,17 @@ the Debug Access Port state, not just replay the eight-bit SWD request.
 
 IHI 0031H section B4.3.3 defines connection and line reset. A line reset is at
 least 50 clocks with SWDIO high followed by at least two idle clocks. It puts
-the SWD interface into its reset state; it is not a reset of every DP
-register. DPIDR is the ordinary transaction which leaves that state.
+the SWD interface into its reset state; it is not a reset of every DP register.
+DPIDR is the ordinary transaction which leaves that state.
 
 Line reset also resets DLCR. If ORUNDETECT was already set, the reset records
 STICKYORUN, so bootstrap has sticky state to clear before ordinary traffic.
 
 There is a slightly nasty qualification in section B4.3.3: detection of the
-50-high sequence is guaranteed while the target is waiting for a packet
-header, but is implementation-defined at other points in a transfer. If the
-first DPIDR read does not answer, the specified recovery is to send the reset
-sequence again. One line reset is not proof that a confused target saw it as
-one.
+50-high sequence is guaranteed while the target is waiting for a packet header,
+but is implementation-defined at other points in a transfer. If the first DPIDR
+read does not answer, the specified recovery is to send the reset sequence
+again. One line reset is not proof that a confused target saw it as one.
 
 An SWJ-DP can power up in JTAG mode. The recommended JTAG-to-SWD sequence is:
 
@@ -168,44 +166,43 @@ at least 50 high clocks
 at least 50 high clocks
 ```
 
-The second high run leaves SWD in line-reset state. Arm points out that the
-two low idle clocks from a normal line reset are absent from the switching
-figure; a host can supply idle clocks before reading DPIDR.
+The second high run leaves SWD in line-reset state. Arm points out that the two
+low idle clocks from a normal line reset are absent from the switching figure; a
+host can supply idle clocks before reading DPIDR.
 
-IHI 0031H section B5.3 defines dormant operation. A dormant interface
-ignores ordinary SWD requests until it receives the selection alert and
-activation code. Ostiole first tries the JTAG-to-SWD sequence above. If the
-initial DPIDR read returns an invalid ACK and the host completes the
-undriven data phase and idle clocks, it tries this sequence once:
+IHI 0031H section B5.3 defines dormant operation. A dormant interface ignores
+ordinary SWD requests until it receives the selection alert and activation code.
+Ostiole first tries the JTAG-to-SWD sequence above. If the initial DPIDR read
+returns an invalid ACK and the host completes the undriven data phase and idle
+clocks, it tries this sequence once:
 
 1. Nine high clocks and the 31-bit JTAG-to-dormant code `0x33bbbbba`,
    least-significant bit first.
 2. Eight high clocks and the 128-bit selection alert
-   `0x19bc0ea2e3ddafe986852d956209f392`, least-significant bit first across
-   the whole value: byte `0x92` goes first.
-3. Four low clocks, the eight-bit SWD activation code `0x1a`
-   least-significant bit first, 56 high clocks for line reset, and eight low
-   idle clocks.
+   `0x19bc0ea2e3ddafe986852d956209f392`, least-significant bit first across the
+   whole value: byte `0x92` goes first.
+3. Four low clocks, the eight-bit SWD activation code `0x1a` least-significant
+   bit first, 56 high clocks for line reset, and eight low idle clocks.
 4. Another DPIDR read, followed by the ordinary bootstrap only if identity
    validation succeeds.
 
-The three activation exchanges use 40, 136, and 76 clocks, so the fallback
-needs no larger wire transfer than existing JTAG-to-SWD entry. A parity,
-WAIT, FAULT, or transport error does not trigger this fallback. Neither does
-an invalid ACK whose trailing clocks failed. Each bootstrap has at most two
-DPIDR attempts; failed Connect may also run a separate bootstrap during
-bounded cleanup. Ordinary register calls still make one attempt.
+The three activation exchanges use 40, 136, and 76 clocks, so the fallback needs
+no larger wire transfer than existing JTAG-to-SWD entry. A parity, WAIT, FAULT,
+or transport error does not trigger this fallback. Neither does an invalid ACK
+whose trailing clocks failed. Each bootstrap has at most two DPIDR attempts;
+failed Connect may also run a separate bootstrap during bounded cleanup.
+Ordinary register calls still make one attempt.
 
 Release uses the same activation fallback when framing repair is needed and
 checks the established identity before restoring owned state. It restores
-ORUNDETECT but leaves SWD selected; it does not return the interface to
-dormant mode. Activation does not halt or reset the processor, request
-system power, or add ADIv6 AP addressing.
+ORUNDETECT but leaves SWD selected; it does not return the interface to dormant
+mode. Activation does not halt or reset the processor, request system power, or
+add ADIv6 AP addressing.
 
 Multidrop SWD has another boundary worth stating plainly: there is no generic
 way to ask an unselected multidrop bus which target IDs are present. The host
-must already know which IDs to try. That is a protocol limitation, not a
-missing discovery trick.
+must already know which IDs to try. That is a protocol limitation, not a missing
+discovery trick.
 
 ## Bench note, 2026-08-09
 
@@ -213,16 +210,16 @@ I ran the existing SWD and DAP integration tests on macOS 26.5.2 (arm64),
 through an FT232H (`0403:6014`) using MPSSE port A at a requested 400 kHz. The
 adapter was wired as follows:
 
-| FT232H signal | Target signal |
-| --- | --- |
-| D0 | SWCLK |
-| D1 through a 1 kΩ series resistor | SWDIO |
-| D2 | SWDIO |
-| GND | GND |
+| FT232H signal                     | Target signal |
+| --------------------------------- | ------------- |
+| D0                                | SWCLK         |
+| D1 through a 1 kΩ series resistor | SWDIO         |
+| D2                                | SWDIO         |
+| GND                               | GND           |
 
-D1 drove SWDIO and D2 sampled the same line. The target board and SoC names
-were not recorded. Its debug fingerprint identifies an ADIv5 MEM-AP and an
-otherwise unidentified Cortex-M4:
+D1 drove SWDIO and D2 sampled the same line. The target board and SoC names were
+not recorded. Its debug fingerprint identifies an ADIv5 MEM-AP and an otherwise
+unidentified Cortex-M4:
 
 ```text
 DPIDR  = 0x2ba01477
@@ -294,9 +291,9 @@ was `0x23000040`. The transaction completed `DebugPort.Release`, and the test
 closed the FTDI channel. The target returned no WAIT during this run. Packed
 WAIT recovery remains simulator evidence.
 
-Measuring turnaround requires a capture of SWCLK, SWDIO, and the FTDI
-direction pin. A real WAIT still requires a target which can be made to stall;
-the ordinary transfers here did not produce one.
+Measuring turnaround requires a capture of SWCLK, SWDIO, and the FTDI direction
+pin. A real WAIT still requires a target which can be made to stall; the
+ordinary transfers here did not produce one.
 
 ## Linux explicit-transfer regression, 2026-08-25
 
@@ -314,20 +311,20 @@ OSTIOLE_FTDI_HIL=1 OSTIOLE_FTDI_HIL_ENUMERATIONS=1000 \
 ```
 
 One session completed all 1,000 AP enumerations with 1,024,022 physical OK
-acknowledgements, no WAIT, FAULT, or invalid acknowledgement, and one SWD
-entry. It used 32,033 physical SWDIO calls. The experiment exercises Linux
-usbfs submission, completion notification and reaping, endpoint cancellation,
-and release on this bench; it is not a USB or SWD waveform capture and does
-not establish behavior for another host controller or FTDI product.
+acknowledgements, no WAIT, FAULT, or invalid acknowledgement, and one SWD entry.
+It used 32,033 physical SWDIO calls. The experiment exercises Linux usbfs
+submission, completion notification and reaping, endpoint cancellation, and
+release on this bench; it is not a USB or SWD waveform capture and does not
+establish behavior for another host controller or FTDI product.
 
 ## RP2350 dormant activation bench
 
 On macOS, a J-Link EDU Mini V2 (serial `000802011345`, firmware
-`J-Link EDU Mini V2 compiled Jun 25 2026 10:27:52`) connected to an RP2350
-over SWD at 100 kHz. Before each of two fresh Ostiole sessions, OpenOCD 0.12.0 connected
-to the debug port and shut down; its debug log showed SWD-to-dormant
-followed by dormant-to-JTAG on shutdown. The preparation used no CPU target
-or reset command:
+`J-Link EDU Mini V2 compiled Jun 25 2026 10:27:52`) connected to an RP2350 over
+SWD at 100 kHz. Before each of two fresh Ostiole sessions, OpenOCD 0.12.0
+connected to the debug port and shut down; its debug log showed SWD-to-dormant
+followed by dormant-to-JTAG on shutdown. The preparation used no CPU target or
+reset command:
 
 ```sh
 openocd -c 'adapter driver jlink' -c 'adapter serial 000802011345' \
@@ -349,6 +346,6 @@ reproduced that invalid ACK after JTAG-to-SWD and read the correct identity
 after its dormant fallback.
 
 The runs did not independently measure the inherited ORUNDETECT value after
-release, exercise an Ostiole ADIv6 AP, or read target memory. No processor
-halt or reset was requested. OpenOCD performed its own debug-port
-initialization; the bench was not power-cycled to test startup state.
+release, exercise an Ostiole ADIv6 AP, or read target memory. No processor halt
+or reset was requested. OpenOCD performed its own debug-port initialization; the
+bench was not power-cycled to test startup state.

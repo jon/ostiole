@@ -1,8 +1,8 @@
 # Composing Ostiole
 
-Choose the highest-level package that already owns the behavior an
-application needs. Drop to a lower layer only when the lower-level operation
-is itself the goal.
+Choose the highest-level package that already owns the behavior an application
+needs. Drop to a lower layer only when the lower-level operation is itself the
+goal.
 
 For example, a program identifying a Cortex-M should call `cortexm.Identify`
 rather than read and decode CPUID itself. A program inspecting an access port
@@ -14,32 +14,32 @@ data-register write can write target memory.
 
 ## Find the right layer
 
-| Task | Public API | Executable reference |
-| --- | --- | --- |
-| Discover and select among registered probe drivers | `discover.Probes`, `ProbeInventory.Select`, `Candidate.Open`, or `discover.OpenProbe` | `discover/probes` integration tests |
-| List every host USB attachment | `usb.New`, `usb.AllDevices`, `Enumerator.List` | Package tests |
-| List USB attachments understood by the FTDI driver | `usb.New`, `ftdi.SupportedDevices`, `Enumerator.List` | `ost ftdi list` |
-| Read metadata from one J-Link | `usb.New`, `jlink.SupportedDevices`, `Enumerator.Open`, `jlink.Open`, `Session.Info` | Package tests |
-| Read metadata from one CMSIS-DAP v2 probe | `usb.New`, `usb.AllDevices`, `cmsisdap.Candidates`, `Enumerator.Open`, `cmsisdap.Open`, `Session.Info` | Package tests |
-| Open one FTDI MPSSE SWD port | `Enumerator.Open`, `ftdi.Open` | `examples/trivial/swd-dpidr` |
-| Use an FTDI JTAG chain | `ftdi.Open` or `Probe.JTAG`, then `jtag.New` and `jtag.NewChain` | FTDI integration tests |
-| Open one J-Link SWD session | `Enumerator.Open`, `jlink.Open`, `jlink.WithSWD` | Package tests |
-| Use a J-Link JTAG chain | `jlink.Open` with `WithJTAG` or `Probe.JTAG`, then `jtag.New` and `jtag.NewChain` | J-Link integration tests |
-| Open one CMSIS-DAP SWD session | `Enumerator.Open`, `cmsisdap.Open`, `cmsisdap.WithSWD` | Package tests |
-| Connect SWD or transfer DP/AP registers | `swd.New`, `Conn.Connect`, `Conn.ReadDP`, `Conn.WriteDP`, `Conn.ReadAP`, `Conn.WriteAP`, `Conn.NewBatch`, `Conn.Release` | `examples/trivial/swd-dpidr` |
-| Enter SWD, decode a DPIDR, and manage SW-DP power | `dap.NewDebugPort`, `DebugPort.Connect`, `DebugPort.Release` | `ost dap dp id` |
-| Identify one explicitly selected AP | `DebugPort.ReadAPIDR`, `DecodeAPIDR` | `examples/simple/ap-id` |
-| Access another AP register by its full register address | `DebugPort.ReadRawAP`, `DebugPort.WriteRawAP` | Package tests |
-| Read or write one aligned target scalar through a MEM-AP | `dap.OpenMemAP`, `MemAP.ReadScalar`, `MemAP.WriteScalar`, `MemAP.Release` | `examples/simple/cortexm-info` uses `ReadWord`. |
-| Read or write arbitrary target bytes through a MEM-AP | `dap.OpenMemAP`, `MemAP.ReadBlock`, `MemAP.WriteBlock`, `MemAP.Release` | Package tests |
-| Obtain a MEM-AP's advertised debug entry | `MemAP.ReadDebugBase` | `examples/simple/coresight-info` |
-| Identify one debug component through scalar memory | `coresight.Identify` | `examples/simple/coresight-info` |
-| Inspect ROM entries or a bounded component hierarchy | `Component.ROMTable`, `ROMTable.ReadEntry`, `coresight.Walk` | `examples/simple/coresight-info -walk` |
-| Identify a Cortex-M through any compatible word reader | `cortexm.Identify` | `examples/simple/cortexm-info` |
-| Acquire, halt, inspect registers, and resume a Cortex-M0 | `cortexm.Acquire`, `Target.Halt`, `Target.ReadRegister`, `Target.Resume`, `Target.Release` | `examples/simple/cortexm-control` |
-| Step a Cortex-M0 from an owned halt | `Target.Step` | `examples/simple/cortexm-control -step` |
-| Read or write a halted Cortex-M0 register | `Target.ReadRegister`, `Target.WriteRegister` | [Register reads](cortexm.md#register-reads), [writes](cortexm.md#register-writes) |
-| Test SWD and DAP behavior without hardware | `swd/sim`, `dap/sim` | Package tests |
+| Task                                                     | Public API                                                                                                               | Executable reference                                                              |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| Discover and select among registered probe drivers       | `discover.Probes`, `ProbeInventory.Select`, `Candidate.Open`, or `discover.OpenProbe`                                    | `discover/probes` integration tests                                               |
+| List every host USB attachment                           | `usb.New`, `usb.AllDevices`, `Enumerator.List`                                                                           | Package tests                                                                     |
+| List USB attachments understood by the FTDI driver       | `usb.New`, `ftdi.SupportedDevices`, `Enumerator.List`                                                                    | `ost ftdi list`                                                                   |
+| Read metadata from one J-Link                            | `usb.New`, `jlink.SupportedDevices`, `Enumerator.Open`, `jlink.Open`, `Session.Info`                                     | Package tests                                                                     |
+| Read metadata from one CMSIS-DAP v2 probe                | `usb.New`, `usb.AllDevices`, `cmsisdap.Candidates`, `Enumerator.Open`, `cmsisdap.Open`, `Session.Info`                   | Package tests                                                                     |
+| Open one FTDI MPSSE SWD port                             | `Enumerator.Open`, `ftdi.Open`                                                                                           | `examples/trivial/swd-dpidr`                                                      |
+| Use an FTDI JTAG chain                                   | `ftdi.Open` or `Probe.JTAG`, then `jtag.New` and `jtag.NewChain`                                                         | FTDI integration tests                                                            |
+| Open one J-Link SWD session                              | `Enumerator.Open`, `jlink.Open`, `jlink.WithSWD`                                                                         | Package tests                                                                     |
+| Use a J-Link JTAG chain                                  | `jlink.Open` with `WithJTAG` or `Probe.JTAG`, then `jtag.New` and `jtag.NewChain`                                        | J-Link integration tests                                                          |
+| Open one CMSIS-DAP SWD session                           | `Enumerator.Open`, `cmsisdap.Open`, `cmsisdap.WithSWD`                                                                   | Package tests                                                                     |
+| Connect SWD or transfer DP/AP registers                  | `swd.New`, `Conn.Connect`, `Conn.ReadDP`, `Conn.WriteDP`, `Conn.ReadAP`, `Conn.WriteAP`, `Conn.NewBatch`, `Conn.Release` | `examples/trivial/swd-dpidr`                                                      |
+| Enter SWD, decode a DPIDR, and manage SW-DP power        | `dap.NewDebugPort`, `DebugPort.Connect`, `DebugPort.Release`                                                             | `ost dap dp id`                                                                   |
+| Identify one explicitly selected AP                      | `DebugPort.ReadAPIDR`, `DecodeAPIDR`                                                                                     | `examples/simple/ap-id`                                                           |
+| Access another AP register by its full register address  | `DebugPort.ReadRawAP`, `DebugPort.WriteRawAP`                                                                            | Package tests                                                                     |
+| Read or write one aligned target scalar through a MEM-AP | `dap.OpenMemAP`, `MemAP.ReadScalar`, `MemAP.WriteScalar`, `MemAP.Release`                                                | `examples/simple/cortexm-info` uses `ReadWord`.                                   |
+| Read or write arbitrary target bytes through a MEM-AP    | `dap.OpenMemAP`, `MemAP.ReadBlock`, `MemAP.WriteBlock`, `MemAP.Release`                                                  | Package tests                                                                     |
+| Obtain a MEM-AP's advertised debug entry                 | `MemAP.ReadDebugBase`                                                                                                    | `examples/simple/coresight-info`                                                  |
+| Identify one debug component through scalar memory       | `coresight.Identify`                                                                                                     | `examples/simple/coresight-info`                                                  |
+| Inspect ROM entries or a bounded component hierarchy     | `Component.ROMTable`, `ROMTable.ReadEntry`, `coresight.Walk`                                                             | `examples/simple/coresight-info -walk`                                            |
+| Identify a Cortex-M through any compatible word reader   | `cortexm.Identify`                                                                                                       | `examples/simple/cortexm-info`                                                    |
+| Acquire, halt, inspect registers, and resume a Cortex-M0 | `cortexm.Acquire`, `Target.Halt`, `Target.ReadRegister`, `Target.Resume`, `Target.Release`                               | `examples/simple/cortexm-control`                                                 |
+| Step a Cortex-M0 from an owned halt                      | `Target.Step`                                                                                                            | `examples/simple/cortexm-control -step`                                           |
+| Read or write a halted Cortex-M0 register                | `Target.ReadRegister`, `Target.WriteRegister`                                                                            | [Register reads](cortexm.md#register-reads), [writes](cortexm.md#register-writes) |
+| Test SWD and DAP behavior without hardware               | `swd/sim`, `dap/sim`                                                                                                     | Package tests                                                                     |
 
 The examples are intentionally small, executable compositions of public
 packages. `ost` adds command parsing and output policy, but its internal
@@ -47,8 +47,8 @@ packages are not a reusable library surface.
 
 ## Select and open hardware explicitly
 
-`armdebug.Connect` owns the connection from an already-open probe through an
-Arm SW-DP. Pass an explicit port configuration:
+`armdebug.Connect` owns the connection from an already-open probe through an Arm
+SW-DP. Pass an explicit port configuration:
 
 ```go
 connected, err := armdebug.Connect(ctx, opened, armdebug.Config{
@@ -63,20 +63,19 @@ if err != nil {
 port := connected.Port()
 ```
 
-The call takes responsibility for `opened` even on invalid input. Stop using
-the supplied probe directly. Keep any non-nil returned owner, including on an
-error, until `Close` succeeds; the single deferred attempt above reports a
-failure but does not replace an application's bounded retry policy.
-The borrowed port is for serialized operations, not independent `Connect` or
-`Release` calls. Stop using it when owner cleanup begins. A manually acquired
-MEM-AP must be released before closing the owner.
+The call takes responsibility for `opened` even on invalid input. Stop using the
+supplied probe directly. Keep any non-nil returned owner, including on an error,
+until `Close` succeeds; the single deferred attempt above reports a failure but
+does not replace an application's bounded retry policy. The borrowed port is for
+serialized operations, not independent `Connect` or `Release` calls. Stop using
+it when owner cleanup begins. A manually acquired MEM-AP must be released before
+closing the owner.
 
 `Close` releases DAP, which releases SWD or the JTAG chain, before closing the
-probe. A failed
-release retains the live probe for another attempt. Cleanup uses fresh bounded
-contexts, not the operation's possibly canceled context. There is no forced
-abandonment. `Port()` returns nil once cleanup starts; previously returned
-pointers are governed by the borrowing contract, not forcibly revoked.
+probe. A failed release retains the live probe for another attempt. Cleanup uses
+fresh bounded contexts, not the operation's possibly canceled context. There is
+no forced abandonment. `Port()` returns nil once cleanup starts; previously
+returned pointers are governed by the borrowing contract, not forcibly revoked.
 
 Use the owner's method to acquire a MEM-AP whose cleanup it will track:
 
@@ -89,13 +88,13 @@ processor, err := cortexm.Identify(ctx, memory)
 ```
 
 Distinct APs may be acquired and used serially; acquiring the same AP twice
-fails before traffic. Do not call `Release` on these borrowed clients.
-`Close` releases them in reverse acquisition order before releasing DAP/SWD.
-If one release fails, the owner retains that client and all lower dependencies
-for retry. An acquisition error preserves existing clients and ownership;
-the DAP client's state determines which subsequent operations remain possible.
-Clients acquired directly with `dap.OpenMemAP`, rather than this method, are
-not tracked and remain the caller's cleanup responsibility.
+fails before traffic. Do not call `Release` on these borrowed clients. `Close`
+releases them in reverse acquisition order before releasing DAP/SWD. If one
+release fails, the owner retains that client and all lower dependencies for
+retry. An acquisition error preserves existing clients and ownership; the DAP
+client's state determines which subsequent operations remain possible. Clients
+acquired directly with `dap.OpenMemAP`, rather than this method, are not tracked
+and remain the caller's cleanup responsibility.
 
 The generic `examples/simple/arm-info` program uses this ownership path:
 
@@ -103,13 +102,12 @@ The generic `examples/simple/arm-info` program uses this ownership path:
 go run ./examples/simple/arm-info -provider cmsisdap -serial SERIAL -ap 0
 ```
 
-It defaults to a 1 MHz SW-DP; `-clock` selects the requested ceiling in Hz.
-The default meets the micro:bit nRF51's
-[startup clock requirement](protocols/cmsisdap.md#nrf51-startup-clock).
-It reads DPIDR, AP IDR, and Cortex-M identity, and
-attempts owner cleanup up to three times. It does not halt, reset, or write
-target memory. Probe filters may be omitted only when selection remains unique;
-the AP argument is required.
+It defaults to a 1 MHz SW-DP; `-clock` selects the requested ceiling in Hz. The
+default meets the micro:bit nRF51's
+[startup clock requirement](protocols/cmsisdap.md#nrf51-startup-clock). It reads
+DPIDR, AP IDR, and Cortex-M identity, and attempts owner cleanup up to three
+times. It does not halt, reset, or write target memory. Probe filters may be
+omitted only when selection remains unique; the AP argument is required.
 
 A generic tool enables the bundled providers with these imports:
 
@@ -120,9 +118,9 @@ import (
 )
 ```
 
-For a smaller binary, blank-import just `jlink/discovery`, `ftdi/discovery`,
-or `cmsisdap/discovery`. The core `discover` and `probe` packages import no
-USB implementation or concrete driver. Registration performs no hardware I/O.
+For a smaller binary, blank-import just `jlink/discovery`, `ftdi/discovery`, or
+`cmsisdap/discovery`. The core `discover` and `probe` packages import no USB
+implementation or concrete driver. Registration performs no hardware I/O.
 
 For an owned Arm debug connection, `armdebug.Open` combines discovery and
 `Connect`, using the same selection and configuration:
@@ -135,16 +133,16 @@ connected, err := armdebug.Open(ctx, selection, armdebug.Config{
 
 Handle the returned owner and error as in the `Connect` example above. Invalid
 configuration or incomplete discovery prevents opening. For an explicit
-registry, use `registry.OpenProbe` and then `armdebug.Connect`; if opening
-fails with a probe, close that probe rather than trying to activate it.
+registry, use `registry.OpenProbe` and then `armdebug.Connect`; if opening fails
+with a probe, close that probe rather than trying to activate it.
 
 With providers registered, `discover.OpenProbe(ctx, selection)` combines
 enumeration, classification, unique selection, and opening. It stops on any
 discovery error. `discover.Probes(ctx)` returns a partial inventory alongside
-errors so an application can inspect those errors before deliberately opening
-a surviving candidate. An explicit `discover.Registry` offers the same calls.
-All paths leave the same cleanup obligations on the returned owner, including
-when opening returns both an owner and an error.
+errors so an application can inspect those errors before deliberately opening a
+surviving candidate. An explicit `discover.Registry` offers the same calls. All
+paths leave the same cleanup obligations on the returned owner, including when
+opening returns both an owner and an error.
 
 A `discover.ProbeInventory` supports direct iteration and exact selection:
 
@@ -210,9 +208,9 @@ probe invalidates every borrowed wire, including when transport cleanup fails.
 
 Providers can instead register on a caller-owned `discover.Registry` with
 `RegisterTransport`. `EnsureTransport` shares an identical provider dependency
-without accepting a different provider under the same ID. Iteration repeats
-the detached snapshot without enumerating again. To use `slices.Collect`,
-convert the named sequence to `iter.Seq[discover.Transport]` explicitly.
+without accepting a different provider under the same ID. Iteration repeats the
+detached snapshot without enumerating again. To use `slices.Collect`, convert
+the named sequence to `iter.Seq[discover.Transport]` explicitly.
 
 Probe order is provider ID, serial, function, location, then product, with
 binding identity breaking final ties. Transport order is provider ID, serial,
@@ -229,10 +227,10 @@ distinguish candidates, and pass it back as an exact filter:
 selected, err := inventory.Select(discover.Selection{Binding: binding})
 ```
 
-The binding filter combines with every other nonempty filter. An unknown
-binding returns not-found; it never falls back to another candidate. Do not
-parse the token or assume it survives replugging. An empty `Selection{}`
-deliberately selects the sole candidate and reports ambiguity for several.
+The binding filter combines with every other nonempty filter. An unknown binding
+returns not-found; it never falls back to another candidate. Do not parse the
+token or assume it survives replugging. An empty `Selection{}` deliberately
+selects the sole candidate and reports ambiguity for several.
 
 An application with a `probe.SWDBackend` can transfer it to a generic owner:
 
@@ -246,15 +244,15 @@ if err != nil {
 connection := swd.New(wire)
 ```
 
-Use a named error result for this cleanup pattern. Release any SWD or DAP
-state before closing the probe. The caller must stop using the transferred
-backend directly; the borrowed wire has no independent close operation.
+Use a named error result for this cleanup pattern. Release any SWD or DAP state
+before closing the probe. The caller must stop using the transferred backend
+directly; the borrowed wire has no independent close operation.
 
 FTDI and J-Link owners can instead lend JTAG with
 `opened.JTAG(ctx, probe.JTAGConfig{MaxClockHz: 100_000})`. Pass the wire to
-`jtag.New`, supply an explicit layout, and release the chain before closing
-the probe. Retain both after a failed release so cleanup can be retried.
-The [JTAG guide](protocols/jtag.md) covers pin wiring and chain ownership.
+`jtag.New`, supply an explicit layout, and release the chain before closing the
+probe. Retain both after a failed release so cleanup can be retried. The
+[JTAG guide](protocols/jtag.md) covers pin wiring and chain ownership.
 
 Concrete drivers can open that owner from an exact USB identity:
 
@@ -315,13 +313,12 @@ func openCMSISDAP(ctx context.Context) (_ *cmsisdap.Session, cleanup func() erro
 
 On success the session owns the device, and `cleanup` calls `session.Close`.
 After a failed open whose device cleanup also fails, `cleanup` calls
-`device.Close` again. Retain a non-nil cleanup function. Calling it again
-either retries a retained interface claim or returns the cached device-close
-result.
-Product matching is case-sensitive and only shortlists candidates; `Open`
-still requires the exact v2 bulk interface. An application which knows a
-composite probe by serial or another explicit policy may select it from
-`devices` even when its device product string is absent from `Candidates`.
+`device.Close` again. Retain a non-nil cleanup function. Calling it again either
+retries a retained interface claim or returns the cached device-close result.
+Product matching is case-sensitive and only shortlists candidates; `Open` still
+requires the exact v2 bulk interface. An application which knows a composite
+probe by serial or another explicit policy may select it from `devices` even
+when its device product string is absent from `Candidates`.
 
 To use that selected v2 probe as an SWD wire, configure it during `Open` and
 return a cleanup function even when `connection.Connect` fails:
@@ -361,17 +358,17 @@ func connectCMSISDAPSWD(ctx context.Context, device *usb.Device) (_ uint32, clea
 }
 ```
 
-`WithSWD` requires the advertised SWD capability, sends `DAP_Connect(SWD)`,
-and requests a maximum frequency in hertz through `DAP_SWJ_Clock`.
-`MaxClockHz` reports that accepted request because CMSIS-DAP does not report
-the attained clock. `SWDIO` converts direction runs to packet-bounded
-`DAP_SWD_Sequence` commands; the session remains the USB owner. A
-`connection.Release` failure that leaves the session usable, a complete
-`DAP_Disconnect` failure, or an interface-release failure leaves cleanup
-retryable in reverse order. After a poisoned exchange, the helper records
-`ErrSessionPoisoned`, lets `Close` report the abandoned port and finish USB
-cleanup without another command, and returns that terminal error. Device close
-runs once; later calls to `Session.Close` return its cached result.
+`WithSWD` requires the advertised SWD capability, sends `DAP_Connect(SWD)`, and
+requests a maximum frequency in hertz through `DAP_SWJ_Clock`. `MaxClockHz`
+reports that accepted request because CMSIS-DAP does not report the attained
+clock. `SWDIO` converts direction runs to packet-bounded `DAP_SWD_Sequence`
+commands; the session remains the USB owner. A `connection.Release` failure that
+leaves the session usable, a complete `DAP_Disconnect` failure, or an
+interface-release failure leaves cleanup retryable in reverse order. After a
+poisoned exchange, the helper records `ErrSessionPoisoned`, lets `Close` report
+the abandoned port and finish USB cleanup without another command, and returns
+that terminal error. Device close runs once; later calls to `Session.Close`
+return its cached result.
 
 A metadata-only J-Link session follows the same explicit inventory rule:
 
@@ -405,13 +402,12 @@ func readJLinkInfo(ctx context.Context) (_ jlink.Info, cleanup func() error, err
 }
 ```
 
-Inventory policy still belongs to the application. `jlink.Open` takes
-ownership on success. It claims only the J-Link application interface,
-resolves the active endpoints after selecting its alternate, and does not
-select or configure a target interface. If a close fails, the returned
-`cleanup` function keeps the affected device or session reachable. Calling it
-again either retries a retained interface claim or returns the cached
-device-close result.
+Inventory policy still belongs to the application. `jlink.Open` takes ownership
+on success. It claims only the J-Link application interface, resolves the active
+endpoints after selecting its alternate, and does not select or configure a
+target interface. If a close fails, the returned `cleanup` function keeps the
+affected device or session reachable. Calling it again either retries a retained
+interface claim or returns the cached device-close result.
 
 To use the same selected probe as an SWD wire, configure it while opening and
 pass the session to `swd.New`. Keep the cleanup closure when the operation
@@ -461,8 +457,8 @@ func connectJLinkSWD(ctx context.Context, device *usb.Device) (_ uint32, cleanup
 }
 ```
 
-`WithSWD` selects the advertised SWD interface and requests a whole-kHz clock
-no greater than its argument. A metadata-only session can instead call
+`WithSWD` selects the advertised SWD interface and requests a whole-kHz clock no
+greater than its argument. A metadata-only session can instead call
 `ConfigureSWD` later. Both forms change volatile probe interface and clock
 state, which `Close` does not restore. A complete nonzero scan status requires
 another `ConfigureSWD`; an ambiguous transfer requires close and reopen. The
@@ -479,13 +475,12 @@ Pass the opened device to `ftdi.Open` with the MPSSE port and maximum requested
 clock. The driver reads and validates the product from the device identity;
 discovery does not choose the port or clock.
 
-`ftdi.Open` initializes MPSSE and the clock with target pins as inputs.
-The returned channel supplies both `SWDIO` and `JTAGIO`; each call establishes
-its own directions. A non-nil channel owns the USB device even on error;
-close that channel and retain it if cleanup fails. Only a nil result leaves
-`Device.Close` with the caller. Release higher-level protocol state before
-closing the channel, and do not mix raw operations underneath a live protocol
-connection.
+`ftdi.Open` initializes MPSSE and the clock with target pins as inputs. The
+returned channel supplies both `SWDIO` and `JTAGIO`; each call establishes its
+own directions. A non-nil channel owns the USB device even on error; close that
+channel and retain it if cleanup fails. Only a nil result leaves `Device.Close`
+with the caller. Release higher-level protocol state before closing the channel,
+and do not mix raw operations underneath a live protocol connection.
 
 Adapter drivers submit USB transfers through the claimed interface and keep
 their scheduling policy themselves:
@@ -525,27 +520,27 @@ if err := consume(completion); err != nil {
 return claim.Close()
 ```
 
-This example posts one IN request before its OUT request. A protocol which
-needs a receive window submits several maximum-packet-sized buffers instead;
-one which does not tolerate read-ahead submits its IN request only when the
-response is due. Each handle reports its own completion, including a short or
-zero-length transfer. Ending a `Wait` context does not cancel the request.
-If the host transfer engine fails, `Wait` returns that error while `Done` can
-remain open; the caller must not reuse the buffer until `Done` closes.
-`AbortBulk` is endpoint-wide and performs a bounded drain of every pending
-request on that endpoint. A drain timeout matches `context.DeadlineExceeded`.
-If native cancellation or the drain fails, those requests and the claim remain
-owned so cleanup can be retried. Closing the claim applies the same bound
-across its endpoints before release. The first endpoint lookup reads the
-interface's current alternate setting; a new claim does not imply alternate
-zero. If alternate selection fails, the next endpoint lookup reads the host
-state again instead of retaining descriptors for the previous alternate.
+This example posts one IN request before its OUT request. A protocol which needs
+a receive window submits several maximum-packet-sized buffers instead; one which
+does not tolerate read-ahead submits its IN request only when the response is
+due. Each handle reports its own completion, including a short or zero-length
+transfer. Ending a `Wait` context does not cancel the request. If the host
+transfer engine fails, `Wait` returns that error while `Done` can remain open;
+the caller must not reuse the buffer until `Done` closes. `AbortBulk` is
+endpoint-wide and performs a bounded drain of every pending request on that
+endpoint. A drain timeout matches `context.DeadlineExceeded`. If native
+cancellation or the drain fails, those requests and the claim remain owned so
+cleanup can be retried. Closing the claim applies the same bound across its
+endpoints before release. The first endpoint lookup reads the interface's
+current alternate setting; a new claim does not imply alternate zero. If
+alternate selection fails, the next endpoint lookup reads the host state again
+instead of retaining descriptors for the previous alternate.
 
 ## Managed JTAG-DP
 
 Select JTAG-DP through the same `Open` or `Connect` calls. The configuration
-contains a complete expected layout, a zero-based TDO-first TAP index, and
-the probe's clock ceiling:
+contains a complete expected layout, a zero-based TDO-first TAP index, and the
+probe's clock ceiling:
 
 ```go
 arm, err := jtag.IDCODE(4, 0x5ba00477)
@@ -567,30 +562,30 @@ config := armdebug.Config{
 connected, err := armdebug.Open(ctx, selection, config)
 ```
 
-Store any non-nil `connected` owner before handling `err`, including when
-setup failed. For an already-open probe, call
-`armdebug.Connect(ctx, opened, config)` instead; ownership of `opened`
-transfers even on error. Close any returned owner and retain it until cleanup
-succeeds. These are the same ownership rules as the SW-DP path.
+Store any non-nil `connected` owner before handling `err`, including when setup
+failed. For an already-open probe, call `armdebug.Connect(ctx, opened, config)`
+instead; ownership of `opened` transfers even on error. Close any returned owner
+and retain it until cleanup succeeds. These are the same ownership rules as the
+SW-DP path.
 
 The configuration copies the layout without traffic. Static layout, selected
-TAP, clock, and cleanup-timeout validation precede discovery or activation.
-The selected TAP must have an IDCODE and a four- or eight-bit IR. DAP then
-validates the exact physical chain and enters baseline ADIv5 JTAG-DP.
-Board-specific routing must already be enabled; the owner does not infer a
-layout or activate a hidden DAP. DAP options are checked after probe activation.
+TAP, clock, and cleanup-timeout validation precede discovery or activation. The
+selected TAP must have an IDCODE and a four- or eight-bit IR. DAP then validates
+the exact physical chain and enters baseline ADIv5 JTAG-DP. Board-specific
+routing must already be enabled; the owner does not infer a layout or activate a
+hidden DAP. DAP options are checked after probe activation.
 
-The borrowed `connected.Port()` supplies IDCODE through its cached
-`Identity`, and the existing AP and transaction APIs. Acquire memory separately
-with `connected.OpenMemAP(ctx, dap.NewAPSel(1))`; the owner tracks that
-MEM-AP's restoration. Do not release or reconnect borrowed clients yourself.
-`Close` restores owned MEM-APs in reverse acquisition order, releases DAP and
-the chain to BYPASS/Idle, then closes the probe. A failure retains the current
-owner and its dependencies, and completed releases are not repeated.
+The borrowed `connected.Port()` supplies IDCODE through its cached `Identity`,
+and the existing AP and transaction APIs. Acquire memory separately with
+`connected.OpenMemAP(ctx, dap.NewAPSel(1))`; the owner tracks that MEM-AP's
+restoration. Do not release or reconnect borrowed clients yourself. `Close`
+restores owned MEM-APs in reverse acquisition order, releases DAP and the chain
+to BYPASS/Idle, then closes the probe. A failure retains the current owner and
+its dependencies, and completed releases are not repeated.
 
-`CleanupTimeout` bounds each owned release attempt. Zero chooses one second
-for SWD or thirty seconds for JTAG; a negative value is invalid. Each attempt
-uses a fresh context, independent of the operation context. DAP's own recovery
+`CleanupTimeout` bounds each owned release attempt. Zero chooses one second for
+SWD or thirty seconds for JTAG; a negative value is invalid. Each attempt uses a
+fresh context, independent of the operation context. DAP's own recovery
 attempts, including chain revalidation, have separate bounds configured with
 `dap.WithCleanupTimeout` in `DAPOptions`; host cleanup also keeps its own
 limits. `CleanupTimeout` is not a total deadline for `Close`.
@@ -602,66 +597,65 @@ OSTIOLE_ARMDEBUG_JTAG_HIL=1 go test -tags=integration ./armdebug -run '^TestHILA
 ```
 
 On Nostalgia, FT4232H `01691`/A at 100 kHz completed two fresh `Connect`
-sessions and two fresh `Open` sessions against the externally activated
-Arm `0x5ba00477`/IR4 and Xilinx `0x14730093`/IR12 chain. AP1 IDR was
-`0x44770002`; component words at `0x80410ff0` through `0x80410ffc` were
-`0x0d`, `0x90`, `0x05`, and `0xb1`. Each owner closed successfully. Fresh
-sessions found the same initial AP1 CSW/TAR (`0x80000042`/`0`) and connected
-CTRL/STAT (`0xf0000000`). This exercises managed cleanup and repeated-session
-AP restoration; it does not independently measure power after closing the
-probe. No halt, target reset, or target-memory write was performed.
+sessions and two fresh `Open` sessions against the externally activated Arm
+`0x5ba00477`/IR4 and Xilinx `0x14730093`/IR12 chain. AP1 IDR was `0x44770002`;
+component words at `0x80410ff0` through `0x80410ffc` were `0x0d`, `0x90`,
+`0x05`, and `0xb1`. Each owner closed successfully. Fresh sessions found the
+same initial AP1 CSW/TAR (`0x80000042`/`0`) and connected CTRL/STAT
+(`0xf0000000`). This exercises managed cleanup and repeated-session AP
+restoration; it does not independently measure power after closing the probe. No
+halt, target reset, or target-memory write was performed.
 
 ## Choose between raw SWD and DAP
 
-Use `swd.Conn` when the application needs one explicit wire-protocol
-transaction or is bringing up an SWD path. Call `Connect` before register
-access and `Release` before closing the wire. `Connect` returns DPIDR, keeps
-inherited ORUNDETECT or tries to enable it, and records whether the setting was
-inherited. `Release` restores only a change made by that connection and can be
-retried. A register operation returns WAIT, FAULT, parity, and protocol errors
-without replaying the requested transaction. When a fixed response returns
-WAIT, the connection clears STICKYORUN before returning it.
-Use `Conn.NewBatch` for an ordered group of raw register operations. Queue each
-operation with the direction-specific DP or AP method, call `Commit`, then read
-each direction-specific result. The batch uses the connection's established
-response grammar. In simple mode it sends one request at a time; in overrun
-mode it packs complete fixed frames when the wire reports room for more than
-one. A transport failure makes the operations in that physical chunk
-indeterminate and leaves later chunks unsent. WAIT and FAULT still stop the
-batch, and the connection never replays a requested operation.
-The [SWD protocol guide](protocols/swd.md) describes the wire transaction and
-the specification details which are easiest to misread.
+Use `swd.Conn` when the application needs one explicit wire-protocol transaction
+or is bringing up an SWD path. Call `Connect` before register access and
+`Release` before closing the wire. `Connect` returns DPIDR, keeps inherited
+ORUNDETECT or tries to enable it, and records whether the setting was inherited.
+`Release` restores only a change made by that connection and can be retried. A
+register operation returns WAIT, FAULT, parity, and protocol errors without
+replaying the requested transaction. When a fixed response returns WAIT, the
+connection clears STICKYORUN before returning it. Use `Conn.NewBatch` for an
+ordered group of raw register operations. Queue each operation with the
+direction-specific DP or AP method, call `Commit`, then read each
+direction-specific result. The batch uses the connection's established response
+grammar. In simple mode it sends one request at a time; in overrun mode it packs
+complete fixed frames when the wire reports room for more than one. A transport
+failure makes the operations in that physical chunk indeterminate and leaves
+later chunks unsent. WAIT and FAULT still stop the batch, and the connection
+never replays a requested operation. The [SWD protocol guide](protocols/swd.md)
+describes the wire transaction and the specification details which are easiest
+to misread.
 
 Use `dap.DebugPort` when the application needs debug-port identity, power
-ownership, bank selection, or AP access. Call `Connect` before AP operations
-and `Release` afterward. `DebugPort.Connect` also connects its underlying
-SWD stream, and `DebugPort.Release` releases it after restoring DAP state;
-do not connect or release that stream separately. Give the debug port
-exclusive, serialized use of its `swd.Conn`; direct transfers on that
-connection can invalidate cached DAP state. DP, AP, transaction, and MEM-AP
-operations require an active connection. `ReadDP` and `WriteDP` take logical
-ADIv5 register names and manage DPBANKSEL without exposing a current-bank
-API. `NewAPSel` constructs an ADIv5 index; `APAt` constructs an ADIv6 base-address
-selector. Both return `APSel` values; the zero `APSel` remains invalid.
-`APSel.Address` combines a selector with an eight-bit ADIv5 or twelve-bit
-ADIv6 register offset; the
+ownership, bank selection, or AP access. Call `Connect` before AP operations and
+`Release` afterward. `DebugPort.Connect` also connects its underlying SWD
+stream, and `DebugPort.Release` releases it after restoring DAP state; do not
+connect or release that stream separately. Give the debug port exclusive,
+serialized use of its `swd.Conn`; direct transfers on that connection can
+invalidate cached DAP state. DP, AP, transaction, and MEM-AP operations require
+an active connection. `ReadDP` and `WriteDP` take logical ADIv5 register names
+and manage DPBANKSEL without exposing a current-bank API. `NewAPSel` constructs
+an ADIv5 index; `APAt` constructs an ADIv6 base-address selector. Both return
+`APSel` values; the zero `APSel` remains invalid. `APSel.Address` combines a
+selector with an eight-bit ADIv5 or twelve-bit ADIv6 register offset; the
 resulting `APAddress` also has an invalid zero value. `ReadAPIDR` reads and
-decodes the common read-only AP identity. `EnumerateAPs` scans every ADIv5
-AP selector without reading class-specific registers. Raw AP access rejects
-an invalid or unaligned address before traffic. Use it only when the caller
-understands the selected AP class and will restore any state the access
-changes. A raw MEM-AP data-register write can write target memory. This
-layer owns AP read and write completion. Construct an SWD binding with
+decodes the common read-only AP identity. `EnumerateAPs` scans every ADIv5 AP
+selector without reading class-specific registers. Raw AP access rejects an
+invalid or unaligned address before traffic. Use it only when the caller
+understands the selected AP class and will restore any state the access changes.
+A raw MEM-AP data-register write can write target memory. This layer owns AP
+read and write completion. Construct an SWD binding with
 `dap.NewDebugPort(dap.SWDP(conn))`; the operation context bounds WAIT retry.
 Adding `dap.WithMaxWaits(1)` stops at the first clean WAIT, reporting both
-`dap.ErrWait` and its underlying `swd.ErrWait`. `SetMaxWaits` changes the
-limit before `Connect` or after a successful `Release`; it rejects the
-change while the port is connected or cleanup is pending. The count is per
-physical request and does not bound host I/O. A raw AP read or write which
-completes, or might have completed, invalidates existing `MemAP` values. If
-the limit or context ends after an AP WAIT, `dap.DebugPort` issues DAPABORT;
-existing `dap.MemAP` values reject further reads, though `dap.MemAP.Release`
-still attempts to restore their saved state.
+`dap.ErrWait` and its underlying `swd.ErrWait`. `SetMaxWaits` changes the limit
+before `Connect` or after a successful `Release`; it rejects the change while
+the port is connected or cleanup is pending. The count is per physical request
+and does not bound host I/O. A raw AP read or write which completes, or might
+have completed, invalidates existing `MemAP` values. If the limit or context
+ends after an AP WAIT, `dap.DebugPort` issues DAPABORT; existing `dap.MemAP`
+values reject further reads, though `dap.MemAP.Release` still attempts to
+restore their saved state.
 
 For an explicit JTAG composition, pass `dap.JTAGDP(chain, tapIndex)` instead.
 The chain supplies the complete expected layout; the index is zero-based and
@@ -671,33 +665,31 @@ replaying them and checks CTRL/STAT after each AP operation. It temporarily
 disables inherited ORUNDETECT and restores it during release. Release MEM-APs,
 then DAP and its chain, before closing the probe. Independent recovery defaults
 to thirty seconds for JTAG, versus one second for SWD; use
-`dap.WithCleanupTimeout` for slower clocks. The [DAP guide](ports/dap.md)
-shows the binding and the read-only FTDI bench procedure. `armdebug.JTAGDP`
-composes these same owners through the managed path above.
+`dap.WithCleanupTimeout` for slower clocks. The [DAP guide](ports/dap.md) shows
+the binding and the read-only FTDI bench procedure. `armdebug.JTAGDP` composes
+these same owners through the managed path above.
 
 The SWD connection reads DPIDR, clears supported sticky conditions with ABORT,
 establishes bank zero through RDBUFF, and establishes its response grammar
-before DAP requests power.
-Debug-port CTRL/STAT writes must preserve ORUNDETECT. DAP settles a new SELECT
-through RDBUFF before sending AP traffic. If WAIT cleanup or a later retry
-leaves framing unknown, `dap.DebugPort` invalidates those values and later DP
-and AP calls stop before sending traffic.
-`Connect` performs bounded cleanup after failed setup. When cleanup succeeds,
-the debug port can connect again immediately. If cleanup also fails, or if
-`Release` fails, ordinary DP, AP, and MEM-AP operations remain blocked. Call
+before DAP requests power. Debug-port CTRL/STAT writes must preserve ORUNDETECT.
+DAP settles a new SELECT through RDBUFF before sending AP traffic. If WAIT
+cleanup or a later retry leaves framing unknown, `dap.DebugPort` invalidates
+those values and later DP and AP calls stop before sending traffic. `Connect`
+performs bounded cleanup after failed setup. When cleanup succeeds, the debug
+port can connect again immediately. If cleanup also fails, or if `Release`
+fails, ordinary DP, AP, and MEM-AP operations remain blocked. Call
 `MemAP.Release` before retrying `DebugPort.Release`; cleanup re-enters SWD when
-necessary and verifies that DPIDR still identifies the connection being
-cleaned up before restoring state. `DebugPort.Release` settles its final
-bank-zero SELECT through RDBUFF, releases power, and restores connection-owned
-ORUNDETECT before returning success.
-The [DAP guide](ports/dap.md) describes the ADIv5 register protocol behind
-that lifecycle.
+necessary and verifies that DPIDR still identifies the connection being cleaned
+up before restoring state. `DebugPort.Release` settles its final bank-zero
+SELECT through RDBUFF, releases power, and restores connection-owned ORUNDETECT
+before returning success. The [DAP guide](ports/dap.md) describes the ADIv5
+register protocol behind that lifecycle.
 
 Use `DebugPort.NewTxn` when several DP or AP accesses need ordered results.
 `Commit` validates the complete queue, settles an earlier immediate DP write if
-necessary, then lets the SWD connection pack fixed frames within its wire
-limit. Sticky-exempt DPIDR, CTRL/STAT, and ABORT operations remain separate so
-an earlier WAIT or FAULT cannot hide behind one of them. DP writes and AP
+necessary, then lets the SWD connection pack fixed frames within its wire limit.
+Sticky-exempt DPIDR, CTRL/STAT, and ABORT operations remain separate so an
+earlier WAIT or FAULT cannot hide behind one of them. DP writes and AP
 operations settle through RDBUFF before reporting success. Queued reads return a
 `ReadResult`, whose `Value` method returns the data. Queued writes return a
 `WriteResult`, whose `Err` method reports completion without a placeholder
@@ -719,11 +711,10 @@ same configured WAIT policy as the scalar and raw DAP operations. If selection,
 framing, or cleanup becomes uncertain, repair is required. A FAULT returns the
 contiguous prefix read before the fault; a configured WAIT limit, cancellation,
 and transport or protocol failures can also interrupt the read. The rest of the
-destination remains unchanged. No auto-incrementing word run crosses a 1 KiB
-TAR boundary; unaligned edges still require the MEM-AP to accept byte or
-halfword CSW sizes.
-If the MEM-AP does not accept single address increment, `ReadBlock` and
-`WriteBlock` write TAR before each word.
+destination remains unchanged. No auto-incrementing word run crosses a 1 KiB TAR
+boundary; unaligned edges still require the MEM-AP to accept byte or halfword
+CSW sizes. If the MEM-AP does not accept single address increment, `ReadBlock`
+and `WriteBlock` write TAR before each word.
 
 `MemAP.WriteBlock` accepts the same ranges and uses the same geometry. Its
 returned prefix includes only chunks whose RDBUFF completion requests were
@@ -746,17 +737,17 @@ CSW, then release and reconnect the debug port.
 
 Use `target/cortexm` when the desired result is processor identity. It accepts
 the word-reader behavior supplied by `dap.MemAP`, so target code remains
-independent of the host, adapter, and wire protocol. `cortexm.Acquire` also
-uses `WriteWord` to enable Cortex-M0 halting debug. Use `ReadRegister` for
-halted core registers and `WriteRegister` for intentional changes. The target
-tracks transfer completion but does not roll back writes. Release it before
-its memory owner and retain both after failed target restoration. See
+independent of the host, adapter, and wire protocol. `cortexm.Acquire` also uses
+`WriteWord` to enable Cortex-M0 halting debug. Use `ReadRegister` for halted
+core registers and `WriteRegister` for intentional changes. The target tracks
+transfer completion but does not roll back writes. Release it before its memory
+owner and retain both after failed target restoration. See
 [Cortex-M control](cortexm.md) for the full composition and effects.
 
 ## Release in reverse order
 
-A complete Cortex-M identity composition acquires and releases state in one
-of these orders:
+A complete Cortex-M identity composition acquires and releases state in one of
+these orders:
 
 ```text
 acquire: USB device → FTDI channel → debug port (enters SWD) → MEM-AP
@@ -770,13 +761,13 @@ release: MEM-AP → debug port → CMSIS-DAP session
 ```
 
 Use a fresh, bounded cleanup context if the operation context may already be
-canceled. Join cleanup errors with the operation error so a restoration or
-close failure is not lost.
+canceled. Join cleanup errors with the operation error so a restoration or close
+failure is not lost.
 
 `Enumerator.Open` cleans up native resources before returning an error.
 `ftdi.Open` attempts cleanup, then leaves the original device with the caller
-for the `Device.Close` described above. A successfully returned value belongs
-to the caller until its documented release or close method succeeds.
+for the `Device.Close` described above. A successfully returned value belongs to
+the caller until its documented release or close method succeeds.
 
 ## Identify a debug component
 
@@ -801,12 +792,12 @@ fmt.Printf("class=%#x part=%#x\n", component.Class(), component.Part())
 This borrows the same memory client and adds no cleanup owner. An advertised
 address still requires component power and access permissions. A caller that
 already knows another accessible identification page can pass that address
-directly to `coresight.Identify`.
-Use `coresight.Walk` with explicit `WalkLimits` to follow ROM entries. Retain
-partial visits when it returns an error, and leave power-domain children
-skipped until access has been established separately. The same memory owner
-retains cleanup responsibility. The [component guide](coresight.md) describes
-entry decoding, traversal bounds, power metadata, and incomplete results.
+directly to `coresight.Identify`. Use `coresight.Walk` with explicit
+`WalkLimits` to follow ROM entries. Retain partial visits when it returns an
+error, and leave power-domain children skipped until access has been established
+separately. The same memory owner retains cleanup responsibility. The
+[component guide](coresight.md) describes entry decoding, traversal bounds,
+power metadata, and incomplete results.
 
 ## Keep policy at the application edge
 
@@ -823,9 +814,9 @@ Libraries own reusable hardware and protocol behavior. USB requests, MPSSE
 commands, SWD frames, AP posted reads, MEM-AP register restoration, and CPUID
 decoding should not be recreated in an application.
 
-If a needed capability is absent, add it at the layer that can express and
-test it as a reusable mechanism. Do not hide a second hardware stack in an
-example, an `ost` subcommand, or another application's command package.
+If a needed capability is absent, add it at the layer that can express and test
+it as a reusable mechanism. Do not hide a second hardware stack in an example,
+an `ost` subcommand, or another application's command package.
 
 ## Guidance for coding agents
 
@@ -841,5 +832,5 @@ Before writing a hardware composition:
    reimplementing lower-level framing in application code.
 
 The [architecture guide](architecture.md) is the authority for current package
-ownership. The [examples](../examples) are the authority for compact,
-executable composition.
+ownership. The [examples](../examples) are the authority for compact, executable
+composition.
