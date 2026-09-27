@@ -42,6 +42,7 @@ type Target struct {
 	resumeUncertain bool
 	registerPending bool
 	registerLost    bool
+	step            stepPhase
 }
 
 // Acquire enables Cortex-M0 halting debug without requesting a halt. It reads
@@ -119,7 +120,9 @@ func (t *Target) Identity() Identity {
 // a completed resume. An unconfirmed control change, or a new halt while
 // restoring disabled debug, can prevent cleanup until execution resumes.
 // Pending register transfers must settle first. Reset or loss of Debug state
-// during a transfer prevents automatic cleanup.
+// during a transfer prevents automatic cleanup. An accepted step must return
+// halted before stepping can be disabled; an unconfirmed step launch prevents
+// automatic cleanup. A competing debug event leaves its halt unowned.
 func (t *Target) Release(ctx context.Context) error {
 	if t == nil || t.memory == nil {
 		return nil
@@ -130,6 +133,11 @@ func (t *Target) Release(ctx context.Context) error {
 	}
 	if t.registerPending {
 		if err := t.waitRegister(ctx); err != nil {
+			return err
+		}
+	}
+	if t.step != stepIdle {
+		if err := t.settleStep(ctx); err != nil {
 			return err
 		}
 	}

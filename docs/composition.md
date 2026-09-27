@@ -37,6 +37,7 @@ data-register write can write target memory.
 | Inspect ROM entries or a bounded component hierarchy | `Component.ROMTable`, `ROMTable.ReadEntry`, `coresight.Walk` | `examples/simple/coresight-info -walk` |
 | Identify a Cortex-M through any compatible word reader | `cortexm.Identify` | `examples/simple/cortexm-info` |
 | Acquire, halt, inspect registers, and resume a Cortex-M0 | `cortexm.Acquire`, `Target.Halt`, `Target.ReadRegister`, `Target.Resume`, `Target.Release` | `examples/simple/cortexm-control` |
+| Step a Cortex-M0 from an owned halt | `Target.Step` | [Stepping](cortexm.md#stepping) |
 | Read or write a halted Cortex-M0 register | `Target.ReadRegister`, `Target.WriteRegister` | [Register reads](cortexm.md#register-reads), [writes](cortexm.md#register-writes) |
 | Test SWD and DAP behavior without hardware | `swd/sim`, `dap/sim` | Package tests |
 
