@@ -104,7 +104,7 @@ operation.
 Instructions, exception entry, elapsed time, and peripheral effects cannot be
 undone. Behavioral tests cover immediate and delayed completion, competing
 flags, cancellation, ignored writes, partial failures, and cleanup retries.
-Physical stepping has not yet been exercised.
+The [step bench](#step-bench) records physical instruction checks.
 
 ## Register reads
 
@@ -180,12 +180,12 @@ err = errors.Join(err, cleanupErr)
 
 The [control example](../examples/simple/cortexm-control/main.go) selects one
 probe and AP, halts, prints PC, SP, R0, and R4, resumes, then releases the
-target before closing the
-connection. It requires explicit consent to control execution:
+target before closing the connection. With `-step`, it also steps once and
+prints the resulting PC. It requires explicit consent to control execution:
 
 ```sh
 go run ./examples/simple/cortexm-control \
-  -provider cmsisdap -serial SERIAL -ap 0 -clock 1000000 -allow-control
+  -provider cmsisdap -serial SERIAL -ap 0 -clock 1000000 -allow-control -step
 ```
 
 Hardware-independent tests model DHCSR control and execution state, including
@@ -279,3 +279,40 @@ the temporary PC or stack values. Writes to the other general registers and LR,
 process-stack selection, inherited halts, and failure cleanup have behavioral
 test coverage only. XPSR writes, stepping, reset, and state after Arm owner
 close were not tested.
+
+### Step bench
+
+`TestHILCortexM0Step` uses the same micro:bit and verified counter firmware,
+with a separate gate for stepping:
+
+```sh
+OSTIOLE_CORTEXM_HIL_CONTROL=1 \
+OSTIOLE_CORTEXM_HIL_STEP=1 \
+OSTIOLE_CORTEXM_HIL_PROGRAM=sha256:ee294cc06ab6e8228161b49506675b065c0148b26421cf1f83c8e45e35cd4e5d \
+go test -tags integration ./target/cortexm -run '^TestHILCortexM0Step$' -count=1 -v
+```
+
+On September 26, 2026, two fresh sessions passed on Nostalgia through
+CMSIS-DAP, 1 MHz SWD, and AP0, with CPUID `0x410cc200`. Each checked twelve
+consecutive steps through the counter loop:
+
+- At PC `0xc6`, `adds r0, #1` advanced PC to `0xc8` and incremented R0,
+  leaving RAM unchanged.
+- At PC `0xc8`, `str r0, [r1]` advanced PC to `0xca` and copied R0 to the
+  counter at `0x20000000`, leaving R0 unchanged.
+- At PC `0xca`, the branch returned PC to `0xc6`, leaving R0 and RAM unchanged.
+
+After every step, `Halted` confirmed Debug state with stepping and interrupt
+masking disabled. The counter then remained unchanged across ten samples
+20 milliseconds apart while halted, and advanced after resume. Each session
+halted again, checked one further step, and released from that halt. The
+counter advanced after release. DHCSR was `0x01000000` before acquisition and
+after release in both sessions; initially disabled debug and running state
+were restored. Both target releases and Arm owner closes completed. The
+control example also completed a step with `-allow-control -step`.
+
+Stepping's register and memory effects were intentional and were not rolled
+back. The firmware disables configurable interrupts, so these runs do not
+establish exception entry, competing debug events, sleeping instructions, or
+failure cleanup on hardware. Those control failures have behavioral coverage;
+state after Arm owner close was not measured.

@@ -27,7 +27,8 @@ func run() error {
 	provider := flag.String("provider", "", "required probe provider")
 	serial := flag.String("serial", "", "required probe serial")
 	ap := flag.Int("ap", -1, "required MEM-AP index (0..255)")
-	allow := flag.Bool("allow-control", false, "allow enabling debug, halting, and resuming the processor")
+	allow := flag.Bool("allow-control", false, "allow enabling debug, halting, stepping, and resuming the processor")
+	step := flag.Bool("step", false, "perform one architectural step while halted")
 	clock := flag.Uint64("clock", 1_000_000, "maximum SWD clock in Hz")
 	flag.Parse()
 	if *clock < 1000 || *clock > 1<<32-1 {
@@ -37,10 +38,10 @@ func run() error {
 		return errors.New("require -allow-control, -provider, -serial, and -ap 0..255")
 	}
 	selection := discover.Selection{Provider: discover.ProviderID(*provider), Serial: *serial}
-	return runControl(selection, dap.NewAPSel(uint8(*ap)), uint32(*clock))
+	return runControl(selection, dap.NewAPSel(uint8(*ap)), uint32(*clock), *step)
 }
 
-func runControl(selection discover.Selection, ap dap.APSel, clock uint32) (err error) {
+func runControl(selection discover.Selection, ap dap.APSel, clock uint32, step bool) (err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	c, err := armdebug.Open(ctx, selection, armdebug.Config{
@@ -61,10 +62,10 @@ func runControl(selection discover.Selection, ap dap.APSel, clock uint32) (err e
 	if err != nil {
 		return err
 	}
-	return control(ctx, core)
+	return control(ctx, core, step)
 }
 
-func control(ctx context.Context, core *cortexm.Target) error {
+func control(ctx context.Context, core *cortexm.Target, step bool) error {
 	if err := core.Halt(ctx); err != nil {
 		return err
 	}
@@ -78,6 +79,16 @@ func control(ctx context.Context, core *cortexm.Target) error {
 			return err
 		}
 		fmt.Printf("%s=%#08x\n", reg.name, value)
+	}
+	if step {
+		if err := core.Step(ctx); err != nil {
+			return err
+		}
+		pc, err := core.ReadRegister(ctx, cortexm.PC)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("stepped; PC=%#08x\n", pc)
 	}
 	if err := core.Resume(ctx); err != nil {
 		return err
