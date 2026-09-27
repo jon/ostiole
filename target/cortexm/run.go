@@ -15,8 +15,6 @@ func (t *Target) Halt(ctx context.Context) error {
 	if err := t.active(ctx); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(ctx, controlTimeout)
-	defer cancel()
 	value, err := t.readControl(ctx)
 	if err != nil || value&sHalt != 0 {
 		return err
@@ -36,8 +34,6 @@ func (t *Target) Resume(ctx context.Context) error {
 	if !t.haltOwned {
 		return errors.New("cortexm: no owned halt to resume")
 	}
-	ctx, cancel := context.WithTimeout(ctx, controlTimeout)
-	defer cancel()
 	if err := t.resume(ctx); err != nil {
 		return err
 	}
@@ -50,8 +46,6 @@ func (t *Target) Halted(ctx context.Context) (bool, error) {
 	if err := t.active(ctx); err != nil {
 		return false, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, controlTimeout)
-	defer cancel()
 	value, err := t.readControl(ctx)
 	return value&sHalt != 0, err
 }

@@ -10,7 +10,7 @@ import (
 // requires bit zero clear and does not change Thumb state. Invalid identifiers
 // and values are rejected before traffic. Release does not undo register writes.
 //
-// The transfer and cleanup bounds are those of ReadRegister. An error after
+// The transfer and cleanup rules are those of ReadRegister. An error after
 // staging data leaves only Release available; the register may have changed
 // if selection was attempted. Release settles that transfer without replaying
 // it. Callers own the consequences when execution resumes.
@@ -21,8 +21,6 @@ func (t *Target) WriteRegister(ctx context.Context, reg Register, value uint32) 
 	if err := t.active(ctx); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(ctx, controlTimeout)
-	defer cancel()
 	if err := t.waitRegister(ctx); err != nil {
 		return err
 	}
