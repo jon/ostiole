@@ -7,9 +7,9 @@ execute repository code as root.
 
 ## Grant device access
 
-Give the interactive user permission to open only the intended USB products.
-For the FT232H used by the examples, a system using systemd-logind can install
-this udev rule as `/etc/udev/rules.d/70-ostiole-ftdi.rules`:
+Give the interactive user permission to open only the intended USB products. For
+the FT232H used by the examples, a system using systemd-logind can install this
+udev rule as `/etc/udev/rules.d/70-ostiole-ftdi.rules`:
 
 ```udev
 SUBSYSTEM=="usb", ATTR{idVendor}=="0403", ATTR{idProduct}=="6014", MODE="0660", TAG+="uaccess"
@@ -30,10 +30,10 @@ Add rules only for the exact USB products the bench uses.
 
 ## Release a bound FTDI interface
 
-Device-node permission is necessary but not sufficient when a kernel driver
-owns the interface. Ostiole does not currently detach kernel drivers, and
-`ftdi_sio` normally binds the FT232H. In that state, opening the usbfs node
-succeeds but claiming the interface returns `EBUSY`.
+Device-node permission is necessary but not sufficient when a kernel driver owns
+the interface. Ostiole does not currently detach kernel drivers, and `ftdi_sio`
+normally binds the FT232H. In that state, opening the usbfs node succeeds but
+claiming the interface returns `EBUSY`.
 
 Before releasing a driver, confirm that no serial process is using the exact
 adapter. `go run ./cmd/ost ftdi list` reports its USB bus and address. Query the

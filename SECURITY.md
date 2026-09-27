@@ -7,9 +7,9 @@ private vulnerability-reporting form when it is available. Otherwise, email
 [jon@jon.dev](mailto:jon@jon.dev) with the affected revision, enough detail to
 reproduce or understand the issue, and any relevant host or hardware context.
 
-Do not include live credentials, private keys, or other people's sensitive
-data in a report. Jon will coordinate disclosure and any necessary fix with
-the reporter.
+Do not include live credentials, private keys, or other people's sensitive data
+in a report. Jon will coordinate disclosure and any necessary fix with the
+reporter.
 
 ## Supported versions
 

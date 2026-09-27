@@ -6,12 +6,18 @@ defines the command protocol, and its [USB firmware guidance][usb] defines the
 v2 USB interface. This note records the narrower host boundary Ostiole
 implements.
 
-[commands]: https://arm-software.github.io/CMSIS-DAP/latest/group__DAP__Info.html
-[usb]: https://arm-software.github.io/CMSIS-DAP/latest/dap_firmware.html#dap_bulk_usb
-[connect]: https://arm-software.github.io/CMSIS-DAP/latest/group__DAP__Connect.html
-[clock]: https://arm-software.github.io/CMSIS-DAP/latest/group__DAP__SWJ__Clock.html
-[sequence]: https://arm-software.github.io/CMSIS-DAP/latest/group__DAP__SWD__Sequence.html
-[disconnect]: https://arm-software.github.io/CMSIS-DAP/latest/group__DAP__Disconnect.html
+[commands]:
+  https://arm-software.github.io/CMSIS-DAP/latest/group__DAP__Info.html
+[usb]:
+  https://arm-software.github.io/CMSIS-DAP/latest/dap_firmware.html#dap_bulk_usb
+[connect]:
+  https://arm-software.github.io/CMSIS-DAP/latest/group__DAP__Connect.html
+[clock]:
+  https://arm-software.github.io/CMSIS-DAP/latest/group__DAP__SWJ__Clock.html
+[sequence]:
+  https://arm-software.github.io/CMSIS-DAP/latest/group__DAP__SWD__Sequence.html
+[disconnect]:
+  https://arm-software.github.io/CMSIS-DAP/latest/group__DAP__Disconnect.html
 
 ## Discovery and interface selection
 
@@ -26,9 +32,9 @@ The application still selects one complete `usb.DeviceInfo`. It may explicitly
 select a known composite attachment which is absent from `Candidates`.
 `cmsisdap.Open` accepts the selected device only when its active descriptors
 contain exactly one vendor-specific `ff/00/00` alternate. The endpoints must
-appear in the order required by the v2 interface: bulk OUT for commands, bulk
-IN for responses, and optionally a distinct bulk IN endpoint for SWO. The
-current package records but does not use the optional SWO endpoint.
+appear in the order required by the v2 interface: bulk OUT for commands, bulk IN
+for responses, and optionally a distinct bulk IN endpoint for SWO. The current
+package records but does not use the optional SWO endpoint.
 
 An HID interface is CMSIS-DAP v1 rather than v2. `Open` rejects it with
 `ErrNoV2Interface`; it does not fall back to interrupt transfers.
@@ -38,9 +44,9 @@ An HID interface is CMSIS-DAP v1 rather than v2. `Open` rejects it with
 A successful `Open` claims and selects the command interface, resolves the
 active endpoints, and sends only `DAP_Info` commands. It reads packet size,
 packet count, capabilities, protocol version, vendor, product, serial, and
-firmware version. A missing product or serial uses the corresponding USB
-string. The USB package does not currently expose a manufacturer string, so a
-missing CMSIS-DAP vendor remains empty.
+firmware version. A missing product or serial uses the corresponding USB string.
+The USB package does not currently expose a manufacturer string, so a missing
+CMSIS-DAP vendor remains empty.
 
 The packet-size query begins with the active bulk IN maximum packet size as a
 bootstrap response capacity. Once the probe reports its command packet size,
@@ -63,30 +69,28 @@ clock, or touch a target.
 
 ## SWD connection and sequences
 
-`WithSWD` during open or `ConfigureSWD` afterward first requires protocol 1.2
-or later and the SWD capability reported by `DAP_Info`. It sends
+`WithSWD` during open or `ConfigureSWD` afterward first requires protocol 1.2 or
+later and the SWD capability reported by `DAP_Info`. It sends
 [DAP_Connect][connect] with port 1, then sends the caller's requested maximum
 frequency as the little-endian hertz value in [DAP_SWJ_Clock][clock]. A
-successful clock response says that the request was accepted; CMSIS-DAP does
-not report the rate the probe attained. Reconfiguring an active session
-disconnects it first.
+successful clock response says that the request was accepted; CMSIS-DAP does not
+report the rate the probe attained. Reconfiguring an active session disconnects
+it first.
 
-The configured session implements `swd.Wire` with
-[DAP_SWD_Sequence][sequence], which is available in CMSIS-DAP 1.2 and later.
-For each set direction bit, the probe drives SWDIO; for each clear bit, it
-samples SWDIO. Each run carries at most 64 cycles, with 64 encoded as zero;
-data is packed least-significant bit first. Output bytes are absent from input
-sequences, so a caller's output bits are never driven while the target owns
-SWDIO.
+The configured session implements `swd.Wire` with [DAP_SWD_Sequence][sequence],
+which is available in CMSIS-DAP 1.2 and later. For each set direction bit, the
+probe drives SWDIO; for each clear bit, it samples SWDIO. Each run carries at
+most 64 cycles, with 64 encoded as zero; data is packed least-significant bit
+first. Output bytes are absent from input sequences, so a caller's output bits
+are never driven while the target owns SWDIO.
 
 One command can contain several runs. The driver keeps both its request and
-expected response within the negotiated packet size, then starts another
-command when either side is full or the 255-sequence count is exhausted. It
-does not use the reported packet count to pipeline commands. One logical
-`SWDIO` call may therefore complete several command exchanges, in order, up to
-the driver's conservative 16,384-bit limit. A failure stops at that packet and
-no command is replayed; the probe may already have clocked the prefix sent in
-earlier packets.
+expected response within the negotiated packet size, then starts another command
+when either side is full or the 255-sequence count is exhausted. It does not use
+the reported packet count to pipeline commands. One logical `SWDIO` call may
+therefore complete several command exchanges, in order, up to the driver's
+conservative 16,384-bit limit. A failure stops at that packet and no command is
+replayed; the probe may already have clocked the prefix sent in earlier packets.
 
 When the probe returns a complete `DAP_ERROR`, `SWDIO` returns an error naming
 that packet but leaves the command stream synchronized. A response with the
@@ -100,38 +104,38 @@ retains ownership for another attempt. After failed SWD configuration, `Open`
 makes another bounded disconnect attempt; if synchronized cleanup remains
 pending, the caller receives the non-nil session with the setup error and
 retries `Session.Close`. After a poisoned exchange, `Close` reports the
-abandoned active port and continues USB cleanup without sending another
-command. Device close still runs once and its result is cached.
+abandoned active port and continues USB cleanup without sending another command.
+Device close still runs once and its result is cached.
 
 ## Bench observation
 
 The `0d28:0204` BBC micro:bit attached to the macOS bench identifies itself as
 `BBC micro:bit CMSIS-DAP` and exposes the v2 bulk command interface. The HIL
 selected it from the product-string shortlist, opened and closed one metadata
-session, then opened a second. Both sessions reported protocol `2.1.0`,
-firmware `0257`, packet size 64, packet count 5, and capabilities `0x11`. They
-sent no `DAP_Connect` or target traffic.
+session, then opened a second. Both sessions reported protocol `2.1.0`, firmware
+`0257`, packet size 64, packet count 5, and capabilities `0x11`. They sent no
+`DAP_Connect` or target traffic.
 
 Two fresh read-only sessions selected the same serial and requested a 100 kHz
 maximum clock. One called `ConfigureSWD` after metadata-only open; the other
 used `WithSWD`. Both returned DPIDR `0x0bb11477`, AP0 IDR `0x04770021`, CPUID
 `0x410cc200`, and DHCSR `0x01000001`. Each saved and restored AP0 CSW and TAR,
-released the debug port, disconnected the CMSIS-DAP session, and reproduced
-the identities and `DHCSR.S_HALT` state after reopen. Each session sent 20
-packed SWD frames in 57 `SWDIO` calls.
+released the debug port, disconnected the CMSIS-DAP session, and reproduced the
+identities and `DHCSR.S_HALT` state after reopen. Each session sent 20 packed
+SWD frames in 57 `SWDIO` calls.
 
 OpenOCD 0.12.0 independently selected the same serial and v2 bulk interface at
 100 kHz. It returned the same DPIDR and AP0 IDR and identified the target as
-Cortex-M0. These observations cover one probe, one target, read-only access,
-and restoration of the session and target state. They do not establish the
-clock the probe attained or validate JTAG or SWO.
+Cortex-M0. These observations cover one probe, one target, read-only access, and
+restoration of the session and target state. They do not establish the clock the
+probe attained or validate JTAG or SWO.
 
 The DAPLink `0d28:0204` attached to the Linux bench identifies itself as
-`DAPLink CMSIS-DAP`, but its command interface is HID. Its other
-vendor-specific interface has subclass 3 and no endpoints. The product-string
-inventory reported its product and serial. The HIL selected it by serial, and
-the v2 opener rejected it before claiming an interface. No CMSIS-DAP command
-or target traffic was sent.
+`DAPLink CMSIS-DAP`, but its command interface is HID. Its other vendor-specific
+interface has subclass 3 and no endpoints. The product-string inventory reported
+its product and serial. The HIL selected it by serial, and the v2 opener
+rejected it before claiming an interface. No CMSIS-DAP command or target traffic
+was sent.
 
 The Linux bench still exercises only passive v1 rejection.
 
@@ -140,10 +144,9 @@ The Linux bench still exercises only passive v1 rejection.
 The nRF51 on the micro:bit requires at least 125 kHz when entering debug
 interface mode after power-on. Nordic also specifies at least 150 SWCLK cycles
 with SWDIO high to guarantee that the DAP captures 50 cycles while its power
-domain starts; see section 11.1.2 of the
-[nRF51 reference manual](https://docs-be.nordicsemi.com/bundle/nRF51-Series/raw/resource/enus/nRF51_RM_v3.0.1.pdf).
-A slower clock can work once another debugger has activated the interface.
-The CMSIS-DAP driver accepts the caller's clock ceiling; it does not know the
+domain starts; see section 11.1.2 of the [nRF51 reference manual][nrf51-manual].
+A slower clock can work once another debugger has activated the interface. The
+CMSIS-DAP driver accepts the caller's clock ceiling; it does not know the
 target's startup requirements or silently raise that ceiling.
 
 On Nostalgia, Ostiole connected first after a physical micro:bit replug at 1 MHz
@@ -166,6 +169,9 @@ go test -tags integration ./cmsisdap \
 For a startup check, physically unplug/replug before running the command and
 leave other debuggers stopped. Reopening a session alone does not reproduce
 power-on state. The earlier 100 kHz evidence above covers an active interface;
-it does not establish startup from power-on. The new result covers one board
-and firmware revision, with no measurement of the attained clock or guarantee
-of target-specific activation timing on other devices.
+it does not establish startup from power-on. The new result covers one board and
+firmware revision, with no measurement of the attained clock or guarantee of
+target-specific activation timing on other devices.
+
+[nrf51-manual]:
+  https://docs-be.nordicsemi.com/bundle/nRF51-Series/raw/resource/enus/nRF51_RM_v3.0.1.pdf

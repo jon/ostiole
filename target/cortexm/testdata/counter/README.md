@@ -1,10 +1,10 @@
 # Cortex-M0 counter firmware
 
-This micro:bit v1 bench program increments the 32-bit word at `0x20000000`
-in a CPU loop. It disables interrupts and uses no peripheral or DMA engine.
-The vector table starts at flash address zero and uses the top of the first
-16 KiB of RAM for the initial stack pointer. Every unexpected exception loops
-without changing the counter.
+This micro:bit v1 bench program increments the 32-bit word at `0x20000000` in a
+CPU loop. It disables interrupts and uses no peripheral or DMA engine. The
+vector table starts at flash address zero and uses the top of the first 16 KiB
+of RAM for the initial stack pointer. Every unexpected exception loops without
+changing the counter.
 
 Build from the repository root with Clang's Arm assembler, LLD, and GNU Arm
 objcopy:
@@ -17,15 +17,15 @@ ld.lld -T target/cortexm/testdata/counter/counter.ld \
 arm-none-eabi-objcopy -O ihex /tmp/ostiole-counter.elf /tmp/ostiole-counter.hex
 ```
 
-Loading this image replaces the target program and resets the processor. It
-does not update the DAPLink interface firmware. Select the exact probe when
-using an external programmer. Programming is bench preparation, separate from
-the Ostiole [control test](../../../../docs/cortexm.md#hardware-procedure).
+Loading this image replaces the target program and resets the processor. It does
+not update the DAPLink interface firmware. Select the exact probe when using an
+external programmer. Programming is bench preparation, separate from the Ostiole
+[control test](../../../../docs/cortexm.md#hardware-procedure).
 
-For the selected micro:bit, use OpenOCD's CMSIS-DAP v2 transport and nRF51
-flash driver at 1 MHz. The nRF51 requires at least 125 kHz when entering
-debug interface mode after power-on; 100 kHz can work after another debugger
-has already activated it. See the
+For the selected micro:bit, use OpenOCD's CMSIS-DAP v2 transport and nRF51 flash
+driver at 1 MHz. The nRF51 requires at least 125 kHz when entering debug
+interface mode after power-on; 100 kHz can work after another debugger has
+already activated it. See the
 [startup evidence](../../../../docs/protocols/cmsisdap.md#nrf51-startup-clock).
 
 ```sh

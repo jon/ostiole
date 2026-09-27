@@ -18,6 +18,7 @@ env:
   GOLANGCI_LINT_VERSION: v2.12.2
   GOVULNCHECK_VERSION: v1.6.0
   MARKDOWNLINT_VERSION: 0.23.2
+  PRETTIER_VERSION: 3.9.9
   STATICCHECK_VERSION: v0.7.0
 
 jobs:
@@ -138,13 +139,14 @@ jobs:
           golangci-lint run --config .golangci.yml ./...
       - name: Run test-code lint
         run: golangci-lint run --config .golangci.tests.yml ./...
-      - name: Lint tracked Markdown
+      - name: Check tracked Markdown formatting and lint
         shell: bash
         run: |
           markdown_files=()
           while IFS= read -r -d '' file; do
             markdown_files+=("$file")
           done < <(git ls-files -z '*.md')
+          npx --yes "prettier@${PRETTIER_VERSION}" --check "${markdown_files[@]}"
           npx --yes "markdownlint-cli2@${MARKDOWNLINT_VERSION}" -- "${markdown_files[@]}"
       - name: Test Codex review signal
         run: bash .github/scripts/codex-review-signal_test.sh

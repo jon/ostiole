@@ -9,10 +9,13 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/parser"
+	"github.com/yuin/goldmark/text"
 )
 
 var inlineLink = regexp.MustCompile(`!?\[[^]]*\]\(([^)]+)\)`)
-var referenceLink = regexp.MustCompile(`^\s*\[[^]]+\]:\s*(\S+)`)
 
 type markdownTree struct {
 	repo          string
@@ -141,9 +144,11 @@ func markdownLinks(content string) []string {
 		for _, match := range inlineLink.FindAllStringSubmatch(line, -1) {
 			links = append(links, linkDestination(match[1]))
 		}
-		if match := referenceLink.FindStringSubmatch(line); match != nil {
-			links = append(links, linkDestination(match[1]))
-		}
+	}
+	context := parser.NewContext()
+	goldmark.DefaultParser().Parse(text.NewReader([]byte(content)), parser.WithContext(context))
+	for _, reference := range context.References() {
+		links = append(links, string(reference.Destination()))
 	}
 	return links
 }
