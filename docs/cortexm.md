@@ -23,7 +23,8 @@ resume it. `Halted` reads the current status without acquiring halt ownership.
 
 Release the target before its MEM-AP or Arm debug owner. `Release` restores
 the debug control changed by the target and leaves an inherited halt alone.
-Each operation is bounded to five seconds or the caller's earlier deadline.
+The caller controls operation cancellation and deadlines, including release.
+Without either, an operation may wait indefinitely for the processor.
 Failed acquisition attempts cleanup with a fresh five-second context; a
 non-nil target returned with an error must be retained for release retries.
 Once release starts, or a control write fails, ordinary target calls stop.
@@ -80,9 +81,9 @@ pc, err := core.ReadRegister(ctx, cortexm.PC)
 ```
 
 Reads write DCRSR and replace DCRDR; these transfer registers are not restored.
-The target waits for S_REGRDY before and after selecting a register, with the
-same five-second bound as control operations. It does not require observing
-S_REGRDY clear, since a transfer may finish before the first status read.
+The target waits for S_REGRDY before and after selecting a register, using the
+caller's context. It does not require observing S_REGRDY clear, since a transfer
+may finish before the first status read.
 
 A failed transfer leaves only `Release` available. Release waits for any
 pending transfer, including one found busy before selection, before resuming

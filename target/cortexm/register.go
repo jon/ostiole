@@ -43,11 +43,11 @@ const (
 )
 
 // ReadRegister reads a register while halted, without acquiring halt ownership.
-// It writes debug transfer registers and consumes DHCSR's sticky status. Calls
-// are bounded to five seconds or the caller's earlier deadline. An uncertain
-// transfer blocks ordinary calls; Release must settle it before changing debug
-// control. Loss of Debug state or reset during a pending transfer prevents
-// automatic cleanup. An error returns no valid register value.
+// It writes debug transfer registers and consumes DHCSR's sticky status. The
+// caller controls cancellation and deadlines. An uncertain transfer blocks
+// ordinary calls; Release must settle it before changing debug control. Loss
+// of Debug state or reset during a pending transfer prevents automatic cleanup.
+// An error returns no valid register value.
 func (t *Target) ReadRegister(ctx context.Context, reg Register) (uint32, error) {
 	if reg < R0 || reg > PSP {
 		return 0, errors.New("cortexm: invalid register")
@@ -55,8 +55,6 @@ func (t *Target) ReadRegister(ctx context.Context, reg Register) (uint32, error)
 	if err := t.active(ctx); err != nil {
 		return 0, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, controlTimeout)
-	defer cancel()
 	if err := t.waitRegister(ctx); err != nil {
 		return 0, err
 	}

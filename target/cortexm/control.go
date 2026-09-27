@@ -8,14 +8,14 @@ import (
 )
 
 const (
-	dhcsrAddress   = uint32(0xe000edf0)
-	debugKey       = uint32(0xa05f0000)
-	cDebugEnable   = uint32(1)
-	cHalt          = uint32(2)
-	cStep          = uint32(4)
-	cMaskInts      = uint32(8)
-	sHalt          = uint32(1 << 17)
-	controlTimeout = 5 * time.Second
+	dhcsrAddress          = uint32(0xe000edf0)
+	debugKey              = uint32(0xa05f0000)
+	cDebugEnable          = uint32(1)
+	cHalt                 = uint32(2)
+	cStep                 = uint32(4)
+	cMaskInts             = uint32(8)
+	sHalt                 = uint32(1 << 17)
+	acquireCleanupTimeout = 5 * time.Second
 )
 
 // Memory reads and writes aligned 32-bit target words. A successful write must
@@ -29,7 +29,8 @@ type Memory interface {
 // Target owns Cortex-M0 halting debug state through borrowed memory. Do not copy
 // it. Calls and all access to the underlying memory must be serialized. Keep
 // exclusive control of the processor's debug registers until Release succeeds,
-// then release the memory owner. The zero value is inactive.
+// then release the memory owner. The caller controls operation cancellation
+// and deadlines. The zero value is inactive.
 type Target struct {
 	memory          Memory
 	identity        Identity
@@ -48,10 +49,10 @@ type Target struct {
 // and an unfinished halt transition before writing. DHCSR reads consume its
 // sticky reset and instruction-retirement indicators.
 //
-// Calls are bounded to five seconds or the caller's earlier deadline. Failed
-// setup attempts restoration with an independent five-second context. A non-nil
-// target returned with an error retains cleanup obligations; only Release is
-// then available. Memory remains borrowed on every return.
+// The caller controls cancellation and deadlines. Failed setup attempts
+// restoration with an independent five-second context. A non-nil target
+// returned with an error retains cleanup obligations; only Release is then
+// available. Memory remains borrowed on every return.
 func Acquire(ctx context.Context, memory Memory) (*Target, error) {
 	if memory == nil {
 		return nil, errors.New("cortexm: nil memory")
@@ -59,8 +60,6 @@ func Acquire(ctx context.Context, memory Memory) (*Target, error) {
 	if err := liveContext(ctx); err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, controlTimeout)
-	defer cancel()
 	identity, err := Identify(ctx, memory)
 	if err != nil {
 		return nil, err
@@ -81,7 +80,7 @@ func Acquire(ctx context.Context, memory Memory) (*Target, error) {
 	}
 	t.saved = 0
 	if err := t.writeControl(ctx, cDebugEnable); err != nil {
-		cleanup, cancel := context.WithTimeout(context.Background(), controlTimeout)
+		cleanup, cancel := context.WithTimeout(context.Background(), acquireCleanupTimeout)
 		defer cancel()
 		if releaseErr := t.Release(cleanup); releaseErr != nil {
 			return t, errors.Join(err, releaseErr)
@@ -115,9 +114,9 @@ func (t *Target) Identity() Identity {
 // Release restores the inherited debug control. A target initially halted
 // remains halted. Failed restoration is retryable and blocks ordinary calls.
 // Nil and released targets need no cleanup. Use a fresh context after operation
-// cancellation; each attempt is capped at five seconds. Release requires usable
-// memory and cannot repair a disconnected or invalidated memory client. It
-// never repeats a completed resume. An unconfirmed control change, or a new halt while
+// cancellation and choose its deadline. Release requires usable memory and
+// cannot repair a disconnected or invalidated memory client. It never repeats
+// a completed resume. An unconfirmed control change, or a new halt while
 // restoring disabled debug, can prevent cleanup until execution resumes.
 // Pending register transfers must settle first. Reset or loss of Debug state
 // during a transfer prevents automatic cleanup.
@@ -129,8 +128,6 @@ func (t *Target) Release(ctx context.Context) error {
 	if err := liveContext(ctx); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(ctx, controlTimeout)
-	defer cancel()
 	if t.registerPending {
 		if err := t.waitRegister(ctx); err != nil {
 			return err
