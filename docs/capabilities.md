@@ -303,7 +303,7 @@ layouts and power-domain skips have hardware-independent test coverage.
 | CPUID read and decode | Yes | Accepts any aligned-word reader and validates a plausible Arm Cortex-M identity. |
 | Physical identity read | HIL | Opt-in FTDI/SWD/DAP/MEM-AP integration test. |
 | Cortex-M0 acquisition and halt/resume | HIL | Two CMSIS-DAP micro:bit sessions at a requested 1 MHz stopped a CPU counter during halt and observed progress after resume and release. Both restored initially disabled debug and running state before Arm debug owner close. Earlier sessions preserved initially enabled debug. Cleanup failures remain covered only by behavioral tests; see the [control evidence](cortexm.md#hardware-evidence). |
-| Step | No | No single-step API exists. |
+| Cortex-M0 step | Yes | `Target.Step` requires an owned halt and returns halted. Competing debug events remain unowned; uncertain launch can block cleanup. Behavioral coverage only; see [stepping](cortexm.md#stepping). |
 | Register reads | Yes | Halted Cortex-M0 R0–R12, SP, LR, PC, XPSR, MSP, and PSP through `ReadRegister`. Two fresh CMSIS-DAP micro:bit sessions read all 19 registers; transfer failures and cleanup have behavioral coverage. |
 | Register writes | Yes | Halted Cortex-M0 writes except XPSR; aligned SP/MSP/PSP and even PC values. Writes persist after release. Behavioral tests cover staging, uncertain selection, and pending cleanup. Two micro:bit sessions wrote and restored R4, SP, MSP, PSP, and PC before resuming; see the [register bench](cortexm.md#register-bench). |
 | Reset | No | No architectural or pin-reset operation exists. |

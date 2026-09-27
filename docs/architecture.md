@@ -337,8 +337,9 @@ component identity](coresight.md) for its register and failure boundaries.
 
 `target/cortexm` identifies processors through a word reader. Cortex-M0
 control also requires a word writer that waits for each access to complete.
-The target owns DHCSR control, its halt requests, and pending register
-transfers. Release settles a pending transfer before restoring debug control;
+The target owns DHCSR control, its halt requests, and pending register and
+step operations. Stepping checks DFSR to preserve competing stops. Release
+settles pending operations before restoring debug control;
 the target must be released before the memory owner. Register writes persist
 after release.
 It does not know about USB, adapters, or wire protocols. See

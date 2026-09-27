@@ -65,8 +65,46 @@ The package does not restore those indicators or clear DFSR event flags.
 
 The implementation follows Arm DDI 0419E, sections C1.5 and C1.6.3–C1.6.5 of the
 [Armv6-M Architecture Reference Manual](https://documentation-service.arm.com/static/5f8ff05ef86e16515cdbf826).
-It does not implement reset, single-step, breakpoints, or
-watchpoints.
+It does not implement reset, breakpoints, or watchpoints.
+
+## Stepping
+
+`Step(ctx)` performs one architectural step from a halt owned by the target.
+It returns halted with stepping disabled, retaining ownership for another
+step, register access, or resume. It rejects a running processor or an inherited
+halt, settles any pending register transfer before launch, and uses the
+caller's context for cancellation and deadlines.
+
+```go
+if err := core.Step(ctx); err != nil {
+    // Retain core and its memory owner for Release.
+    return err
+}
+pc, err := core.ReadRegister(ctx, cortexm.PC)
+```
+
+Stepping does not change interrupt masking. An architectural step can enter
+an exception handler instead of retiring an instruction. A breakpoint,
+watchpoint, vector catch, or external halt can also interrupt it. The target
+checks DFSR before launch and rejects any existing flags for those events;
+it preserves all DFSR flags. After launch, it requires a fresh halt with the
+HALTED reason and no competing event before claiming that stop. A competing
+stop returns an error and remains unowned.
+
+Once launch is attempted, any failure leaves only `Release` available. Release
+never repeats the step. After a confirmed launch, it waits for a fresh halt
+before clearing C_STEP; it does not change stepping control while running.
+A failed write to clear C_STEP can be retried without restarting execution.
+An unconfirmed launch, ignored step request, reset, changed debug control, or
+loss of the completed halt can prevent automatic cleanup. A competing stop can
+prevent restoring initially disabled debug until the processor runs again.
+Retain both owners when release fails; this package provides no forced cleanup
+operation.
+
+Instructions, exception entry, elapsed time, and peripheral effects cannot be
+undone. Behavioral tests cover immediate and delayed completion, competing
+flags, cancellation, ignored writes, partial failures, and cleanup retries.
+Physical stepping has not yet been exercised.
 
 ## Register reads
 
