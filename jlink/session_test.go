@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jon/ostiole/usb"
 )
@@ -434,9 +435,9 @@ func TestInspectApplicationRetriesUnconfiguredState(t *testing.T) {
 	}
 }
 
-func TestInspectApplicationBoundsUnconfiguredRetries(t *testing.T) {
+func TestInspectApplicationRetriesUntilConfigured(t *testing.T) {
 	device := metadataPeer(t, nil)
-	device.configurationErrs = make([]error, configurationInspectionAttempts)
+	device.configurationErrs = make([]error, 150)
 	for i := range device.configurationErrs {
 		device.configurationErrs[i] = usb.ErrNotConfigured
 	}
@@ -445,10 +446,10 @@ func TestInspectApplicationBoundsUnconfiguredRetries(t *testing.T) {
 		waits++
 		return nil
 	})
-	if !errors.Is(err, usb.ErrNotConfigured) {
-		t.Fatalf("inspectApplicationWithWait error = %v, want ErrNotConfigured", err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if device.configurationN != configurationInspectionAttempts || waits != configurationInspectionAttempts-1 {
+	if device.configurationN != 151 || waits != 150 {
 		t.Fatalf("inspections = %d waits %d", device.configurationN, waits)
 	}
 }
@@ -821,4 +822,62 @@ func metadataPeer(t *testing.T, operations []peerOperation) *peerUSBDevice {
 		device.endpoints[endpoint.Address] = endpoint
 	}
 	return device
+}
+
+type deadlineUSBDevice struct {
+	*peerUSBDevice
+	ctx context.Context
+	t   *testing.T
+}
+
+func (d deadlineUSBDevice) ActiveConfiguration(ctx context.Context) (usb.Configuration, error) {
+	d.t.Helper()
+	got, gotOK := ctx.Deadline()
+	want, wantOK := d.ctx.Deadline()
+	if gotOK != wantOK || !got.Equal(want) {
+		d.t.Errorf("inspection deadline = %v, %v; want %v, %v", got, gotOK, want, wantOK)
+	}
+	return d.peerUSBDevice.ActiveConfiguration(ctx)
+}
+
+func TestInspectApplicationPreservesCallerDeadline(t *testing.T) {
+	for _, timeout := range []time.Duration{0, 100 * time.Millisecond, time.Minute} {
+		t.Run(timeout.String(), func(t *testing.T) {
+			ctx := t.Context()
+			if timeout != 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, timeout)
+				defer cancel()
+			}
+			device := deadlineUSBDevice{peerUSBDevice: metadataPeer(t, nil), ctx: ctx, t: t}
+			if _, err := inspectApplication(ctx, device); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestInspectApplicationCallerCancelsRetries(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	device := metadataPeer(t, nil)
+	device.configurationErrs = make([]error, 150)
+	for i := range device.configurationErrs {
+		device.configurationErrs[i] = usb.ErrNotConfigured
+	}
+	waits := 0
+	_, err := inspectApplicationWithWait(ctx, device, func(ctx context.Context) error {
+		waits++
+		if waits == 150 {
+			cancel()
+			return waitForConfigurationInspection(ctx)
+		}
+		return nil
+	})
+	if !errors.Is(err, context.Canceled) || !errors.Is(err, usb.ErrNotConfigured) {
+		t.Fatalf("inspection error = %v, want cancellation and unconfigured state", err)
+	}
+	if device.configurationN != 150 {
+		t.Fatalf("inspections = %d, want 150", device.configurationN)
+	}
 }
