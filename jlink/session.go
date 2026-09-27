@@ -44,11 +44,7 @@ type usbBulkTransfer interface {
 
 type ownedUSBDevice struct{ *usb.Device }
 
-const (
-	configurationInspectionAttempts = 101
-	configurationInspectionInterval = 10 * time.Millisecond
-	configurationInspectionTimeout  = time.Second
-)
+const configurationInspectionInterval = 10 * time.Millisecond
 
 func (d ownedUSBDevice) claimInterface(number uint8) (usbClaim, error) {
 	claim, err := d.ClaimInterface(number)
@@ -86,7 +82,9 @@ type Session struct {
 // Open claims the J-Link application interface, reads probe metadata, applies
 // its options, and takes ownership of the device on success. With no options it
 // does not select or configure a target interface. After an error, the caller
-// must still call device.Close; Open has already attempted cleanup.
+// must still call device.Close; Open has already attempted cleanup. Inspection
+// retries an unconfigured USB device until the caller cancels or its deadline
+// expires. Without either, an unconfigured device can keep Open waiting.
 func Open(ctx context.Context, device *usb.Device, options ...Option) (*Session, error) {
 	if device == nil {
 		return nil, errors.New("jlink: nil USB device")
@@ -187,14 +185,12 @@ func applyOptions(options []Option) (openConfig, error) {
 }
 
 func inspectApplication(ctx context.Context, device usbDevice) (applicationInterface, error) {
-	inspectionCtx, cancel := context.WithTimeout(ctx, configurationInspectionTimeout)
-	defer cancel()
-	return inspectApplicationWithWait(inspectionCtx, device, waitForConfigurationInspection)
+	return inspectApplicationWithWait(ctx, device, waitForConfigurationInspection)
 }
 
 func inspectApplicationWithWait(ctx context.Context, device usbDevice, wait func(context.Context) error) (applicationInterface, error) {
 	var unavailable error
-	for attempt := range configurationInspectionAttempts {
+	for {
 		configuration, err := device.ActiveConfiguration(ctx)
 		if err == nil {
 			return findApplicationInterface(configuration)
@@ -206,14 +202,10 @@ func inspectApplicationWithWait(ctx context.Context, device usbDevice, wait func
 			return applicationInterface{}, fmt.Errorf("jlink: inspect active USB configuration: %w", err)
 		}
 		unavailable = err
-		if attempt == configurationInspectionAttempts-1 {
-			return applicationInterface{}, fmt.Errorf("jlink: inspect active USB configuration: %w", err)
-		}
 		if waitErr := wait(ctx); waitErr != nil {
 			return applicationInterface{}, fmt.Errorf("jlink: inspect active USB configuration: %w", errors.Join(err, waitErr))
 		}
 	}
-	panic("unreachable")
 }
 
 func waitForConfigurationInspection(ctx context.Context) error {

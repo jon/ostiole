@@ -112,9 +112,10 @@ than a vendor wildcard. `jlink.Open` inspects the active descriptors, rejects
 missing or ambiguous application interfaces, selects the descriptor-chosen
 alternate, resolves its active bulk endpoints, and reads metadata. With no
 options it does not select a target interface. An immediate reopen may briefly
-find the probe unconfigured; `jlink.Open` retries only that typed USB state for
-at most one second. `jlink.WithSWD` selects SWD during open and requests a
-whole-kHz clock no greater than the requested ceiling.
+find the probe unconfigured; `jlink.Open` retries only that typed USB state
+until configuration appears or the caller's context ends. Without cancellation
+or a deadline, it may wait indefinitely. `jlink.WithSWD` selects SWD during open
+and requests a whole-kHz clock no greater than the requested ceiling.
 `WithJTAG` does the same for the advertised JTAG interface. An open session
 can be explicitly reconfigured after releasing its existing protocol owner;
 `SWDIO` and `JTAGIO` reject calls for the wrong selected interface. J-Link
