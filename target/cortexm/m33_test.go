@@ -130,7 +130,7 @@ func TestM33RejectsControlChangesBeforeResume(t *testing.T) {
 	}
 }
 
-func TestM33DefersRegistersAndSteppingWithoutTraffic(t *testing.T) {
+func TestM33DefersSteppingWithoutTraffic(t *testing.T) {
 	m := newM33Memory()
 	core, err := cortexm.Acquire(t.Context(), m)
 	if err != nil {
@@ -140,12 +140,6 @@ func TestM33DefersRegistersAndSteppingWithoutTraffic(t *testing.T) {
 		t.Fatal(err)
 	}
 	reads, writes := m.reads, m.writes
-	if _, err := core.ReadRegister(t.Context(), cortexm.PC); err == nil {
-		t.Fatal("register read accepted")
-	}
-	if err := core.WriteRegister(t.Context(), cortexm.R0, 1); err == nil {
-		t.Fatal("register write accepted")
-	}
 	if err := core.Step(t.Context()); err == nil {
 		t.Fatal("step accepted")
 	}

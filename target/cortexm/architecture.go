@@ -53,7 +53,7 @@ func (t *Target) activeM0(ctx context.Context) error {
 		return err
 	}
 	if t.identity.Part != 0xc20 {
-		return errors.New("cortexm: register access and stepping require Cortex-M0")
+		return errors.New("cortexm: stepping requires Cortex-M0")
 	}
 	return nil
 }

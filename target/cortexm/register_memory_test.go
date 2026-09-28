@@ -24,6 +24,8 @@ type registerMemory struct {
 	beforeStatus     func()
 	afterSelector    func()
 	processStack     bool
+	nonsecure        bool
+	nonsecureStacks  [2]uint32
 }
 
 func newRegisterMemory() *registerMemory {
@@ -118,10 +120,14 @@ func (m *registerMemory) complete() {
 	if selector == 13 {
 		selector = bank
 	}
+	register := &m.registers[selector]
+	if m.nonsecure && (selector == 17 || selector == 18) {
+		register = &m.nonsecureStacks[selector-17]
+	}
 	if m.selector&(1<<16) != 0 {
-		m.registers[selector] = m.data
+		*register = m.data
 	} else {
-		m.data = m.registers[selector]
+		m.data = *register
 	}
 	m.registers[13] = m.registers[bank]
 	m.pending = false
