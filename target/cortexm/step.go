@@ -18,8 +18,8 @@ const (
 	dfsrAddress = uint32(0xe000ed30)
 )
 
-// Step performs one architectural step from a halt owned by this target, then
-// returns halted with stepping disabled. Exceptions can be taken and debug
+// Step performs one Cortex-M0 architectural step from a halt owned by this
+// target, then returns halted with stepping disabled. Exceptions can be taken and debug
 // events can interrupt a step; success does not promise instruction retirement.
 // Interrupt masking is unchanged. Existing competing DFSR event flags prevent
 // stepping, and none of its flags are cleared.
@@ -30,7 +30,7 @@ const (
 // control can prevent automatic cleanup. A competing halt is not owned
 // and can prevent restoring initially disabled debug. Execution is not undone.
 func (t *Target) Step(ctx context.Context) error {
-	if err := t.active(ctx); err != nil {
+	if err := t.activeM0(ctx); err != nil {
 		return err
 	}
 	if !t.haltOwned {

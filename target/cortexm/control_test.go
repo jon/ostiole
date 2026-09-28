@@ -20,6 +20,7 @@ var errMemory = errors.New("memory failure")
 type controlMemory struct {
 	cpuid               uint32
 	control             uint32
+	status              uint32
 	halted              bool
 	reads, writes       int
 	failRead, failWrite int
@@ -56,7 +57,8 @@ func (m *controlMemory) ReadWord(ctx context.Context, addr uint32) (uint32, erro
 			m.halted = true
 		}
 	}
-	value := m.control
+	value := m.control | m.status
+	m.status &^= 1 << 26
 	if m.halted {
 		value |= haltStatus
 	}

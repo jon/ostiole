@@ -41,7 +41,9 @@ func (t *Target) Resume(ctx context.Context) error {
 }
 
 // Halted reads the current Debug state. It consumes DHCSR's sticky reset and
-// instruction-retirement indicators, and does not establish halt ownership.
+// instruction-retirement indicators and Cortex-M33 restart status. It does not
+// establish halt ownership. The target relinquishes its halt claim when it
+// observes Cortex-M33 restart status, even if the processor is halted again.
 func (t *Target) Halted(ctx context.Context) (bool, error) {
 	if err := t.active(ctx); err != nil {
 		return false, err
@@ -58,9 +60,12 @@ func (t *Target) active(ctx context.Context) error {
 }
 
 func (t *Target) readControl(ctx context.Context) (uint32, error) {
-	value, err := t.memory.ReadWord(ctx, dhcsrAddress)
+	value, err := t.readDHCSR(ctx)
 	if err == nil && (value&cDebugEnable == 0 || value&(cStep|cMaskInts) != 0) {
 		err = errors.New("cortexm: halting debug control changed outside the target")
+	}
+	if err == nil {
+		err = t.validateArchitectureControl(value)
 	}
 	if err != nil {
 		t.closing = true

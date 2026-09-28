@@ -69,9 +69,9 @@ The [examples](examples) begin with a raw SWD debug-port identity read, then add
 posted access-port reads and a Cortex-M identity read through a MEM-AP. They
 compose the public packages explicitly without duplicating their framing. The
 `target/cortexm` package reads and decodes the architectural CPUID value through
-any compatible target-word reader. It also provides acquired Cortex-M0
-halt/resume control, stepping, and halted register access over word memory; see
-[Cortex-M control](docs/cortexm.md).
+any compatible target-word reader. It also provides acquired Cortex-M0 and
+Cortex-M33 halt/resume control over word memory, plus Cortex-M0 stepping and
+halted register access; see [Cortex-M control](docs/cortexm.md).
 
 The FTDI path uses the standard H-series MPSSE port and endpoint layout.
 Descriptor-driven FTDI port binding is not implemented yet. J-Link instead
