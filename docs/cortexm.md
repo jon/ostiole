@@ -1,16 +1,17 @@
 # Cortex-M control
 
 `target/cortexm.Identify` reads CPUID through any aligned-word reader. `Acquire`
-additionally enables halting debug on Cortex-M0 through a borrowed `Memory`,
-whose `ReadWord` and `WriteWord` methods are supplied by `dap.MemAP`. Other
-processor parts are rejected before a debug-register write.
+additionally enables halting debug on Cortex-M0 or Cortex-M33 through a borrowed
+`Memory`, whose `ReadWord` and `WriteWord` methods are supplied by `dap.MemAP`.
+Other processor parts are rejected before a debug-register write.
 
 ## Ownership
 
 Acquire sends target traffic but does not request a halt. It preserves an
 inherited halt and rejects active stepping, interrupt masking, or an unfinished
-halt transition. When debug is disabled, the other control bits are unknown;
-acquisition initializes them to zero when enabling debug.
+halt transition. When debug is disabled, the halt, step, and interrupt-mask
+control bits are unknown; acquisition initializes them to zero when enabling
+debug.
 
 The target requires exclusive control of the processor's debug registers. Do not
 use another debugger or write those registers through raw memory while it is
@@ -52,7 +53,9 @@ debug was initially disabled, observing a new halt prevents restoration until
 the processor runs again. After an uncertain halt or resume write, cleanup
 likewise refuses to resume an observed halt: the memory interface cannot
 establish whether the failed write caused that stop. A later running observation
-permits cleanup to continue. The package has no forced-resume escape hatch.
+permits cleanup to continue. On Cortex-M33, the target also relinquishes halt
+ownership when it observes sticky restart status, even if a new event has
+already halted the core again. The package has no forced-resume escape hatch.
 Debug events racing with restoration of disabled debug can still affect
 execution.
 
@@ -60,20 +63,60 @@ If halt readback shows that the request was lost, the target relinquishes halt
 ownership. Cleanup leaves an independent stop alone; restoring initially
 disabled debug waits until the processor is running.
 
-DHCSR reads consume the sticky reset and instruction-retirement indicators. The
-package does not restore those indicators or clear DFSR event flags.
+DHCSR reads consume sticky reset and instruction-retirement indicators, and
+Cortex-M33 restart status. The package does not restore those indicators or
+clear DFSR event flags.
 
-The implementation follows Arm DDI 0419E, sections C1.5 and C1.6.3–C1.6.5 of the
-[Armv6-M Architecture Reference Manual][armv6m]. It does not implement reset,
-breakpoints, or watchpoints.
+The Cortex-M0 implementation follows Arm DDI 0419E, sections C1.5 and
+C1.6.3–C1.6.5 of the [Armv6-M Architecture Reference Manual][armv6m]. It does
+not implement reset, breakpoints, or watchpoints.
+
+## Cortex-M33 control
+
+Cortex-M33 acquisition requires Secure invasive debug permission, indicated by
+DHCSR.S_SDE. Restricted Non-secure-only debug and implementations without the
+Security Extension are not supported by this control path. Acquisition does not
+unlock debug, write authentication settings, select a security bank, or change
+the processor's security state. Permission must remain available for control and
+restoration.
+
+The target rejects C_SNAPSTALL on acquisition and stops control if it observes
+that bit later. Arm requires a system reset after snap-stall before execution
+can safely resume; clearing the bit is insufficient. Once observed, the target
+will not automatically resume the processor. Reset and recovery from that state
+remain outside this API.
+
+`Acquire`, `Halt`, `Halted`, `Resume`, and `Release` support Cortex-M33.
+Register reads, register writes, and `Step` reject an acquired M33 before
+further memory traffic, leaving its control operations available. Those
+operations still support Cortex-M0.
+
+On RP2350, core 0 uses the ADIv6 MEM-AP at `0x2000`. Select it through the
+existing Arm debug owner, then use the target composition below:
+
+```go
+ap, err := dap.APAt(0x2000)
+if err != nil {
+    return err
+}
+memory, err := connection.OpenMemAP(ctx, ap)
+if err != nil {
+    return err
+}
+```
+
+This controls one processor. It does not stop the other core, coordinate shared
+memory, or stop DMA and peripherals. The M33 register semantics follow DHCSR in
+Arm DDI 0553B.y, section D1.2.39 of the [Armv8-M Architecture Reference
+Manual][armv8m], and the [RP2350 datasheet][rp2350].
 
 ## Stepping
 
-`Step(ctx)` performs one architectural step from a halt owned by the target. It
-returns halted with stepping disabled, retaining ownership for another step,
-register access, or resume. It rejects a running processor or an inherited halt,
-settles any pending register transfer before launch, and uses the caller's
-context for cancellation and deadlines.
+`Step(ctx)` performs one Cortex-M0 architectural step from a halt owned by the
+target. It returns halted with stepping disabled, retaining ownership for
+another step, register access, or resume. It rejects a running processor or an
+inherited halt, settles any pending register transfer before launch, and uses
+the caller's context for cancellation and deadlines.
 
 ```go
 if err := core.Step(ctx); err != nil {
@@ -178,10 +221,11 @@ err = errors.Join(err, cleanupErr)
 // On failure retain both owners for a later cleanup attempt.
 ```
 
-The [control example](../examples/simple/cortexm-control/main.go) selects one
-probe and AP, halts, prints PC, SP, R0, and R4, resumes, then releases the
-target before closing the connection. With `-step`, it also steps once and
-prints the resulting PC. It requires explicit consent to control execution:
+The Cortex-M0 [control example](../examples/simple/cortexm-control/main.go)
+selects one probe and AP, halts, prints PC, SP, R0, and R4, resumes, then
+releases the target before closing the connection. With `-step`, it also steps
+once and prints the resulting PC. It requires explicit consent to control
+execution:
 
 ```sh
 go run ./examples/simple/cortexm-control \
@@ -316,3 +360,37 @@ failure cleanup on hardware. Those control failures have behavioral coverage;
 state after Arm owner close was not measured.
 
 [armv6m]: https://documentation-service.arm.com/static/5f8ff05ef86e16515cdbf826
+[armv8m]:
+  https://community.arm.com/cfs-file/__key/communityserver-discussions-components-files/471/DDI0553B_5F00_y_5F00_armv8m_5F00_arm.pdf
+[rp2350]: https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf
+
+## RP2350 hardware procedure
+
+`TestHILRP2350Control` selects J-Link EDU Mini V2 serial `000802011345`,
+requests 1 MHz SWD, and opens core 0's ADIv6 MEM-AP at `0x2000`. It requires
+CPUID `0x411fd210` and a known program whose aligned RAM counter is incremented
+only by that core. An inherited halt fails the test without resuming it. The
+[RAM counter](../target/cortexm/testdata/rp2350-counter/README.md) provides the
+program and separate OpenOCD preparation instructions.
+
+```sh
+OSTIOLE_RP2350_HIL_CONTROL=1 \
+OSTIOLE_RP2350_HIL_COUNTER=0x20040000 \
+OSTIOLE_RP2350_HIL_PROGRAM=c20737e61153b272322548e8e6db5c420f0c148d6707ca4412c309f70415065a \
+go test -tags integration ./target/cortexm -run '^TestHILRP2350Control$' -count=1 -v
+```
+
+On September 27, 2026, OpenOCD 0.12.0 loaded and verified the RAM counter on
+Nostalgia's RP2350 bench. Two fresh Ostiole sessions observed progress before
+acquisition, no counter changes during halt, and renewed progress after resume
+and release from a second halt. Both restored initially disabled debug and
+running state before closing the Arm owner; target release and owner close
+succeeded. Two earlier sessions also preserved initially enabled debug.
+
+These observations cover core 0 with Secure invasive debug permitted and
+configurable interrupts disabled. Failure recovery, permission denial, and
+snap-stall rejection are covered only by behavioral tests. The test does not
+establish core-1 control, cross-core coordination, Non-secure-only debug, M33
+register access or stepping. State after closing the Arm debug owner was not
+measured. The RAM program remains running after the test; original execution
+state is not recovered.

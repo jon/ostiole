@@ -6,7 +6,7 @@ import (
 )
 
 func (t *Target) restore(ctx context.Context) error {
-	value, err := t.memory.ReadWord(ctx, dhcsrAddress)
+	value, err := t.readDHCSR(ctx)
 	if err != nil {
 		return err
 	}
@@ -24,8 +24,11 @@ func (t *Target) restore(ctx context.Context) error {
 	if !t.changed {
 		return nil
 	}
-	value, err = t.memory.ReadWord(ctx, dhcsrAddress)
+	value, err = t.readDHCSR(ctx)
 	if err != nil {
+		return err
+	}
+	if err := t.validateArchitectureControl(value); err != nil {
 		return err
 	}
 	if value&(cHalt|sHalt) != 0 && value&cDebugEnable != 0 {
@@ -35,6 +38,14 @@ func (t *Target) restore(ctx context.Context) error {
 }
 
 func (t *Target) resume(ctx context.Context) error {
+	if t.identity.Part == 0xd21 {
+		if _, err := t.readControl(ctx); err != nil {
+			return err
+		}
+		if !t.haltOwned {
+			return errors.New("cortexm: halt ownership was lost")
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -52,6 +63,9 @@ func (t *Target) resume(ctx context.Context) error {
 }
 
 func (t *Target) checkRestoreState(value uint32) error {
+	if err := t.validateArchitectureControl(value); err != nil {
+		return err
+	}
 	if value&cDebugEnable != 0 && value&(cStep|cMaskInts) != 0 {
 		return errors.New("cortexm: cannot restore externally changed stepping or interrupt masking")
 	}

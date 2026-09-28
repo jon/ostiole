@@ -28,22 +28,26 @@ func TestHILCortexM0Control(t *testing.T) {
 		t.Fatal("require a known bench PROGRAM and aligned RAM COUNTER address")
 	}
 	for range 2 {
-		if !t.Run("session", func(t *testing.T) { controlHIL(t, uint32(counter), program) }) {
+		if !t.Run("session", func(t *testing.T) { controlHIL(t, uint32(counter), program, microbitControlBench()) }) {
 			return
 		}
 	}
 }
 
-func controlHIL(t *testing.T, counter uint32, program string) {
+func controlHIL(t *testing.T, counter uint32, program string, bench controlBench) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	c := openControlBench(t, ctx)
+	c := bench.open(t, ctx)
 	var core *cortexm.Target
 	t.Cleanup(func() { releaseControlBench(t, core, c) })
-	memory, err := c.OpenMemAP(ctx, dap.NewAPSel(0))
+	memory, err := c.OpenMemAP(ctx, bench.ap)
 	if err != nil {
 		t.Fatal(err)
+	}
+	identity, err := cortexm.Identify(ctx, memory)
+	if err != nil || identity.Raw != bench.cpuid {
+		t.Fatalf("bench CPUID=%#x, want %#x: %v", identity.Raw, bench.cpuid, err)
 	}
 	before, err := memory.ReadWord(ctx, dhcsr)
 	if err != nil {
@@ -80,8 +84,8 @@ func controlHIL(t *testing.T, counter uint32, program string) {
 		t.Fatalf("DHCSR before=%#x after=%#x", before, after)
 	}
 	checkCounterHIL(t, ctx, memory, counter, "released", false)
-	t.Logf("micro:bit CMSIS-DAP 1 MHz AP0 CPUID=%#x program=%q counter=%#x DHCSR before=%#x after=%#x",
-		core.Identity().Raw, program, counter, before, after)
+	t.Logf("%s CPUID=%#x program=%q counter=%#x DHCSR before=%#x after=%#x",
+		bench.name, core.Identity().Raw, program, counter, before, after)
 }
 
 func checkCounterHIL(t *testing.T, ctx context.Context, memory *dap.MemAP, addr uint32, phase string, stopped bool) {
@@ -111,14 +115,35 @@ func checkCounterHIL(t *testing.T, ctx context.Context, memory *dap.MemAP, addr 
 	}
 }
 
+type controlBench struct {
+	name     string
+	provider discover.ProviderID
+	serial   string
+	ap       dap.APSel
+	cpuid    uint32
+}
+
+func microbitControlBench() controlBench {
+	return controlBench{
+		name:     "micro:bit CMSIS-DAP 1 MHz AP0",
+		provider: "cmsisdap", serial: "9900360140124e4500279015000000360000000097969901",
+		ap: dap.NewAPSel(0), cpuid: 0x410cc200,
+	}
+}
+
 func openControlBench(t *testing.T, ctx context.Context) *armdebug.Conn {
+	t.Helper()
+	return microbitControlBench().open(t, ctx)
+}
+
+func (bench controlBench) open(t *testing.T, ctx context.Context) *armdebug.Conn {
 	t.Helper()
 	inventory, err := discover.Probes(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	candidate, err := inventory.Select(discover.Selection{
-		Provider: "cmsisdap", Serial: "9900360140124e4500279015000000360000000097969901",
+		Provider: bench.provider, Serial: bench.serial,
 	})
 	if errors.Is(err, discover.ErrCandidateNotFound) || errors.Is(err, discover.ErrCandidateAmbiguous) {
 		t.Skip(err)

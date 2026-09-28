@@ -26,8 +26,8 @@ type Memory interface {
 	WriteWord(context.Context, uint32, uint32) error
 }
 
-// Target owns Cortex-M0 halting debug state through borrowed memory. Do not copy
-// it. Calls and all access to the underlying memory must be serialized. Keep
+// Target owns Cortex-M0 or Cortex-M33 halting debug through borrowed memory.
+// Do not copy it. Calls and all access to the underlying memory must be serialized. Keep
 // exclusive control of the processor's debug registers until Release succeeds,
 // then release the memory owner. The caller controls operation cancellation
 // and deadlines. The zero value is inactive.
@@ -42,13 +42,17 @@ type Target struct {
 	resumeUncertain bool
 	registerPending bool
 	registerLost    bool
+	snapStalled     bool
 	step            stepPhase
 }
 
-// Acquire enables Cortex-M0 halting debug without requesting a halt. It reads
-// CPUID and DHCSR, rejecting other cores, active stepping or interrupt masking,
-// and an unfinished halt transition before writing. DHCSR reads consume its
-// sticky reset and instruction-retirement indicators.
+// Acquire enables Cortex-M0 or Cortex-M33 halting debug without requesting a
+// halt. It reads CPUID and DHCSR, rejecting other cores, active stepping or
+// interrupt masking, and an unfinished halt transition before writing.
+// Cortex-M33 requires Secure invasive debug permission (S_SDE) and rejects
+// snap-stall state. It does not change authentication or security settings.
+// DHCSR reads consume sticky reset, retirement, and Cortex-M33 restart status.
+// Register access and stepping currently require Cortex-M0.
 //
 // The caller controls cancellation and deadlines. Failed setup attempts
 // restoration with an independent five-second context. A non-nil target
@@ -65,8 +69,8 @@ func Acquire(ctx context.Context, memory Memory) (*Target, error) {
 	if err != nil {
 		return nil, err
 	}
-	if identity.Part != 0xc20 || identity.Architecture != 0xc {
-		return nil, fmt.Errorf("cortexm: control requires Cortex-M0, got CPUID %#08x", identity.Raw)
+	if err := controlIdentity(identity); err != nil {
+		return nil, err
 	}
 	saved, err := memory.ReadWord(ctx, dhcsrAddress)
 	if err != nil {
@@ -76,6 +80,9 @@ func Acquire(ctx context.Context, memory Memory) (*Target, error) {
 		return nil, err
 	}
 	t := &Target{memory: memory, identity: identity, saved: saved & (cDebugEnable | cHalt)}
+	if err := t.validateArchitectureControl(saved); err != nil {
+		return nil, err
+	}
 	if saved&cDebugEnable != 0 {
 		return t, nil
 	}
@@ -123,6 +130,8 @@ func (t *Target) Identity() Identity {
 // during a transfer prevents automatic cleanup. An accepted step must return
 // halted before stepping can be disabled; an unconfirmed step launch prevents
 // automatic cleanup. A competing debug event leaves its halt unowned.
+// Observed Cortex-M33 snap-stall state permanently prevents automatic resume;
+// clearing its control bit does not make the memory system safe to resume.
 func (t *Target) Release(ctx context.Context) error {
 	if t == nil || t.memory == nil {
 		return nil
@@ -158,12 +167,17 @@ func (t *Target) writeControl(ctx context.Context, control uint32) error {
 	if err := t.memory.WriteWord(ctx, dhcsrAddress, debugKey|control); err != nil {
 		return err
 	}
-	value, err := t.memory.ReadWord(ctx, dhcsrAddress)
+	value, err := t.readDHCSR(ctx)
 	if err != nil {
 		return err
 	}
 	if value&cDebugEnable == 0 && t.saved == 0 {
 		t.changed = false
+	}
+	if control&cDebugEnable != 0 {
+		if err := t.validateArchitectureControl(value); err != nil {
+			return err
+		}
 	}
 	mask := cDebugEnable
 	if control&cDebugEnable != 0 {

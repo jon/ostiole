@@ -42,8 +42,8 @@ const (
 	sReset       = uint32(1 << 25)
 )
 
-// ReadRegister reads a register while halted, without acquiring halt ownership.
-// It writes debug transfer registers and consumes DHCSR's sticky status. The
+// ReadRegister reads a Cortex-M0 register while halted, without acquiring halt
+// ownership. It writes debug transfer registers and consumes DHCSR's sticky status. The
 // caller controls cancellation and deadlines. An uncertain transfer blocks
 // ordinary calls; Release must settle it before changing debug control. Loss
 // of Debug state or reset during a pending transfer prevents automatic cleanup.
@@ -52,7 +52,7 @@ func (t *Target) ReadRegister(ctx context.Context, reg Register) (uint32, error)
 	if reg < R0 || reg > PSP {
 		return 0, errors.New("cortexm: invalid register")
 	}
-	if err := t.active(ctx); err != nil {
+	if err := t.activeM0(ctx); err != nil {
 		return 0, err
 	}
 	if err := t.waitRegister(ctx); err != nil {
