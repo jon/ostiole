@@ -86,10 +86,9 @@ can safely resume; clearing the bit is insufficient. Once observed, the target
 will not automatically resume the processor. Reset and recovery from that state
 remain outside this API.
 
-`Acquire`, `Halt`, `Halted`, `Resume`, and `Release` support Cortex-M33.
-Register reads, register writes, and `Step` reject an acquired M33 before
-further memory traffic, leaving its control operations available. Those
-operations still support Cortex-M0.
+`Acquire`, `Halt`, `Halted`, `Resume`, `Release`, `ReadRegister`, and
+`WriteRegister` support Cortex-M33. `Step` rejects an acquired M33 before
+further memory traffic, leaving its other operations available.
 
 On RP2350, core 0 uses the ADIv6 MEM-AP at `0x2000`. Select it through the
 existing Arm debug owner, then use the target composition below:
@@ -105,10 +104,12 @@ if err != nil {
 }
 ```
 
-This controls one processor. It does not stop the other core, coordinate shared
-memory, or stop DMA and peripherals. The M33 register semantics follow DHCSR in
-Arm DDI 0553B.y, section D1.2.39 of the [Armv8-M Architecture Reference
-Manual][armv8m], and the [RP2350 datasheet][rp2350].
+This controls one processor and does not configure cross-core stopping or
+coordinate shared memory. Inherited cross-trigger routing can still couple the
+cores. Halting a processor does not stop DMA and peripherals. The M33 debug
+semantics follow DHCSR, DCRSR, and DCRDR in Arm DDI 0553B.y, sections D1.2.33,
+D1.2.34, and D1.2.39 of the [Armv8-M Architecture Reference Manual][armv8m], and
+the [RP2350 datasheet][rp2350].
 
 ## Stepping
 
@@ -152,10 +153,14 @@ flags, cancellation, ignored writes, partial failures, and cleanup retries. The
 ## Register reads
 
 `ReadRegister` reads R0–R12, SP, LR, PC, XPSR, MSP, or PSP from a halted
-processor. SP selects the current stack pointer; MSP and PSP select its banks.
-PC is the debug return address. An inherited halt permits inspection without
-acquiring permission to resume. Invalid `Register` identifiers, including zero,
-are rejected before memory traffic.
+Cortex-M0 or Cortex-M33 processor. SP selects the current stack pointer; MSP and
+PSP select the main and process stacks. On M33, all three use the halted
+security state. The API does not change that state or DSCSR's memory-mapped bank
+selection, and does not expose explicit Secure/Non-secure register selectors,
+stack limits, or floating-point registers. PC is the debug return address. An
+inherited halt permits inspection without acquiring permission to resume.
+Invalid `Register` identifiers, including zero, are rejected before memory
+traffic.
 
 ```go
 pc, err := core.ReadRegister(ctx, cortexm.PC)
@@ -172,11 +177,11 @@ disabling debug. It never replays a selector write whose completion is
 uncertain. A failed precondition or cancellation before selection leaves the
 target usable when no transfer is pending. An error returns no register value.
 
-Reset or loss of Debug state during a pending transfer prevents automatic
-cleanup, even if a later status read would show ready. The target cannot prove
-that the original transfer completed. Retain both owners; there is no forced
-cleanup operation for this state. These failures have behavioral test coverage,
-not physical failure-injection evidence.
+Reset, loss of Debug state, or observed M33 restart during a pending transfer
+prevents automatic cleanup, even if a later status read would show ready. The
+target cannot prove that the original transfer completed. Retain both owners;
+there is no forced cleanup operation for this state. These failures have
+behavioral test coverage, not physical failure-injection evidence.
 
 ## Register writes
 
@@ -394,3 +399,39 @@ establish core-1 control, cross-core coordination, Non-secure-only debug, M33
 register access or stepping. State after closing the Arm debug owner was not
 measured. The RAM program remains running after the test; original execution
 state is not recovered.
+
+## RP2350 register bench
+
+After preparing the
+[core-0 RAM counter](../target/cortexm/testdata/rp2350-counter/README.md), run
+the separately gated register test:
+
+```sh
+OSTIOLE_RP2350_HIL_CONTROL=1 \
+OSTIOLE_RP2350_HIL_REGISTERS=1 \
+OSTIOLE_RP2350_HIL_PROGRAM=c20737e61153b272322548e8e6db5c420f0c148d6707ca4412c309f70415065a \
+go test -tags integration ./target/cortexm -run '^TestHILRP2350Registers$' -count=1 -v
+```
+
+The test checks CPUID and the counter instructions before acquisition. It
+requires a running bench and, after halting, verifies Secure state, main-stack
+selection, and a PC inside the loop. It reads all 19 exposed registers, writes
+and restores R4, SP, MSP, PSP, and PC, then verifies the whole snapshot and
+unchanged DSCSR before resuming. An unconfirmed register restoration retains the
+owners without requesting resume.
+
+On Nostalgia, two fresh sessions through J-Link EDU Mini V2 `000802011345` at 1
+MHz and AP `0x2000` passed on RP2350 core 0, CPUID `0x411fd210`. R4 retained
+both `0x55aa55aa` and `0xaa55aa55`; stack and PC writes read back and were
+restored before execution. All 19 registers matched their saved values and DSCSR
+remained `0x00030000`. The counter stayed unchanged while halted and advanced
+after resume and release. DHCSR's debug-enable and halt status matched initially
+disabled debug and running state; both target release and Arm owner close
+succeeded.
+
+This exercises Secure state on core 0. Non-secure stack selection, transfer
+failures, restart during transfer, and cleanup failures have behavioral
+coverage. No security-state switch or core-1 control was performed. Temporary
+stack and PC values were not executed. State after Arm owner close was not
+independently measured. The previously loaded RAM program remains running; flash
+was untouched.

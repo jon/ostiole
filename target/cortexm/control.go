@@ -26,7 +26,8 @@ type Memory interface {
 	WriteWord(context.Context, uint32, uint32) error
 }
 
-// Target owns Cortex-M0 or Cortex-M33 halting debug through borrowed memory.
+// Target owns one Cortex-M0 or Cortex-M33 processor's halting debug through
+// borrowed memory.
 // Do not copy it. Calls and all access to the underlying memory must be serialized. Keep
 // exclusive control of the processor's debug registers until Release succeeds,
 // then release the memory owner. The caller controls operation cancellation
@@ -52,7 +53,7 @@ type Target struct {
 // Cortex-M33 requires Secure invasive debug permission (S_SDE) and rejects
 // snap-stall state. It does not change authentication or security settings.
 // DHCSR reads consume sticky reset, retirement, and Cortex-M33 restart status.
-// Register access and stepping currently require Cortex-M0.
+// Stepping currently requires Cortex-M0.
 //
 // The caller controls cancellation and deadlines. Failed setup attempts
 // restoration with an independent five-second context. A non-nil target
@@ -127,8 +128,9 @@ func (t *Target) Identity() Identity {
 // a completed resume. An unconfirmed control change, or a new halt while
 // restoring disabled debug, can prevent cleanup until execution resumes.
 // Pending register transfers must settle first. Reset or loss of Debug state
-// during a transfer prevents automatic cleanup. An accepted step must return
-// halted before stepping can be disabled; an unconfirmed step launch prevents
+// or Cortex-M33 restart during a transfer prevents automatic cleanup.
+// An accepted step must return halted before stepping can be disabled;
+// an unconfirmed step launch prevents
 // automatic cleanup. A competing debug event leaves its halt unowned.
 // Observed Cortex-M33 snap-stall state permanently prevents automatic resume;
 // clearing its control bit does not make the memory system safe to resume.

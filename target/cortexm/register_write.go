@@ -5,8 +5,8 @@ import (
 	"errors"
 )
 
-// WriteRegister changes a Cortex-M0 register while halted, without acquiring halt
-// ownership. XPSR is read-only. SP, MSP, and PSP require word alignment; PC
+// WriteRegister changes a Cortex-M0 or Cortex-M33 register while halted,
+// without acquiring halt ownership. XPSR is read-only. SP, MSP, and PSP require word alignment; PC
 // requires bit zero clear and does not change Thumb state. Invalid identifiers
 // and values are rejected before traffic. Release does not undo register writes.
 //
@@ -18,7 +18,7 @@ func (t *Target) WriteRegister(ctx context.Context, reg Register, value uint32) 
 	if err := validateRegisterWrite(reg, value); err != nil {
 		return err
 	}
-	if err := t.activeM0(ctx); err != nil {
+	if err := t.active(ctx); err != nil {
 		return err
 	}
 	if err := t.waitRegister(ctx); err != nil {

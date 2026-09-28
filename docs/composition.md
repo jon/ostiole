@@ -38,7 +38,7 @@ data-register write can write target memory.
 | Identify a Cortex-M through any compatible word reader   | `cortexm.Identify`                                                                                                       | `examples/simple/cortexm-info`                                                    |
 | Acquire, halt, inspect registers, and resume a Cortex-M0 | `cortexm.Acquire`, `Target.Halt`, `Target.ReadRegister`, `Target.Resume`, `Target.Release`                               | `examples/simple/cortexm-control`                                                 |
 | Step a Cortex-M0 from an owned halt                      | `Target.Step`                                                                                                            | `examples/simple/cortexm-control -step`                                           |
-| Read or write a halted Cortex-M0 register                | `Target.ReadRegister`, `Target.WriteRegister`                                                                            | [Register reads](cortexm.md#register-reads), [writes](cortexm.md#register-writes) |
+| Read or write a halted Cortex-M0/M33 register            | `Target.ReadRegister`, `Target.WriteRegister`                                                                            | [Register reads](cortexm.md#register-reads), [writes](cortexm.md#register-writes) |
 | Test SWD and DAP behavior without hardware               | `swd/sim`, `dap/sim`                                                                                                     | Package tests                                                                     |
 
 The examples are intentionally small, executable compositions of public
@@ -738,10 +738,10 @@ CSW, then release and reconnect the debug port.
 Use `target/cortexm` when the desired result is processor identity. It accepts
 the word-reader behavior supplied by `dap.MemAP`, so target code remains
 independent of the host, adapter, and wire protocol. `cortexm.Acquire` also uses
-`WriteWord` to enable Cortex-M0 halting debug. Use `ReadRegister` for halted
-core registers and `WriteRegister` for intentional changes. The target tracks
-transfer completion but does not roll back writes. Release it before its memory
-owner and retain both after failed target restoration. See
+`WriteWord` to enable Cortex-M0 or Cortex-M33 halting debug. Use `ReadRegister`
+for halted core registers and `WriteRegister` for intentional changes. The
+target tracks transfer completion but does not roll back writes. Release it
+before its memory owner and retain both after failed target restoration. See
 [Cortex-M control](cortexm.md) for the full composition and effects.
 
 ## Release in reverse order
