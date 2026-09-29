@@ -130,30 +130,6 @@ func TestM33RejectsControlChangesBeforeResume(t *testing.T) {
 	}
 }
 
-func TestM33DefersSteppingWithoutTraffic(t *testing.T) {
-	m := newM33Memory()
-	core, err := cortexm.Acquire(t.Context(), m)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := core.Halt(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	reads, writes := m.reads, m.writes
-	if err := core.Step(t.Context()); err == nil {
-		t.Fatal("step accepted")
-	}
-	if m.reads != reads || m.writes != writes {
-		t.Fatal("unsupported operation reached memory")
-	}
-	if err := core.Resume(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if err := core.Release(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestM33HaltHonorsCancellationAndAllowsCleanup(t *testing.T) {
 	m := newM33Memory()
 	core, err := cortexm.Acquire(t.Context(), m)

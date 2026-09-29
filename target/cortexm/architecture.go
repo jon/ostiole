@@ -47,13 +47,3 @@ func (t *Target) readDHCSR(ctx context.Context) (uint32, error) {
 	}
 	return value, err
 }
-
-func (t *Target) activeM0(ctx context.Context) error {
-	if err := t.active(ctx); err != nil {
-		return err
-	}
-	if t.identity.Part != 0xc20 {
-		return errors.New("cortexm: stepping requires Cortex-M0")
-	}
-	return nil
-}

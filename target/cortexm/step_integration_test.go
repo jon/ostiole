@@ -88,22 +88,27 @@ func stepHIL(t *testing.T) {
 
 func checkCounterStepHIL(t *testing.T, ctx context.Context, core *cortexm.Target, memory *dap.MemAP, n int) {
 	t.Helper()
+	checkCounterStepAtHIL(t, ctx, core, memory, n, 0xc6, 0x20000000)
+}
+
+func checkCounterStepAtHIL(t *testing.T, ctx context.Context, core *cortexm.Target, memory *dap.MemAP, n int, start, addr uint32) {
+	t.Helper()
 	pc := readRegisterHIL(t, ctx, core, cortexm.PC)
 	r0 := readRegisterHIL(t, ctx, core, cortexm.R0)
-	counter, err := memory.ReadWord(ctx, 0x20000000)
+	counter, err := memory.ReadWord(ctx, addr)
 	if err != nil {
 		t.Fatal(err)
 	}
 	nextPC, nextR0, nextCounter := pc, r0, counter
 	switch pc {
-	case 0xc6:
-		nextPC = 0xc8
+	case start:
+		nextPC = start + 2
 		nextR0++
-	case 0xc8:
-		nextPC = 0xca
+	case start + 2:
+		nextPC = start + 4
 		nextCounter = r0
-	case 0xca:
-		nextPC = 0xc6
+	case start + 4:
+		nextPC = start
 	default:
 		t.Fatalf("PC outside counter loop: %#x", pc)
 	}
@@ -112,7 +117,7 @@ func checkCounterStepHIL(t *testing.T, ctx context.Context, core *cortexm.Target
 	}
 	gotPC := readRegisterHIL(t, ctx, core, cortexm.PC)
 	gotR0 := readRegisterHIL(t, ctx, core, cortexm.R0)
-	gotCounter, err := memory.ReadWord(ctx, 0x20000000)
+	gotCounter, err := memory.ReadWord(ctx, addr)
 	if err != nil {
 		t.Fatal(err)
 	}
