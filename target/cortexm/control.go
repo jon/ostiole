@@ -53,7 +53,6 @@ type Target struct {
 // Cortex-M33 requires Secure invasive debug permission (S_SDE) and rejects
 // snap-stall state. It does not change authentication or security settings.
 // DHCSR reads consume sticky reset, retirement, and Cortex-M33 restart status.
-// Stepping currently requires Cortex-M0.
 //
 // The caller controls cancellation and deadlines. Failed setup attempts
 // restoration with an independent five-second context. A non-nil target

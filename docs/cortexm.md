@@ -86,9 +86,8 @@ can safely resume; clearing the bit is insufficient. Once observed, the target
 will not automatically resume the processor. Reset and recovery from that state
 remain outside this API.
 
-`Acquire`, `Halt`, `Halted`, `Resume`, `Release`, `ReadRegister`, and
-`WriteRegister` support Cortex-M33. `Step` rejects an acquired M33 before
-further memory traffic, leaving its other operations available.
+`Acquire`, `Halt`, `Halted`, `Resume`, `Release`, `ReadRegister`,
+`WriteRegister`, and `Step` support Cortex-M0 and Cortex-M33.
 
 On RP2350, core 0 uses the ADIv6 MEM-AP at `0x2000`. Select it through the
 existing Arm debug owner, then use the target composition below:
@@ -113,11 +112,11 @@ the [RP2350 datasheet][rp2350].
 
 ## Stepping
 
-`Step(ctx)` performs one Cortex-M0 architectural step from a halt owned by the
-target. It returns halted with stepping disabled, retaining ownership for
-another step, register access, or resume. It rejects a running processor or an
-inherited halt, settles any pending register transfer before launch, and uses
-the caller's context for cancellation and deadlines.
+`Step(ctx)` performs one Cortex-M0 or Cortex-M33 architectural step from a halt
+owned by the target. It returns halted with stepping disabled, retaining
+ownership for another step, register access, or resume. It rejects a running
+processor or an inherited halt, settles any pending register transfer before
+launch, and uses the caller's context for cancellation and deadlines.
 
 ```go
 if err := core.Step(ctx); err != nil {
@@ -141,14 +140,20 @@ before clearing C_STEP; it does not change stepping control while running. A
 failed write to clear C_STEP can be retried without restarting execution. An
 unconfirmed launch, ignored step request, reset, changed debug control, or loss
 of the completed halt can prevent automatic cleanup. A competing stop can
-prevent restoring initially disabled debug until the processor runs again.
-Retain both owners when release fails; this package provides no forced cleanup
-operation.
+prevent restoring initially disabled debug until the processor runs again. On
+M33, the step's own restart is expected while waiting for completion. After
+observing the completed halt, any further restart prevents automatic cleanup,
+even if the core has already halted again. Permission and snap-stall checks
+apply throughout; before clearing C_STEP, the target checks that the completed
+halt is still present. Retain both owners when release fails; this package
+provides no forced cleanup operation.
 
 Instructions, exception entry, elapsed time, and peripheral effects cannot be
 undone. Behavioral tests cover immediate and delayed completion, competing
 flags, cancellation, ignored writes, partial failures, and cleanup retries. The
-[step bench](#step-bench) records physical instruction checks.
+[micro:bit step bench](#step-bench) and [RP2350 step bench](#rp2350-step-bench)
+record physical instruction checks. M33 step semantics follow Arm DDI 0553B.y
+B13.4.2 and D1.2.38–D1.2.39.
 
 ## Register reads
 
@@ -435,3 +440,38 @@ coverage. No security-state switch or core-1 control was performed. Temporary
 stack and PC values were not executed. State after Arm owner close was not
 independently measured. The previously loaded RAM program remains running; flash
 was untouched.
+
+## RP2350 step bench
+
+After preparing the
+[core-0 RAM counter](../target/cortexm/testdata/rp2350-counter/README.md), run
+the separately gated step test:
+
+```sh
+OSTIOLE_RP2350_HIL_CONTROL=1 \
+OSTIOLE_RP2350_HIL_STEP=1 \
+OSTIOLE_RP2350_HIL_PROGRAM=c20737e61153b272322548e8e6db5c420f0c148d6707ca4412c309f70415065a \
+go test -tags integration ./target/cortexm -run '^TestHILRP2350Step$' -count=1 -v
+```
+
+The test checks CPUID and counter instructions before acquisition and refuses an
+inherited halt. After halting, it checks Secure state, Thread mode, Thumb state,
+and R1's counter address. It compares PC, R0, and RAM after each step through
+the increment at `0x20040026`, store at `0x20040028`, and branch at
+`0x2004002a`. Twelve steps precede resume; a further halt and step exercise
+release from an owned stop. DSCSR is compared across the first twelve steps. The
+test does not reload firmware or roll back execution.
+
+On Nostalgia, two fresh sessions through J-Link EDU Mini V2 `000802011345` at 1
+MHz and AP `0x2000` passed on RP2350 core 0, CPUID `0x411fd210`. Each checked 13
+steps, with PC/R0/RAM matching the expected instruction effects. The counter
+stayed unchanged while halted and advanced after resume and release. DSCSR
+remained `0x00030000`. Initially disabled debug and running state were restored
+before Arm owner close; target release and owner close succeeded.
+
+The RAM program disables configurable interrupts and runs in Secure state.
+Exception entry, competing debug events, permission loss, snap-stall, restart
+after a completed halt, and failure cleanup have behavioral coverage. These
+sessions do not establish sleeping-instruction behavior, Non-secure execution,
+core-1 control, or cross-core coordination. State after Arm owner close was not
+independently measured. Flash was untouched and the counter remains running.

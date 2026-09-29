@@ -18,9 +18,10 @@ const (
 	dfsrAddress = uint32(0xe000ed30)
 )
 
-// Step performs one Cortex-M0 architectural step from a halt owned by this
-// target, then returns halted with stepping disabled. Exceptions can be taken and debug
-// events can interrupt a step; success does not promise instruction retirement.
+// Step performs one Cortex-M0 or Cortex-M33 architectural step from a halt
+// owned by this target, then returns halted with stepping disabled.
+// Exceptions can be taken and debug events can interrupt a step; success
+// does not promise instruction retirement.
 // Interrupt masking is unchanged. Existing competing DFSR event flags prevent
 // stepping, and none of its flags are cleared.
 //
@@ -28,9 +29,11 @@ const (
 // any failure leaves only Release available. Release never repeats a step and
 // only clears stepping while halted. Unconfirmed launch, reset, or lost debug
 // control can prevent automatic cleanup. A competing halt is not owned
-// and can prevent restoring initially disabled debug. Execution is not undone.
+// and can prevent restoring initially disabled debug. On Cortex-M33, restart
+// after observing the completed halt prevents automatic cleanup, even if the
+// processor has already halted again. Execution is not undone.
 func (t *Target) Step(ctx context.Context) error {
-	if err := t.activeM0(ctx); err != nil {
+	if err := t.active(ctx); err != nil {
 		return err
 	}
 	if !t.haltOwned {
@@ -88,9 +91,6 @@ func (t *Target) settleStep(ctx context.Context) error {
 			return nil
 		}
 		if value&(cHalt|sHalt) == cHalt|sHalt {
-			if t.step == stepRunning {
-				t.step = stepStopped
-			}
 			if err := t.finishStep(ctx); err != nil {
 				return err
 			}
@@ -109,22 +109,40 @@ func (t *Target) stepStatus(ctx context.Context) (uint32, error) {
 	if t.step == stepUncertain || t.step == stepLost {
 		return 0, errors.New("cortexm: step completion is unknown; cleanup cannot continue")
 	}
-	value, err := t.memory.ReadWord(ctx, dhcsrAddress)
+	value, err := t.readDHCSR(ctx)
 	if err != nil {
 		return 0, err
 	}
+	if err := t.observeStepState(value); err != nil {
+		return 0, err
+	}
+	if err := t.validateArchitectureControl(value); err != nil {
+		return 0, err
+	}
+	return value, nil
+}
+
+func (t *Target) observeStepState(value uint32) error {
 	invalid := value&cDebugEnable == 0 || value&(cMaskInts|sReset) != 0
 	if t.step != stepRestoring {
 		invalid = invalid || value&cStep == 0
 	}
 	if t.step == stepStopped || t.step == stepRestoring {
-		invalid = invalid || value&(cHalt|sHalt) != cHalt|sHalt
+		invalid = invalid || t.stepHaltLost(value)
 	}
 	if invalid {
 		t.step = stepLost
-		return 0, errors.New("cortexm: debug control changed during step")
+		return errors.New("cortexm: debug control changed during step")
 	}
-	return value, nil
+	if t.step == stepRunning && value&(cHalt|sHalt) == cHalt|sHalt {
+		t.step = stepStopped
+	}
+	return nil
+}
+
+func (t *Target) stepHaltLost(value uint32) bool {
+	return value&(cHalt|sHalt) != cHalt|sHalt ||
+		t.identity.Part == 0xd21 && value&sRestart != 0
 }
 
 func (t *Target) finishStep(ctx context.Context) error {
@@ -141,6 +159,11 @@ func (t *Target) finishStep(ctx context.Context) error {
 	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if t.identity.Part == 0xd21 {
+		if _, err := t.stepStatus(ctx); err != nil {
+			return err
+		}
 	}
 	return t.memory.WriteWord(ctx, dhcsrAddress, debugKey|cDebugEnable|cHalt)
 }

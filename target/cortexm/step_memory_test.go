@@ -52,6 +52,9 @@ func (m *stepMemory) WriteWord(ctx context.Context, addr, value uint32) error {
 	if wasHalted && value&15 == debugEnable|stepRequest && m.writes != writes && m.control == debugEnable|stepRequest && !m.ignoreWrites {
 		m.stepping, m.stepRemaining = true, m.stepDelay
 		m.launches++
+		if m.cpuid == 0x411fd210 {
+			m.status |= 1 << 26
+		}
 		if m.stepDelay == 0 && !m.blockStep {
 			m.finishStep()
 		}

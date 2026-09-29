@@ -335,7 +335,8 @@ before the memory owner. Register writes persist after release. It does not know
 about USB, adapters, or wire protocols. See [Cortex-M control](cortexm.md) for
 restoration and failure boundaries. Cortex-M33 control requires Secure invasive
 debug permission. Its stack register selectors use the halted security state;
-register access does not change security state. Stepping remains Cortex-M0-only.
+register access does not change security state. Both architectures support
+stepping from an owned halt.
 
 ## Host implementations
 
