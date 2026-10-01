@@ -744,6 +744,12 @@ target tracks transfer completion but does not roll back writes. Release it
 before its memory owner and retain both after failed target restoration. See
 [Cortex-M control](cortexm.md) for the full composition and effects.
 
+For independent RP2350 processors, borrow both MEM-APs from one Arm owner and
+acquire a separate target for each. Serialize calls over that connection and
+release both targets before closing their memory owner. The
+[two-core composition and bench](cortexm.md#independent-rp2350-cores) show the
+per-core ownership boundary and physical observations.
+
 ## Release in reverse order
 
 A complete Cortex-M identity composition acquires and releases state in one of

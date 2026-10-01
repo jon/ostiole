@@ -71,7 +71,10 @@ compose the public packages explicitly without duplicating their framing. The
 `target/cortexm` package reads and decodes the architectural CPUID value through
 any compatible target-word reader. It also provides acquired Cortex-M0 and
 Cortex-M33 halt/resume control, halted register access, and architectural
-stepping over word memory; see [Cortex-M control](docs/cortexm.md).
+stepping over word memory; see [Cortex-M control](docs/cortexm.md). Independent
+RP2350 targets can share one Arm owner with serialized calls; the
+[two-core bench](docs/cortexm.md#rp2350-independent-core-bench) records halt,
+step, peer progress, and cleanup observations.
 
 The FTDI path uses the standard H-series MPSSE port and endpoint layout.
 Descriptor-driven FTDI port binding is not implemented yet. J-Link instead
