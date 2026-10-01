@@ -61,6 +61,11 @@ banking, AP identification, raw AP addresses, power ownership, and MEM-AP state
 stay in `dap`. Higher layers should call these packages rather than reproduce
 their framing.
 
+A target owns one processor. Several targets may borrow distinct MEM-APs from
+one `armdebug.Conn`; all calls over that shared owner remain serialized.
+Independent RP2350 core control has [physical evidence][dual-core]. It does not
+provide group ownership, CTI routing, or a simultaneous memory snapshot.
+
 ## Discovery and opening
 
 `discover.Registry` stores immutable transport providers. Registration is
@@ -409,3 +414,5 @@ The layers are not entirely passive:
 
 Callers should always complete the documented release sequence, including when
 the primary operation fails.
+
+[dual-core]: cortexm.md#rp2350-independent-core-bench

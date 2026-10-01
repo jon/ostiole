@@ -301,6 +301,7 @@ skips have hardware-independent test coverage.
 | Cortex-M33 step                        | HIL         | Two fresh RP2350 core-0/J-Link sessions at 1 MHz checked PC/R0/RAM across 13 steps each, resume, and release with disabled debug restored. Secure counter state and DSCSR were preserved. Permission, snap-stall, restart after completion, and failure cleanup have behavioral coverage; see the [RP2350 step bench](cortexm.md#rp2350-step-bench).                                                                  |
 | Register reads                         | Yes         | Halted Cortex-M0/M33 R0–R12, SP, LR, PC, XPSR, MSP, and PSP through `ReadRegister`. Two fresh sessions each on CMSIS-DAP/micro:bit and J-Link/RP2350 core 0 read all 19 registers; transfer failures and cleanup have behavioral coverage.                                                                                                                                                                            |
 | Register writes                        | Yes         | Halted Cortex-M0/M33 writes except XPSR; aligned SP/MSP/PSP and even PC values. Writes persist after release. Behavioral tests cover staging, uncertain selection, and pending cleanup. Two sessions each on micro:bit and RP2350 core 0 wrote and restored R4, SP, MSP, PSP, and PC before resuming; see the [micro:bit](cortexm.md#register-bench) and [RP2350](cortexm.md#rp2350-register-bench) register benches. |
+| Independent RP2350 cores               | HIL         | Two fresh J-Link sessions borrowed core-0/core-1 MEM-APs under one Arm owner. Each core halted and stepped while its peer advanced; both restored disabled debug and running state with inactive CTIs unchanged. See the [independent-core bench](cortexm.md#rp2350-independent-core-bench). This provides serialized per-core control, without group or CTI ownership.                                               |
 | Reset                                  | No          | No architectural or pin-reset operation exists.                                                                                                                                                                                                                                                                                                                                                                       |
 | Breakpoints or watchpoints             | No          | No target instrumentation API exists.                                                                                                                                                                                                                                                                                                                                                                                 |
 | Firmware or runtime loading            | No          | No ELF loader, image-placement policy, or flash driver exists.                                                                                                                                                                                                                                                                                                                                                        |
@@ -345,9 +346,9 @@ SWD, and use the volatile DAP and MEM-AP state described above.
 ## Not currently provided
 
 There is no CMSIS-DAP HID/v1 transport, automatic probe discovery policy,
-multi-core or SoC attachment, general target control, semihosting, trace,
-debugger protocol server, firmware flashing, FPGA programming, or Windows host
-implementation.
+automatic SoC attachment, group or CTI control, general target control,
+semihosting, trace, debugger protocol server, firmware flashing, FPGA
+programming, or Windows host implementation.
 
 Treat an absent capability as an explicit boundary. Do not infer it from the
 project description or recreate its lower-level protocol inside an application.

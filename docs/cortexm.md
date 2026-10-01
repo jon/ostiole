@@ -246,6 +246,68 @@ Hardware-independent tests model DHCSR control and execution state, including
 partial writes, canceled operations, ignored writes, failed cleanup, and retry.
 They do not establish physical halt/resume behavior on a bench program.
 
+## Independent RP2350 cores
+
+One `armdebug.Conn` can lend core 0's MEM-AP at `0x2000` and core 1's MEM-AP at
+`0x4000`. Acquire a separate `cortexm.Target` for each. Serialize all calls over
+the shared connection, including memory reads, target operations, and cleanup.
+Each target owns only its processor's debug state and halt requests. Halting one
+target does not claim ownership of a stop on the other.
+
+For an already-open Arm owner `c`, the caller supplies operation `ctx` and a
+live `cleanupCtx`, including after cancellation:
+
+```go
+var cores [2]*cortexm.Target
+var err error
+for i, base := range []uint64{0x2000, 0x4000} {
+    ap, e := dap.APAt(base)
+    if e != nil {
+        err = e
+        break
+    }
+    memory, e := c.OpenMemAP(ctx, ap)
+    if e != nil {
+        err = e
+        break
+    }
+    cores[i], err = cortexm.Acquire(ctx, memory)
+    if err != nil {
+        break
+    }
+}
+if err == nil {
+    err = cores[0].Halt(ctx)
+}
+if err == nil {
+    var halted bool
+    halted, err = cores[1].Halted(ctx)
+    if err == nil {
+        fmt.Printf("core 1 halted=%v\n", halted)
+    }
+}
+if err == nil {
+    err = cores[0].Resume(ctx)
+}
+var releaseErr error
+for i := len(cores) - 1; i >= 0; i-- {
+    releaseErr = errors.Join(releaseErr, cores[i].Release(cleanupCtx))
+}
+err = errors.Join(err, releaseErr)
+if releaseErr == nil {
+    err = errors.Join(err, c.Close())
+}
+// Retain targets and c if target cleanup fails; retain c if Close fails.
+```
+
+A failed acquisition can return a non-nil target, so store it before handling
+the error. Release every retained target before closing its memory owner; a
+failed release leaves that owner live for retry. A target acquired while its
+processor is halted cannot resume that inherited halt. Existing cross-trigger
+routing can couple stops: inspect the bench's routing before expecting
+independent progress. This composition provides per-core control, without group
+ownership, coordinated stopping, or a simultaneous snapshot.
+
 ## Hardware procedure
 
 The opt-in integration test selects the CMSIS-DAP micro:bit with serial
@@ -475,3 +537,45 @@ after a completed halt, and failure cleanup have behavioral coverage. These
 sessions do not establish sleeping-instruction behavior, Non-secure execution,
 core-1 control, or cross-core coordination. State after Arm owner close was not
 independently measured. Flash was untouched and the counter remains running.
+
+## RP2350 independent-core bench
+
+`TestHILRP2350IndependentCores` selects J-Link EDU Mini V2 `000802011345` at 1
+MHz, opens one Arm owner, and borrows AP `0x2000` and AP `0x4000`. Prepare the
+[separate RAM counters][dual-counter] first. That procedure replaces both cores'
+volatile execution state, resets core 1, and disables its Secure MPU for RAM
+entry; it does not change flash or CTI routing.
+
+```sh
+OSTIOLE_RP2350_HIL_DUAL_CORE=1 \
+OSTIOLE_RP2350_HIL_PROGRAM=bf878b47815bc5eaf6afb5279efaa6ff163832bd178c5b7b1604f80e6ad6cde9 \
+go test -tags integration ./target/cortexm -run '^TestHILRP2350IndependentCores$' -count=1 -v
+```
+
+The test requires the known instruction words, running Secure counters, and
+inactive CTIs before acquiring either target. It checks CTI architecture and
+geometry, disabled control and integration mode, zero application triggers,
+output and input-channel status, and all eight input/output routes. It reads and
+preserves CTIGATE. It never writes routing or acknowledgements.
+
+On Nostalgia, two fresh sessions read all 19 registers on each core and checked
+one architectural step per core against PC, R0, and its counter word. Core 0's
+counter stayed unchanged during its halt and after its step while core 1
+advanced; the reverse held when core 1 was halted and stepped. Both counters
+stopped after sequential halt requests. Resuming only core 0 left core 1
+stopped; release from an owned halt restored progress on each core.
+
+Both sessions restored initially disabled halting debug and running state on
+both cores before Arm owner close, with DHCSR `0x01100000` before/after and
+DSCSR `0x00030000` unchanged. Both CTIs remained disabled and unrouted, with
+zero pending output/input-channel status and CTIGATE `0x0f` unchanged. Both
+targets released and the shared owner closed successfully.
+
+This covers the prepared Secure counter programs and serialized per-core
+operations. It does not establish simultaneous stopping, CTI propagation,
+Non-secure execution, sleeping instructions, or cross-core failure recovery.
+Per-target cleanup failures have behavioral coverage; this bench does not inject
+failures. State after Arm owner close was not independently measured. Both loops
+remain running; preparation and instruction effects are not undone.
+
+[dual-counter]: ../target/cortexm/testdata/rp2350-dual-counter/README.md
