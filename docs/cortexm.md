@@ -393,6 +393,29 @@ write, new unowned halt, lost permission, or unusable memory can prevent
 recovery. Successful release restores debug control; it does not undo executed
 instructions.
 
+### Member registers and stepping
+
+`Group.ReadRegister`, `Group.WriteRegister`, and `Group.Step` select one member
+and use its owned target. They retain that member's result in `Results`, with
+the same validation, transfer, event, and cleanup rules as the corresponding
+target method. Register access requires a halt but does not claim it; stepping
+requires an owned halt. Invalid register values fail before memory traffic, and
+uncertain transfers or steps block ordinary group calls. A step neither resumes
+nor steps peers. Register writes and instruction effects persist after release.
+
+For an acquired group with an owned stop on core ID 1:
+
+```go
+pc, err := group.ReadRegister(ctx, 1, cortexm.PC)
+if err == nil {
+    err = group.Step(ctx, 1)
+}
+```
+
+Use the same bounded group release and lower-owner retention shown above even
+when access fails. The group has no policy for suspending inherited CTI routes
+during stepping.
+
 ## Hardware procedure
 
 The opt-in integration test selects the CMSIS-DAP micro:bit with serial
@@ -662,5 +685,36 @@ Non-secure execution, sleeping instructions, or cross-core failure recovery.
 Per-target cleanup failures have behavioral coverage; this bench does not inject
 failures. State after Arm owner close was not independently measured. Both loops
 remain running; preparation and instruction effects are not undone.
+
+## RP2350 group bench
+
+`TestHILRP2350Group` uses the same prepared [RAM counters][dual-counter], J-Link
+EDU Mini V2 `000802011345` at 1 MHz, and one Arm owner lending AP `0x2000` and
+AP `0x4000`. Group IDs 1 and 2 select physical cores 0 and 1 respectively.
+Preparation effects and inactive CTI requirements are those of the
+independent-core bench above. The test does not prepare RAM or write routing.
+
+```sh
+OSTIOLE_RP2350_HIL_GROUP=1 \
+OSTIOLE_RP2350_HIL_PROGRAM=bf878b47815bc5eaf6afb5279efaa6ff163832bd178c5b7b1604f80e6ad6cde9 \
+go test -tags integration ./target/cortexm -run '^TestHILRP2350Group$' -count=1 -v
+```
+
+Two fresh sessions read all 19 registers on each core through the group, halted
+and stepped each while its peer advanced, and resumed each selected core. Both
+counters stopped under sequential group requests. One additional PC/R0/RAM
+verified step on core 0 left both counters stopped; resuming only core 0 left
+core 1 stopped. Group release restored progress on both cores.
+
+Both sessions restored initially disabled debug and running state before Arm
+owner close, with DHCSR `0x01100000` before/after, DSCSR `0x00030000` unchanged,
+and inactive CTIs and gate `0x0f` unchanged. Group release and owner close
+succeeded. State after close was not independently measured. The loops remain
+running; instruction and preparation effects are not undone.
+
+Group register writes, inherited stops, partial failures, cancellation, lost
+permissions, competing events, and cleanup retries have behavioral coverage.
+This bench does not exercise register writes, inject failures, or establish CTI
+propagation, simultaneous stopping, or Non-secure execution.
 
 [dual-counter]: ../target/cortexm/testdata/rp2350-dual-counter/README.md
