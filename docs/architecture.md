@@ -63,8 +63,10 @@ their framing.
 
 A target owns one processor. Several targets may borrow distinct MEM-APs from
 one `armdebug.Conn`; all calls over that shared owner remain serialized.
-Independent RP2350 core control has [physical evidence][dual-core]. It does not
-provide group ownership, CTI routing, or a simultaneous memory snapshot.
+`cortexm.Group` acquires and owns an explicit set of those targets, retaining
+member outcomes and cleanup after partial failure. Independent RP2350 core
+control has [physical evidence][dual-core]. Neither path owns CTI routing or
+supplies a simultaneous memory snapshot.
 
 ## Discovery and opening
 

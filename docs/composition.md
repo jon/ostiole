@@ -38,6 +38,7 @@ data-register write can write target memory.
 | Identify a Cortex-M through any compatible word reader   | `cortexm.Identify`                                                                                                       | `examples/simple/cortexm-info`                                                    |
 | Acquire, halt, inspect registers, and resume a Cortex-M0 | `cortexm.Acquire`, `Target.Halt`, `Target.ReadRegister`, `Target.Resume`, `Target.Release`                               | `examples/simple/cortexm-control`                                                 |
 | Step a Cortex-M0/M33 from an owned halt                  | `Target.Step`                                                                                                            | `examples/simple/cortexm-control -step`                                           |
+| Acquire and release explicit Cortex-M targets together   | `cortexm.AcquireGroup`, `Group.Results`, `Group.Release`                                                                 | [Group ownership](cortexm.md#group-ownership)                                     |
 | Read or write a halted Cortex-M0/M33 register            | `Target.ReadRegister`, `Target.WriteRegister`                                                                            | [Register reads](cortexm.md#register-reads), [writes](cortexm.md#register-writes) |
 | Test SWD and DAP behavior without hardware               | `swd/sim`, `dap/sim`                                                                                                     | Package tests                                                                     |
 
@@ -749,6 +750,14 @@ acquire a separate target for each. Serialize calls over that connection and
 release both targets before closing their memory owner. The
 [two-core composition and bench](cortexm.md#independent-rp2350-cores) show the
 per-core ownership boundary and physical observations.
+
+Use `cortexm.AcquireGroup` when one owner should acquire those targets and
+retain per-member results after partial failure. Supply explicit IDs and
+borrowed memory clients; access the targets through group methods. Serialize
+group and other connection calls. Release the group before closing the Arm
+owner, and retain both when target restoration remains pending. See
+[group ownership and control](cortexm.md#group-ownership) for the composition
+and failure rules.
 
 ## Release in reverse order
 

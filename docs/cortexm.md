@@ -308,6 +308,35 @@ routing can couple stops: inspect the bench's routing before expecting
 independent progress. This composition provides per-core control, without group
 ownership, coordinated stopping, or a simultaneous snapshot.
 
+## Group ownership
+
+`AcquireGroup` copies an explicit list of `Member` values and acquires one
+target for each, in membership order. Each `CoreID` is nonzero and unique within
+that group; it is not a CPUID or AP address. The caller supplies distinct
+physical processors and keeps their memory clients alive. Different IDs cannot
+prove that two clients address different processors.
+
+Acquisition enables halting debug without requesting a halt. It has the effects
+and architecture restrictions of `Acquire`. Invalid static membership fails
+before traffic. On failure, acquisition stops and attempts cleanup with a fresh
+five-second context, in addition to any failed target acquisition's own cleanup.
+A non-nil group returned with an error retains obligations and permits only
+release and cached results. Memory is borrowed on every return.
+
+`Release` restores pending targets in reverse membership order, attempting
+independent members after a failure while its context permits. Use a fresh
+bounded context after cancellation. Successful target releases are never
+repeated. Keep the memory and Arm owners live until every member's
+`CleanupPending` is false. Starting release blocks ordinary group operations;
+nil and inactive groups require no cleanup.
+
+`Results` returns copied member outcomes in membership order without traffic.
+`Attempted` distinguishes members reached from those not reached, and `Err`
+retains their causes. Acquisition failure also records cleanup errors. Identity
+remains available after release. Release updates each member's outcome. The
+group never lends its owned targets. Calls and all other access over the shared
+connection must be serialized by the caller.
+
 ## Hardware procedure
 
 The opt-in integration test selects the CMSIS-DAP micro:bit with serial
