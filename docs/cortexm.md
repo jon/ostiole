@@ -333,9 +333,65 @@ nil and inactive groups require no cleanup.
 `Results` returns copied member outcomes in membership order without traffic.
 `Attempted` distinguishes members reached from those not reached, and `Err`
 retains their causes. Acquisition failure also records cleanup errors. Identity
-remains available after release. Release updates each member's outcome. The
-group never lends its owned targets. Calls and all other access over the shared
-connection must be serialized by the caller.
+remains available after release. Later operations update the selected members,
+so cached results may describe different calls. The group never lends its owned
+targets. Calls and all other access over the shared connection must be
+serialized by the caller.
+
+### Selected control
+
+`Halt`, `Resume`, and `Status` take explicit core IDs and operate in membership
+order, returning an outcome for every selected member. Empty, duplicate, and
+unknown selections fail before traffic. An operation stops on its first failure,
+retaining earlier successes and marking later members unattempted. An uncertain
+or unavailable target puts the whole group into cleanup-only mode; a rejected
+precondition or cancellation before a target attempt does not.
+
+`Halt` confirms each selected stop without claiming a halt already present.
+`Resume` observes each selected core and releases only owned halt requests;
+running or unowned cores are reported as `Skipped` without a control write.
+`Status` observes without claiming a stop, consuming the sticky DHCSR indicators
+documented for `Target.Halted`. M33 restart evidence relinquishes a halt claim.
+
+The outcome's `State` is `ExecutionUnknown` unless the operation establishes
+`Running` or `Halted`. `HaltOwned` records the target's retained halt-request
+claim; on a failed confirmation it does not prove a stop. Release outcomes have
+unknown execution state. Cached results do not refresh hardware observations.
+Sequential requests do not provide simultaneous stopping or an atomic memory
+snapshot. The group does not configure CTIs; inherited routes can couple cores.
+
+For two memory clients already borrowed from one Arm owner:
+
+```go
+group, err := cortexm.AcquireGroup(ctx, []cortexm.Member{
+    {ID: 1, Memory: memory0},
+    {ID: 2, Memory: memory1},
+})
+if err == nil {
+    var stops []cortexm.CoreResult
+    stops, err = group.Halt(ctx, 1, 2)
+    for _, stop := range stops {
+        log.Printf("core %d: state=%v owned=%t attempted=%t error=%v",
+            stop.ID, stop.State, stop.HaltOwned, stop.Attempted, stop.Err)
+    }
+    if err == nil {
+        _, err = group.Resume(ctx, 1)
+    }
+}
+cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+results, releaseErr := group.Release(cleanup)
+cancel()
+err = errors.Join(err, releaseErr)
+if releaseErr == nil {
+    err = errors.Join(err, owner.Close())
+}
+```
+
+Inspect `results` and `err`. When release fails, retain `group` and `owner` for
+another cleanup attempt rather than close the memory dependency. An ambiguous
+write, new unowned halt, lost permission, or unusable memory can prevent
+recovery. Successful release restores debug control; it does not undo executed
+instructions.
 
 ## Hardware procedure
 

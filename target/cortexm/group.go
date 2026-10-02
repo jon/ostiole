@@ -19,12 +19,17 @@ type Member struct {
 }
 
 // CoreResult is a detached member outcome. Attempted means the member operation
-// was called. CleanupPending requires retaining memory and lower owners.
-// Identity survives successful release.
+// was called; Skipped means Resume observed no owned halt to release. State is
+// unknown unless this operation observed execution. HaltOwned is the target's
+// retained halt-request claim, not proof that it stopped. CleanupPending requires
+// retaining memory and lower owners. Identity survives successful release.
 type CoreResult struct {
 	ID             CoreID
 	Identity       Identity
 	Attempted      bool
+	Skipped        bool
+	State          ExecutionState
+	HaltOwned      bool
 	CleanupPending bool
 	Err            error
 }
@@ -94,9 +99,10 @@ func validateMembers(members []Member) error {
 	return nil
 }
 
-// Results copies member outcomes in membership order without traffic.
-// Acquisition failure includes any cleanup errors. Nil groups return no results.
-// Changing the returned slice does not change group state.
+// Results copies each member's most recent outcome in membership order without
+// traffic; members may have been selected by different calls. Acquisition failure
+// includes any cleanup errors. Nil groups return no results. Changing the
+// returned slice does not change group state.
 func (g *Group) Results() []CoreResult {
 	if g == nil {
 		return nil
@@ -104,6 +110,7 @@ func (g *Group) Results() []CoreResult {
 	results := make([]CoreResult, len(g.cores))
 	for i, core := range g.cores {
 		results[i] = core.result
+		results[i].HaltOwned = core.target != nil && core.target.haltOwned
 	}
 	return results
 }
@@ -126,6 +133,8 @@ func (g *Group) release(ctx context.Context, preserve bool) ([]CoreResult, error
 	if !preserve {
 		for i := range g.cores {
 			g.cores[i].result.Attempted = false
+			g.cores[i].result.Skipped = false
+			g.cores[i].result.State = ExecutionUnknown
 			g.cores[i].result.Err = nil
 		}
 	}
