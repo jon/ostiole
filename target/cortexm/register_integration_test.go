@@ -112,7 +112,11 @@ func checkRegisterFirmware(t *testing.T, ctx context.Context, memory *dap.MemAP)
 	}
 }
 
-func readRegisterHIL(t *testing.T, ctx context.Context, core *cortexm.Target, reg cortexm.Register) uint32 {
+type registerReaderHIL interface {
+	ReadRegister(context.Context, cortexm.Register) (uint32, error)
+}
+
+func readRegisterHIL(t *testing.T, ctx context.Context, core registerReaderHIL, reg cortexm.Register) uint32 {
 	t.Helper()
 	value, err := core.ReadRegister(ctx, reg)
 	if err != nil {
@@ -121,7 +125,7 @@ func readRegisterHIL(t *testing.T, ctx context.Context, core *cortexm.Target, re
 	return value
 }
 
-func readRegistersHIL(t *testing.T, ctx context.Context, core *cortexm.Target) map[cortexm.Register]uint32 {
+func readRegistersHIL(t *testing.T, ctx context.Context, core registerReaderHIL) map[cortexm.Register]uint32 {
 	t.Helper()
 	saved := make(map[cortexm.Register]uint32)
 	for _, reg := range []cortexm.Register{

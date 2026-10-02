@@ -91,7 +91,13 @@ func checkCounterStepHIL(t *testing.T, ctx context.Context, core *cortexm.Target
 	checkCounterStepAtHIL(t, ctx, core, memory, n, 0xc6, 0x20000000)
 }
 
-func checkCounterStepAtHIL(t *testing.T, ctx context.Context, core *cortexm.Target, memory *dap.MemAP, n int, start, addr uint32) {
+type stepCoreHIL interface {
+	registerReaderHIL
+	Step(context.Context) error
+	Halted(context.Context) (bool, error)
+}
+
+func checkCounterStepAtHIL(t *testing.T, ctx context.Context, core stepCoreHIL, memory *dap.MemAP, n int, start, addr uint32) {
 	t.Helper()
 	pc := readRegisterHIL(t, ctx, core, cortexm.PC)
 	r0 := readRegisterHIL(t, ctx, core, cortexm.R0)
