@@ -12,23 +12,23 @@ func TestMEMAPDebugBaseRegisters(t *testing.T) {
 		t.Fatal(err)
 	}
 	ap := target.aps[sel]
-	if got, err := ap.readRegister(0xf8); err != nil || got != 2 {
+	if got, err := ap.readRegister(t.Context(), 0xf8); err != nil || got != 2 {
 		t.Fatalf("default BASE=%#x, %v", got, err)
 	}
 	if err := target.SetMEMAPDebugBase(sel, 0xe00ff003, 0x12345678); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := ap.readRegister(0xf0); err != nil || got != 0 {
+	if got, err := ap.readRegister(t.Context(), 0xf0); err != nil || got != 0 {
 		t.Fatalf("32-bit upper BASE=%#x, %v", got, err)
 	}
 	if err := target.SetMEMAPCFG(sel, 2); err != nil {
 		t.Fatal(err)
 	}
 	for reg, want := range map[uint8]uint32{0xf8: 0xe00ff003, 0xf0: 0x12345678} {
-		if err := ap.writeRegister(reg, 0); err != nil {
+		if err := ap.writeRegister(t.Context(), reg, 0); err != nil {
 			t.Fatal(err)
 		}
-		if got, err := ap.readRegister(reg); err != nil || got != want {
+		if got, err := ap.readRegister(t.Context(), reg); err != nil || got != want {
 			t.Fatalf("register %#x=%#x, %v; want %#x", reg, got, err, want)
 		}
 	}

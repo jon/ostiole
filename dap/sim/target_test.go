@@ -108,14 +108,14 @@ func TestTargetSnapshotsSize64ReadData(t *testing.T) {
 	ap := target.aps[sel]
 	ap.regs[0] = 3
 	ap.regs[4] = 0x100
-	low, err := ap.readDRW()
+	low, err := ap.readDRW(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := target.SetMEMAPBytes(sel, 0x104, []byte{0xaa, 0xbb, 0xcc, 0xdd}); err != nil {
 		t.Fatal(err)
 	}
-	high, err := ap.readDRW()
+	high, err := ap.readDRW(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,16 +133,16 @@ func TestTargetAcceptsAutoIncrementOnlyForSize32(t *testing.T) {
 	ap := target.aps[sel]
 	for _, size := range []uint32{0, 1, 3} {
 		ap.regs[0] = size | 0x10
-		if _, err := ap.readDRW(); err == nil {
+		if _, err := ap.readDRW(t.Context()); err == nil {
 			t.Errorf("DRW read accepted CSW.Size encoding %d with address increment", size)
 		}
-		if err := ap.writeDRW(0); err == nil {
+		if err := ap.writeDRW(t.Context(), 0); err == nil {
 			t.Errorf("DRW write accepted CSW.Size encoding %d with address increment", size)
 		}
 	}
 	ap.regs[0] = 2 | 0x10
 	ap.regs[4] = 0x100
-	if _, err := ap.readDRW(); err != nil {
+	if _, err := ap.readDRW(t.Context()); err != nil {
 		t.Fatalf("Size32 incrementing DRW read: %v", err)
 	}
 	if ap.regs[4] != 0x104 {
@@ -161,25 +161,25 @@ func TestTargetRequiresCSWToTerminateIncompleteSize64Transfer(t *testing.T) {
 	}
 	ap := target.aps[sel]
 	ap.regs[0] = 3
-	if _, err := ap.readDRW(); err != nil {
+	if _, err := ap.readDRW(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if err := target.Write(t.Context(), swdsim.Request{AP: true, Addr: 0x04}, 0x100); err == nil {
 		t.Fatal("TAR write succeeded during incomplete Size64 read")
 	}
-	if err := ap.writeDRW(0); err == nil {
+	if err := ap.writeDRW(t.Context(), 0); err == nil {
 		t.Fatal("DRW write succeeded during incomplete Size64 read")
 	}
 	if err := target.Write(t.Context(), swdsim.Request{AP: true, Addr: 0x00}, 3); err != nil {
 		t.Fatal(err)
 	}
-	if err := ap.writeDRW(0x55667788); err != nil {
+	if err := ap.writeDRW(t.Context(), 0x55667788); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := target.Read(t.Context(), swdsim.Request{AP: true, Read: true, Addr: 0x04}); err == nil {
 		t.Fatal("TAR read succeeded during incomplete Size64 write")
 	}
-	if _, err := ap.readDRW(); err == nil {
+	if _, err := ap.readDRW(t.Context()); err == nil {
 		t.Fatal("DRW read succeeded during incomplete Size64 write")
 	}
 	if _, err := target.Read(t.Context(), swdsim.Request{AP: true, Read: true, Addr: 0x00}); err != nil {
