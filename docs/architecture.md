@@ -378,7 +378,11 @@ host-specific state.
 
 The public simulations implement the same boundaries consumed by production
 code. `swd/sim` provides a wire, and `dap/sim` provides DP, AP, and MEM-AP state
-behind that wire.
+behind that wire. A MEM-AP can map bounded target address ranges to a
+`dap/sim.MemoryDevice`. Devices receive complete byte accesses; the MEM-AP still
+owns byte order, address lanes, posted reads, and TAR incrementing. Mappings are
+fixed before target traffic. Unmapped addresses keep their ordinary fixture
+memory.
 
 Production packages do not import their simulators. Tests and downstream
 programs may compose them explicitly, which keeps hardware-free behavior

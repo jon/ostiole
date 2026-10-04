@@ -31,8 +31,10 @@ const (
 	dlcrTurnaroundMask = uint32(3 << 8)
 )
 
-// Target models the initial SW-DP register state.
+// Target models SW-DP, AP and target-memory state. All calls, fixture changes,
+// and uses of devices shared with other targets must be serialized.
 type Target struct {
+	started     bool
 	debugWords  map[uint64]uint32
 	dpidr       uint32
 	ctrlStat    uint32
@@ -47,6 +49,7 @@ type Target struct {
 }
 
 type accessPort struct {
+	devices    []deviceMapping
 	regs       map[uint8]uint32
 	memory     map[uint64]byte
 	memAP      bool
@@ -98,6 +101,7 @@ func (t *Target) ObserveLineReset() {
 	if t == nil {
 		return
 	}
+	t.started = true
 	t.dpBanks[1] = 0
 	if t.dpidr>>12&15 == 3 {
 		t.selectDP &^= 15
@@ -120,6 +124,7 @@ func (t *Target) Acknowledge(ctx context.Context, req swdsim.Request) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	t.started = true
 	sticky := stickyOverrun | stickyCompare | stickyError | writeDataError
 	if t.ctrlStat&sticky == 0 || isStickyExempt(req, t.selectDP) {
 		return nil
@@ -284,7 +289,8 @@ func (t *Target) SetMEMAPSizes(sel dap.APSel, sizes ...dap.TransferSize) error {
 	return nil
 }
 
-// SetMEMAPBytes copies data into one simulated MEM-AP's target memory.
+// SetMEMAPBytes copies data into one simulated MEM-AP's ordinary target memory.
+// It rejects ranges overlapping mapped devices without calling the device.
 func (t *Target) SetMEMAPBytes(sel dap.APSel, addr uint64, data []byte) error {
 	if t == nil {
 		return errors.New("dap/sim: nil target")
@@ -297,8 +303,12 @@ func (t *Target) SetMEMAPBytes(sel dap.APSel, addr uint64, data []byte) error {
 	if ap == nil || !ap.memAP {
 		return fmt.Errorf("dap/sim: AP %d is not a MEM-AP", selection)
 	}
-	if _, err := memoryRangeEnd(addr, len(data)); err != nil {
+	end, err := memoryRangeEnd(addr, len(data))
+	if err != nil {
 		return err
+	}
+	if len(data) != 0 && ap.overlapsDevice(addr, end) {
+		return errors.New("dap/sim: fixture write overlaps mapped device")
 	}
 	for i := range data {
 		ap.memory[addr+uint64(i)] = data[i]
@@ -306,7 +316,8 @@ func (t *Target) SetMEMAPBytes(sel dap.APSel, addr uint64, data []byte) error {
 	return nil
 }
 
-// MEMAPBytes returns a copy of one simulated MEM-AP's target memory range.
+// MEMAPBytes returns a copy of one simulated MEM-AP's ordinary memory range.
+// It rejects ranges overlapping mapped devices without calling the device.
 func (t *Target) MEMAPBytes(sel dap.APSel, addr uint64, size int) ([]byte, error) {
 	if t == nil {
 		return nil, errors.New("dap/sim: nil target")
@@ -319,8 +330,12 @@ func (t *Target) MEMAPBytes(sel dap.APSel, addr uint64, size int) ([]byte, error
 	if ap == nil || !ap.memAP {
 		return nil, fmt.Errorf("dap/sim: AP %d is not a MEM-AP", selection)
 	}
-	if _, err := memoryRangeEnd(addr, size); err != nil {
+	end, err := memoryRangeEnd(addr, size)
+	if err != nil {
 		return nil, err
+	}
+	if size != 0 && ap.overlapsDevice(addr, end) {
+		return nil, errors.New("dap/sim: fixture read overlaps mapped device")
 	}
 	data := make([]byte, size)
 	for i := range data {
@@ -354,8 +369,9 @@ func (t *Target) Read(ctx context.Context, req swdsim.Request) (uint32, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
+	t.started = true
 	if req.AP {
-		return t.readAP(req)
+		return t.readAP(ctx, req)
 	}
 	switch req.Addr {
 	case 0x00:
@@ -386,8 +402,9 @@ func (t *Target) Write(ctx context.Context, req swdsim.Request, value uint32) er
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	t.started = true
 	if req.AP {
-		return t.writeAP(req, value)
+		return t.writeAP(ctx, req, value)
 	}
 	switch req.Addr {
 	case 0x00:
@@ -412,7 +429,7 @@ func validateRequest(req swdsim.Request, read bool) error {
 	return nil
 }
 
-func (t *Target) readAP(req swdsim.Request) (uint32, error) {
+func (t *Target) readAP(ctx context.Context, req swdsim.Request) (uint32, error) {
 	posted := t.rdbuff
 	if value, ok := t.debugWords[uint64(t.selectHigh)<<32|uint64(t.selectDP&^15)|uint64(req.Addr)]; ok && t.dpidr>>12&15 == 3 {
 		t.rdbuff = value
@@ -427,7 +444,11 @@ func (t *Target) readAP(req swdsim.Request) (uint32, error) {
 	if err != nil {
 		return 0, err
 	}
-	value, err := ap.readRegister(reg)
+	value, err := ap.readRegister(ctx, reg)
+	if errors.Is(err, ErrBusFault) {
+		t.ctrlStat |= stickyError
+		return posted, nil
+	}
 	if err != nil {
 		return 0, err
 	}
@@ -435,7 +456,7 @@ func (t *Target) readAP(req swdsim.Request) (uint32, error) {
 	return posted, nil
 }
 
-func (t *Target) writeAP(req swdsim.Request, value uint32) error {
+func (t *Target) writeAP(ctx context.Context, req swdsim.Request, value uint32) error {
 	ap := t.aps[t.selectedAP()]
 	if ap == nil {
 		return nil
@@ -444,10 +465,15 @@ func (t *Target) writeAP(req swdsim.Request, value uint32) error {
 	if err != nil {
 		return err
 	}
-	return ap.writeRegister(reg, value)
+	err = ap.writeRegister(ctx, reg, value)
+	if errors.Is(err, ErrBusFault) {
+		t.ctrlStat |= stickyError
+		return nil
+	}
+	return err
 }
 
-func (ap *accessPort) readRegister(reg uint8) (uint32, error) {
+func (ap *accessPort) readRegister(ctx context.Context, reg uint8) (uint32, error) {
 	if !ap.memAP {
 		return ap.regs[reg], nil
 	}
@@ -458,7 +484,7 @@ func (ap *accessPort) readRegister(reg uint8) (uint32, error) {
 		return 0, nil
 	}
 	if reg == 0x0c {
-		return ap.readDRW()
+		return ap.readDRW(ctx)
 	}
 	if reg == 0 {
 		ap.largePhase = largeDataIdle
@@ -466,7 +492,7 @@ func (ap *accessPort) readRegister(reg uint8) (uint32, error) {
 	return ap.regs[reg], nil
 }
 
-func (ap *accessPort) writeRegister(reg uint8, value uint32) error {
+func (ap *accessPort) writeRegister(ctx context.Context, reg uint8, value uint32) error {
 	if !ap.memAP {
 		ap.regs[reg] = value
 		return nil
@@ -481,7 +507,7 @@ func (ap *accessPort) writeRegister(reg uint8, value uint32) error {
 		return nil
 	}
 	if reg == 0x0c {
-		return ap.writeDRW(value)
+		return ap.writeDRW(ctx, value)
 	}
 	if reg == 0 && ap.sizes&(1<<uint8(value&7)) == 0 {
 		value = value&^uint32(7) | ap.regs[0]&7
@@ -500,10 +526,9 @@ func (ap *accessPort) validateLargeDataRegister(reg uint8, operation string) err
 	return fmt.Errorf("dap/sim: MEM-AP register %#02x %s during incomplete 64-bit transfer", reg, operation)
 }
 
-func (ap *accessPort) readDRW() (uint32, error) {
+func (ap *accessPort) readDRW(ctx context.Context) (uint32, error) {
 	size := uint8(ap.regs[0] & 7)
-	addrInc := ap.regs[0] & 0x30
-	if size > 3 || addrInc == 0x20 || addrInc == 0x30 || addrInc == 0x10 && size != 2 {
+	if !ap.supportsDRWAddressing() {
 		return 0, errors.New("dap/sim: DRW read has unsupported CSW.Size or AddrInc")
 	}
 	if size == 3 {
@@ -512,7 +537,10 @@ func (ap *accessPort) readDRW() (uint32, error) {
 		}
 		switch ap.largePhase {
 		case largeDataIdle:
-			value := ap.memoryValue(ap.targetAddress(), 8)
+			value, err := ap.memoryValue(ctx, ap.targetAddress(), 8)
+			if err != nil {
+				return 0, err
+			}
 			ap.largeWord = uint32(value >> 32)
 			ap.largePhase = largeDataRead
 			return uint32(value), nil
@@ -525,15 +553,17 @@ func (ap *accessPort) readDRW() (uint32, error) {
 		}
 	}
 	width := 1 << size
-	value := uint32(ap.memoryValue(ap.targetAddress(), width))
+	value, err := ap.memoryValue(ctx, ap.targetAddress(), width)
+	if err != nil {
+		return 0, err
+	}
 	ap.incrementTAR(width)
-	return value << ap.laneShift(width), nil
+	return uint32(value) << ap.laneShift(width), nil
 }
 
-func (ap *accessPort) writeDRW(value uint32) error {
+func (ap *accessPort) writeDRW(ctx context.Context, value uint32) error {
 	size := uint8(ap.regs[0] & 7)
-	addrInc := ap.regs[0] & 0x30
-	if size > 3 || addrInc == 0x20 || addrInc == 0x30 || addrInc == 0x10 && size != 2 {
+	if !ap.supportsDRWAddressing() {
 		return errors.New("dap/sim: DRW write has unsupported CSW.Size or AddrInc")
 	}
 	if size == 3 {
@@ -546,18 +576,24 @@ func (ap *accessPort) writeDRW(value uint32) error {
 			ap.largePhase = largeDataWrite
 			return nil
 		case largeDataWrite:
-			ap.writeMemoryValue(ap.targetAddress(), 8, uint64(ap.largeWord)|uint64(value)<<32)
 			ap.largePhase = largeDataIdle
-			return nil
+			return ap.writeMemoryValue(ctx, ap.targetAddress(), 8, uint64(ap.largeWord)|uint64(value)<<32)
 		default:
 			return errors.New("dap/sim: 64-bit DRW write interrupted a read")
 		}
 	}
 	width := 1 << size
 	data := uint64(value >> ap.laneShift(width))
-	ap.writeMemoryValue(ap.targetAddress(), width, data)
+	if err := ap.writeMemoryValue(ctx, ap.targetAddress(), width, data); err != nil {
+		return err
+	}
 	ap.incrementTAR(width)
 	return nil
+}
+
+func (ap *accessPort) supportsDRWAddressing() bool {
+	size, inc := ap.regs[0]&7, ap.regs[0]&0x30
+	return size <= 3 && (inc == 0 || inc == 0x10 && size == 2)
 }
 
 func (ap *accessPort) incrementTAR(width int) {
@@ -584,28 +620,34 @@ func (ap *accessPort) laneShift(width int) uint {
 	return uint(lane * 8)
 }
 
-func (ap *accessPort) memoryValue(addr uint64, width int) uint64 {
+func (ap *accessPort) memoryValue(ctx context.Context, addr uint64, width int) (uint64, error) {
+	data, err := ap.readMemory(ctx, addr, width)
+	if err != nil {
+		return 0, err
+	}
 	var value uint64
 	if ap.regs[0xf4]&1 != 0 {
 		for offset := range width {
-			value = value<<8 | uint64(ap.memory[addr+uint64(offset)])
+			value = value<<8 | uint64(data[offset])
 		}
-		return value
+		return value, nil
 	}
 	for offset := range width {
-		value |= uint64(ap.memory[addr+uint64(offset)]) << uint(offset*8)
+		value |= uint64(data[offset]) << uint(offset*8)
 	}
-	return value
+	return value, nil
 }
 
-func (ap *accessPort) writeMemoryValue(addr uint64, width int, value uint64) {
+func (ap *accessPort) writeMemoryValue(ctx context.Context, addr uint64, width int, value uint64) error {
+	data := make([]byte, width)
 	for offset := range width {
 		shift := offset * 8
 		if ap.regs[0xf4]&1 != 0 {
 			shift = (width - 1 - offset) * 8
 		}
-		ap.memory[addr+uint64(offset)] = byte(value >> uint(shift))
+		data[offset] = byte(value >> uint(shift))
 	}
+	return ap.writeMemory(ctx, addr, data)
 }
 
 func (t *Target) apReg(req swdsim.Request) (uint8, error) {

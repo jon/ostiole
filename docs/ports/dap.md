@@ -632,6 +632,58 @@ MEM-AP state before releasing the debug port and probe; retain the owner and
 retry if cleanup fails. Target-memory reads preserve the inherited access
 attributes. This does not acquire or halt the processor.
 
+## Mapping simulated target devices
+
+`dap/sim.Target.MapMEMAPDevice` replaces a bounded range of a MEM-AP's ordinary
+fixture memory with a `dap/sim.MemoryDevice`. Configure mappings before
+connecting the simulated wire:
+
+```go
+target := dapsim.New(0x2ba01477)
+sel := dap.NewAPSel(0)
+if err := target.AddMEMAP(sel, 0x00010001, nil); err != nil {
+    return err
+}
+if err := target.MapMEMAPDevice(sel, 0xe000ed00, 0x100, device); err != nil {
+    return err
+}
+conn := swd.New(swdsim.New(target))
+dp := dap.NewDebugPort(dap.SWDP(conn))
+```
+
+Here `device` implements `MemoryDevice`, and the simulator packages are imported
+as `dapsim` and `swdsim`. Connect `dp` and acquire MEM-APs through the ordinary
+public APIs. Release each MEM-AP before releasing the DP, retaining owners if
+cleanup fails. Mapping itself performs no traffic and owns no cleanup.
+
+Each device call receives the caller's context, the absolute target byte
+address, and a fresh byte slice of length 1, 2, 4 or 8. The bytes follow
+increasing target addresses in both MEM-AP byte orders. A read fills the slice;
+a write consumes it without retaining it. The MEM-AP owns numeric byte order,
+DRW lanes, posted reads, 64-bit transfer phases and TAR incrementing. Narrow
+writes do not synthesize a device read/modify/write. A device can reject widths
+it does not support.
+
+An access crossing a mapping boundary faults before any device or ordinary
+memory effect. Empty, overflowing, overlapping and nil-device mappings are
+rejected, and mappings cannot change once target traffic starts. `SetMEMAPBytes`
+and `MEMAPBytes` reject any nonempty range overlapping a device; they neither
+invoke callbacks nor silently access the hidden fixture bytes. Serialize target
+traffic, fixture changes, and all views of shared devices.
+
+A device returns `dapsim.ErrBusFault` to model a completed bus error. The
+accepted AP data phase sets DP STICKYERR, and a later request observes SWD
+FAULT. A faulting DRW access does not increment TAR. The device decides whether
+a rejected write had an effect; the simulator never replays it or undoes it.
+Ordinary DAP recovery captures and clears sticky state, invalidating existing
+MEM-AP clients. Release and reopen those clients before further access. Other
+callback errors become `ErrDeviceFailure`, preserving their diagnostic text and
+context cancellation/deadline identity while hiding protocol classifications. An
+accepted access might already have taken effect. Request-phase WAIT injection
+belongs to `swd/sim.Acknowledger`; a bus callback error cannot retroactively
+change an acknowledgement already sent. Bus latency and pending completion are
+not modeled.
+
 ## Discovering ADIv6 access ports
 
 `DebugPort.DebugSpace` borrows the DP's debug address space. Its `ReadDebugBase`
@@ -664,4 +716,4 @@ cleanup; the caller still releases the debug port. The DP's discovery base and a
 MEM-AP's debug base belong to different address spaces.
 
 [adi-v6-spec]:
-  https://documentation-service.arm.com/static/622222b2e6f58973271ebc21
+  https://documentation-service.arm.com/static/62221ef4e6f58973271ebc1d
