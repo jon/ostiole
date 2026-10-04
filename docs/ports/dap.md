@@ -684,6 +684,32 @@ belongs to `swd/sim.Acknowledger`; a bus callback error cannot retroactively
 change an acknowledgement already sent. Bus latency and pending completion are
 not modeled.
 
+`dap/sim.RAM` supplies a shared byte store. Map the same value through several
+APs; writes through one AP are then visible through the others. Its zero value
+is usable. Use `SetBytes` to prepare fixtures and `Bytes` to read snapshots:
+
+```go
+ram := new(dapsim.RAM)
+if err := ram.SetBytes(0x20040000, []byte{0, 0, 0, 0}); err != nil {
+    return err
+}
+for _, sel := range []dap.APSel{dap.NewAPSel(0), dap.NewAPSel(1)} {
+    if err := target.MapMEMAPDevice(sel, 0x20040000, 0x100, ram); err != nil {
+        return err
+    }
+}
+snapshot, err := ram.Bytes(0x20040000, 4)
+```
+
+Both MEM-AP fixtures must already exist, and the mappings still precede traffic.
+For ADIv6, use configured `dap.APAt` selectors instead of `dap.NewAPSel`.
+`SetBytes` and `Bytes` operate directly on the shared store, copy their slices,
+and perform no simulated bus traffic. Bounds for bus accesses come from each
+mapping; fixture access to RAM itself can cover any non-overflowing byte range.
+Use separate device values for core-private register windows at the same address
+through different APs. Neither the shared store nor device mapping adds
+processor execution or synchronization between cores.
+
 ## Discovering ADIv6 access ports
 
 `DebugPort.DebugSpace` borrows the DP's debug address space. Its `ReadDebugBase`
