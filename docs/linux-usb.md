@@ -5,6 +5,14 @@ commands should run as an unprivileged user. Do not work around device
 permissions with `sudo go run` or `sudo go test`: those commands compile and
 execute repository code as root.
 
+Endpoint-zero control transfers accept buffers up to 65,535 bytes. The host
+timeout defaults to five seconds; a context deadline rounds up to the next
+millisecond and clamps to the Linux unsigned 32-bit millisecond limit. Control
+requests use the native pointer width, and their buffers remain pinned until the
+ioctl returns. Interface and bulk requests use the ioctl direction encoding for
+the host architecture, including the PowerPC and MIPS variants. This ABI
+handling does not establish physical validation on every Linux architecture.
+
 ## Grant device access
 
 Give the interactive user permission to open only the intended USB products. For

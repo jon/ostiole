@@ -10,9 +10,9 @@ import (
 )
 
 const (
-	usbfsClaimInterface   = 0x8004550f
-	usbfsReleaseInterface = 0x80045510
-	usbfsSetInterface     = 0x80085504
+	usbfsClaimInterface   = usbfsIOCRead | uintptr(0x4550f)
+	usbfsReleaseInterface = usbfsIOCRead | uintptr(0x45510)
+	usbfsSetInterface     = usbfsIOCRead | uintptr(0x85504)
 )
 
 type ioctlFunc func(fd, request uintptr, argument any) (uintptr, error)
