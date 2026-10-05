@@ -5,7 +5,10 @@ def reviewed_commit:
   ) catch empty;
 
 ([$runs[0][]
-    | select(.head_sha == $head and any(.pull_requests[]?; .number == $pr))
+    | select(.head_sha == $head and (
+        any(.pull_requests[]?; .number == $pr)
+        or ((.pull_requests | length) == 0 and .head_repository.id == $head_repository)
+      ))
     | .created_at
   ] | min) as $head_first_seen_at
 | select(($head_first_seen_at | type) == "string")
