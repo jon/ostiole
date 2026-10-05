@@ -11,7 +11,7 @@ import (
 	"unsafe"
 )
 
-const usbfsControl = uintptr(0xc0005500) | unsafe.Sizeof(usbControlTransfer{})<<16
+const usbfsControl = usbfsIOCRead | usbfsIOCWrite | uintptr(0x5500) | unsafe.Sizeof(usbControlTransfer{})<<16
 
 const defaultTransferTimeout = 5 * time.Second
 

@@ -9,8 +9,9 @@ Endpoint-zero control transfers accept buffers up to 65,535 bytes. The host
 timeout defaults to five seconds; a context deadline rounds up to the next
 millisecond and clamps to the Linux unsigned 32-bit millisecond limit. Control
 requests use the native pointer width, and their buffers remain pinned until the
-ioctl returns. This ABI handling does not establish physical validation on every
-Linux architecture.
+ioctl returns. Interface and bulk requests use the ioctl direction encoding for
+the host architecture, including the PowerPC and MIPS variants. This ABI
+handling does not establish physical validation on every Linux architecture.
 
 ## Grant device access
 
