@@ -57,6 +57,7 @@ evaluate_files() {
     --slurpfile runs "$runs_file" \
     --arg head "$head_sha" \
     --argjson pr "$pr_number" \
+    --argjson head_repository 1234 \
     -f "$filter" >/dev/null
 }
 
@@ -108,6 +109,9 @@ reject malformed-summary "$(jq '.comments[0].body = "not metadata"' <<< "$matchi
 reject wrong-run-head "$(jq '.runs[0].head_sha = "ffffffffffffffffffffffffffffffffffffffff"' <<< "$matching")"
 reject wrong-run-pr "$(jq '.runs[0].pull_requests[0].number = 54' <<< "$matching")"
 reject missing-run "$(jq '.runs = []' <<< "$matching")"
+accept fork-run "$(jq '.runs[0] |= (.pull_requests = [] | .head_repository = {id: 1234})' <<< "$matching")"
+reject wrong-fork-repository "$(jq '.runs[0] |= (.pull_requests = [] | .head_repository = {id: 5678})' <<< "$matching")"
+reject unattributed-run "$(jq '.runs[0].pull_requests = []' <<< "$matching")"
 
 argument_limit=$(getconf ARG_MAX)
 if [[ ! "$argument_limit" =~ ^[0-9]+$ ]]; then

@@ -161,6 +161,12 @@ Changes to policy tooling, lint and format configuration, files under
 `.github/`, and `AGENTS*.md` instruction files receive a review-policy warning
 and are assigned to the maintainer in CODEOWNERS.
 
+The policy job builds its checker from the pull request's base revision and
+checks the proposed head's commits and Markdown. The Codex gate also loads its
+review evaluator from the base revision. It checks the pull request's current
+head and draft state before accepting a review, including on reruns of older
+workflow events. Failed or empty commit enumeration fails the per-commit job.
+
 Untrusted pull-request workflows receive no secrets or write-capable checkout
 credentials and never run HIL. CodeQL uses the ordinary `pull_request` event and
 GitHub's built-in token; it does not use `pull_request_target` or a maintainer

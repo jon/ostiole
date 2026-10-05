@@ -37,17 +37,22 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha }}
+      - name: Prepare the base policy source
+        run: git worktree add --detach "$RUNNER_TEMP/policy-base" "$BASE_SHA"
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version-file: go.mod
+          go-version-file: ${{ runner.temp }}/policy-base/go.mod
           cache: false
       - name: Check commits and pull-request metadata
-        run: >-
-          go run ./internal/ci/checkpr
-          -base "$BASE_SHA"
-          -head "$HEAD_SHA"
-          -event "$GITHUB_EVENT_PATH"
+        shell: bash
+        run: |
+          (
+            cd "$RUNNER_TEMP/policy-base"
+            GOWORK=off go build -o "$RUNNER_TEMP/checkpr" ./internal/ci/checkpr
+          )
+          "$RUNNER_TEMP/checkpr" -repo "$GITHUB_WORKSPACE" \
+            -base "$BASE_SHA" -head "$HEAD_SHA" -event "$GITHUB_EVENT_PATH"
 
   commits:
     if: ${{ github.event_name == 'pull_request' }}
@@ -81,6 +86,11 @@ jobs:
           }
           trap cleanup EXIT
 
+          commits=$(git rev-list --reverse "${BASE_SHA}..${HEAD_SHA}")
+          if [[ -z "$commits" ]]; then
+            echo "The pull-request commit range is empty."
+            exit 1
+          fi
           while read -r commit; do
             echo "Testing ${commit}"
             git worktree add --detach "$worktree" "$commit"
@@ -97,7 +107,7 @@ jobs:
               go test -race ./...
             )
             git worktree remove --force "$worktree"
-          done < <(git rev-list --reverse "${BASE_SHA}..${HEAD_SHA}")
+          done <<< "$commits"
 
   quality:
     name: quality
@@ -149,7 +159,9 @@ jobs:
           npx --yes "prettier@${PRETTIER_VERSION}" --check "${markdown_files[@]}"
           npx --yes "markdownlint-cli2@${MARKDOWNLINT_VERSION}" -- "${markdown_files[@]}"
       - name: Test Codex review signal
-        run: bash .github/scripts/codex-review-signal_test.sh
+        run: |
+          bash .github/scripts/codex-review-signal_test.sh
+          python3 .github/scripts/publication-guards_test.py
       - name: Lint workflows
         run: |
           go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
@@ -198,7 +210,7 @@ jobs:
           usb/iokit_darwin.c
 
   codex-reviewed:
-    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+    if: ${{ github.event_name == 'pull_request' }}
     name: codex-reviewed
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -216,10 +228,19 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.base.sha }}
       - name: Wait for Codex to review the current head
         shell: bash
         run: |
+          current_pull_request() {
+            gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}"
+          }
+
+          current_reviewable_head() {
+            current_pull_request | jq -e --arg head "$HEAD_SHA" \
+              '.draft == false and .head.sha == $head' >/dev/null
+          }
+
           post_head_timeline() {
             gh api \
               --paginate \
@@ -292,6 +313,7 @@ jobs:
               --slurpfile runs "$review_runs_file" \
               --arg head "$HEAD_SHA" \
               --argjson pr "$PR_NUMBER" \
+              --argjson head_repository "$head_repository" \
               -f .github/scripts/codex-review-signal.jq > "$review_prefixes_file" || return 1
             reviewed_head < "$review_prefixes_file"
           }
@@ -318,13 +340,22 @@ jobs:
           trap cleanup EXIT
 
           for attempt in {1..60}; do
-            if clean_reaction_review; then
+            pull_request=$(current_pull_request) || pull_request='{}'
+            head_repository=$(jq -er --arg head "$HEAD_SHA" '
+              select(.draft == false and .head.sha == $head) | .head.repo.id
+            ' <<< "$pull_request") || head_repository='null'
+            if [[ "$head_repository" == "null" ]]; then
+              echo "Waiting for a current ready pull-request head (${attempt}/60)."
+              sleep 20
+              continue
+            fi
+            if clean_reaction_review && current_reviewable_head; then
               echo "Codex completed a clean review of ${HEAD_SHA}."
               finish 0
             fi
 
-            post_head_entries=$(post_head_timeline)
-            if clean_comment_review; then
+            post_head_entries=$(post_head_timeline) || post_head_entries='[]'
+            if clean_comment_review && current_reviewable_head; then
               echo "Codex completed a clean review of ${HEAD_SHA}."
               finish 0
             fi
