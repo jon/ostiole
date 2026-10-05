@@ -1,6 +1,9 @@
 package sim
 
-import "errors"
+import (
+	"errors"
+	"math"
+)
 
 // ErrUnsupported reports behavior outside this model or an architecturally
 // unpredictable request. It is a fixture/model failure, not a target bus fault.
@@ -15,21 +18,22 @@ func (c *Core) writeControl(value uint32) error {
 		return err
 	}
 	if control&enabled == 0 {
+		c.invalidateTransition()
 		c.state.DHCSR &^= enabled | haltRequest | maskInterrupts
 		return nil
 	}
 	if !c.debugAllowed() {
 		control &^= haltRequest
 	}
+	delay := c.transitionDelay(control)
+	if c.transitionPossible(control) && delay != NoCompletion && delay > math.MaxUint64-c.clock.now {
+		return ErrUnsupported
+	}
 	previous := c.state.DHCSR & (enabled | haltRequest)
 	c.state.DHCSR = c.state.DHCSR & ^(enabled|haltRequest|maskInterrupts|snapStall) | control
 	if previous != control&(enabled|haltRequest) {
-		if control&haltRequest != 0 {
-			c.state.DHCSR |= inDebug | registerReady
-			c.state.DFSR |= 1
-		} else {
-			c.completeResume()
-		}
+		c.invalidateTransition()
+		c.queueTransition(control)
 	}
 	return nil
 }
@@ -66,6 +70,10 @@ func (c *Core) completeResume() {
 		c.state.DHCSR |= restarted
 	}
 	c.state.DHCSR &^= inDebug
+}
+
+func (c *Core) invalidateTransition() {
+	c.generation++
 }
 
 func (c *Core) debugAllowed() bool {

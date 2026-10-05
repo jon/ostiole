@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/jon/ostiole/armdebug"
 	"github.com/jon/ostiole/dap"
@@ -17,8 +18,10 @@ import (
 
 type clockedProbe struct {
 	*swdsim.Wire
+	clock  *sim.Clock
 	closes int
 	fail   error
+	pace   uint64
 }
 
 func (p *clockedProbe) SWD(context.Context, probe.SWDConfig) (probe.Wire, error) { return p, nil }
@@ -30,19 +33,37 @@ func (p *clockedProbe) SWDIO(ctx context.Context, direction, output []byte, bits
 	if p.fail != nil {
 		return nil, p.fail
 	}
+	if err := p.clock.Advance(p.pace); err != nil {
+		return nil, err
+	}
 	return p.Wire.SWDIO(ctx, direction, output, bits)
 }
 
+type observedMemory struct {
+	*dap.MemAP
+	afterRead func(uint32)
+}
+
+func (m *observedMemory) ReadWord(ctx context.Context, addr uint32) (uint32, error) {
+	value, err := m.MemAP.ReadWord(ctx, addr)
+	if err == nil && addr == uint32(dhcsr) && m.afterRead != nil {
+		m.afterRead(value)
+	}
+	return value, err
+}
+
 type composition struct {
-	owner    *armdebug.Conn
-	probe    *clockedProbe
-	cores    []*sim.Core
-	memories []*dap.MemAP
-	group    *cortexm.Group
+	owner        *armdebug.Conn
+	probe        *clockedProbe
+	cores        []*sim.Core
+	memories     []*dap.MemAP
+	group        *cortexm.Group
+	observations []*observedMemory
 }
 
 func compose(t *testing.T, p sim.Profile, inherited bool) *composition {
 	t.Helper()
+	clock := new(sim.Clock)
 	dp := dapsim.New(0x2ba01477)
 	b := &composition{}
 	selectors := []dap.APSel{dap.NewAPSel(0), dap.NewAPSel(1)}
@@ -73,7 +94,7 @@ func compose(t *testing.T, p sim.Profile, inherited bool) *composition {
 		if inherited && i == 1 {
 			initial.DHCSR |= enable | halt | halted
 		}
-		core, err := sim.New(sim.Config{Profile: p, Initial: initial})
+		core, err := sim.New(sim.Config{Profile: p, Initial: initial, Clock: clock, HaltDelay: 10, ResumeDelay: 8})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -84,7 +105,7 @@ func compose(t *testing.T, p sim.Profile, inherited bool) *composition {
 		}
 		b.cores = append(b.cores, core)
 	}
-	b.probe = &clockedProbe{Wire: swdsim.New(dp)}
+	b.probe = &clockedProbe{Wire: swdsim.New(dp), clock: clock, pace: 1}
 	owner, err := armdebug.Connect(t.Context(), probe.New(probe.Info{}, b.probe), armdebug.Config{Port: armdebug.SWDP(probe.SWDConfig{MaxClockHz: 1_000_000})})
 	if err != nil {
 		t.Fatal(err)
@@ -97,7 +118,9 @@ func compose(t *testing.T, p sim.Profile, inherited bool) *composition {
 			t.Fatal(err)
 		}
 		b.memories = append(b.memories, m)
-		members[i] = cortexm.Member{ID: cortexm.CoreID(i + 1), Memory: m}
+		view := &observedMemory{MemAP: m}
+		b.observations = append(b.observations, view)
+		members[i] = cortexm.Member{ID: cortexm.CoreID(i + 1), Memory: view}
 	}
 	b.group, err = cortexm.AcquireGroup(t.Context(), members)
 	if err != nil {
@@ -151,6 +174,37 @@ func checkGroupOwnership(t *testing.T, p sim.Profile, inherited bool) {
 		if c.Snapshot().DHCSR&(3|halted) != expected {
 			t.Fatalf("core %d not restored: %+v", i, c.Snapshot())
 		}
+	}
+}
+
+func TestCanceledPendingHaltRestoresWithFreshContext(t *testing.T) {
+	b := compose(t, sim.M33, false)
+	b.probe.pace = 0
+	ctx, cancel := context.WithCancel(t.Context())
+	b.observations[0].afterRead = func(value uint32) {
+		if value&(halt|halted) == halt {
+			cancel()
+		}
+	}
+	defer cancel()
+	_, err := b.group.Halt(ctx, 1)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	if b.cores[0].Snapshot().DHCSR&(halt|halted) != halt {
+		t.Fatal("halt request not distinct from completion")
+	}
+	if err := b.probe.clock.Advance(10); err != nil {
+		t.Fatal(err)
+	}
+	b.probe.pace = 1
+	cleanup, done := context.WithTimeout(t.Context(), time.Second)
+	defer done()
+	if _, err := b.group.Release(cleanup); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.owner.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 
