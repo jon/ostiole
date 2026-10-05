@@ -52,6 +52,8 @@ type Core struct {
 	clock                  *Clock
 	haltDelay, resumeDelay uint64
 	generation             uint64
+	secureAllowed          bool
+	haltReady              bool
 	unsafeMemory           bool
 }
 
@@ -88,7 +90,8 @@ func New(cfg Config) (*Core, error) {
 	return &Core{
 		profile: cfg.Profile, state: cfg.Initial, clock: cfg.Clock,
 		haltDelay: cfg.HaltDelay, resumeDelay: cfg.ResumeDelay,
-		unsafeMemory: cfg.Initial.DHCSR&snapStall != 0,
+		secureAllowed: cfg.Initial.DHCSR&secureDebug != 0,
+		unsafeMemory:  cfg.Initial.DHCSR&snapStall != 0,
 	}, nil
 }
 

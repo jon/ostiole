@@ -231,3 +231,74 @@ func TestSharedTransportFailureRetainsCleanup(t *testing.T) {
 		t.Fatal("cleanup obligations lost")
 	}
 }
+
+func TestRestartAndCompetingStopDoNotFabricateOwnership(t *testing.T) {
+	b := compose(t, sim.M33, false)
+	if _, err := b.group.Halt(t.Context(), 1); err != nil {
+		t.Fatal(err)
+	}
+	c := b.cores[0]
+	for _, event := range []sim.Event{sim.ExternalRestart, sim.ExternalHalt} {
+		if err := c.Schedule(c.Clock().Now(), event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := c.Clock().Advance(0); err != nil {
+		t.Fatal(err)
+	}
+	result, err := b.group.Status(t.Context(), 1)
+	if err != nil || result[0].HaltOwned || result[0].State != cortexm.Halted {
+		t.Fatalf("restart ownership: %+v %v", result, err)
+	}
+	result, err = b.group.Resume(t.Context(), 1)
+	if err != nil || !result[0].Skipped || c.Snapshot().DHCSR&halted == 0 {
+		t.Fatal("resumed competing stop")
+	}
+	if _, err := b.group.Release(t.Context()); err == nil {
+		t.Fatal("restored disabled debug through unowned stop")
+	}
+	if err := c.Schedule(c.Clock().Now(), sim.ExternalRestart); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Clock().Advance(0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.group.Release(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.owner.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPermissionLossAndReturnAllowRetainedRestoration(t *testing.T) {
+	b := compose(t, sim.M33, false)
+	c := b.cores[0]
+	if err := c.Schedule(c.Clock().Now(), sim.RevokeSecureDebug); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Clock().Advance(0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.group.Status(t.Context(), 1); err == nil {
+		t.Fatal("permission loss not observed")
+	}
+	if _, err := b.group.Release(t.Context()); err == nil {
+		t.Fatal("restored without Secure permission")
+	}
+	if b.group.Results()[1].CleanupPending {
+		t.Fatal("healthy peer cleanup not attempted")
+	}
+	if err := c.Schedule(c.Clock().Now(), sim.GrantSecureDebug); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Clock().Advance(0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.group.Release(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.owner.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
