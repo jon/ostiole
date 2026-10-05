@@ -16,12 +16,12 @@ import (
 
 const (
 	usbfsURBBulk    = 3
-	usbfsDiscardURB = uintptr(0x550b)
+	usbfsDiscardURB = usbfsIOCNone | uintptr(0x550b)
 )
 
 const (
-	usbfsSubmitURB      = uintptr(0x8000550a) | unsafe.Sizeof(usbURB{})<<16
-	usbfsReapURBNoDelay = uintptr(0x4000550d) | unsafe.Sizeof(uintptr(0))<<16
+	usbfsSubmitURB      = usbfsIOCRead | uintptr(0x550a) | unsafe.Sizeof(usbURB{})<<16
+	usbfsReapURBNoDelay = usbfsIOCWrite | uintptr(0x550d) | unsafe.Sizeof(uintptr(0))<<16
 )
 
 type usbURB struct {
