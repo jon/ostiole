@@ -71,6 +71,19 @@ func TestWriteMEMAPScalarsOverFTDI(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	size64 := exerciseHardwareScalarWrites(t, ctx, mem, addr, original)
+	if err := writeHardwareBytes(ctx, mem, addr, original); err != nil {
+		t.Fatal(err)
+	}
+	if err := assertHardwareBytes(ctx, mem, addr, original); err != nil {
+		t.Fatal(err)
+	}
+	restored = true
+	t.Logf("scalar writes: scratch=%#x bytes=%d sizes=8,16,32 size64=%s neighboring_lanes=unchanged restored=true", addr, hardwareScratchSize, size64)
+}
+
+func exerciseHardwareScalarWrites(t *testing.T, ctx context.Context, mem *dap.MemAP, addr uint64, original []byte) string {
+	t.Helper()
 	expected := slices.Clone(original)
 	accesses := []struct {
 		offset int
@@ -108,14 +121,7 @@ func TestWriteMEMAPScalarsOverFTDI(t *testing.T) {
 	} else if !strings.Contains(err.Error(), "CFG.LD") {
 		t.Fatalf("Size64 write error = %v, want CFG.LD rejection", err)
 	}
-	if err := writeHardwareBytes(ctx, mem, addr, original); err != nil {
-		t.Fatal(err)
-	}
-	if err := assertHardwareBytes(ctx, mem, addr, original); err != nil {
-		t.Fatal(err)
-	}
-	restored = true
-	t.Logf("scalar writes: scratch=%#x bytes=%d sizes=8,16,32 size64=%s neighboring_lanes=unchanged restored=true", addr, hardwareScratchSize, size64)
+	return size64
 }
 
 func restoreHardwareScratch(ctx context.Context, dp *dap.DebugPort, mem **dap.MemAP, addr uint64, original []byte, expectedDPIDR, expectedAPIDR uint32) error {
@@ -123,43 +129,26 @@ func restoreHardwareScratch(ctx context.Context, dp *dap.DebugPort, mem **dap.Me
 	identityVerified := true
 	for {
 		if *mem != nil {
-			writeErr := writeHardwareBytes(ctx, *mem, addr, original)
-			verifyErr := error(nil)
-			if writeErr == nil {
-				verifyErr = assertHardwareBytes(ctx, *mem, addr, original)
-			}
-			if writeErr == nil && verifyErr == nil {
+			restored, err := restoreHardwareScratchAttempt(ctx, mem, addr, original)
+			if restored {
 				return nil
 			}
-			attemptErr = errors.Join(attemptErr, writeErr, verifyErr)
-			if err := releaseHardwareMemAPWithin(ctx, *mem); err != nil {
-				return errors.Join(attemptErr, err)
+			attemptErr = errors.Join(attemptErr, err)
+			if *mem != nil {
+				return attemptErr
 			}
-			*mem = nil
 		}
 		if !identityVerified {
-			identity, err := dp.Connect(ctx)
+			retry, err := verifyHardwareScratchIdentity(ctx, dp, expectedDPIDR, expectedAPIDR)
 			if err != nil {
 				attemptErr = errors.Join(attemptErr, err)
+				if !retry {
+					return attemptErr
+				}
 				if err := releaseHardwareDebugPortWithin(ctx, dp); err != nil {
 					return errors.Join(attemptErr, err)
 				}
 				continue
-			}
-			dpidr, ok := identity.DPIDR()
-			if !ok || dpidr.Raw != expectedDPIDR {
-				return errors.Join(attemptErr, fmt.Errorf("reconnected DPIDR = %#08x, want %#08x", dpidr.Raw, expectedDPIDR))
-			}
-			apIdentity, err := dp.ReadAPIDR(ctx, hardwareAP)
-			if err != nil {
-				attemptErr = errors.Join(attemptErr, err)
-				if err := releaseHardwareDebugPortWithin(ctx, dp); err != nil {
-					return errors.Join(attemptErr, err)
-				}
-				continue
-			}
-			if apIdentity.Raw != expectedAPIDR {
-				return errors.Join(attemptErr, fmt.Errorf("reconnected APIDR = %#08x, want %#08x", apIdentity.Raw, expectedAPIDR))
 			}
 			identityVerified = true
 		}
@@ -177,6 +166,42 @@ func restoreHardwareScratch(ctx context.Context, dp *dap.DebugPort, mem **dap.Me
 		}
 		identityVerified = false
 	}
+}
+
+func restoreHardwareScratchAttempt(ctx context.Context, mem **dap.MemAP, addr uint64, original []byte) (bool, error) {
+	writeErr := writeHardwareBytes(ctx, *mem, addr, original)
+	var verifyErr error
+	if writeErr == nil {
+		verifyErr = assertHardwareBytes(ctx, *mem, addr, original)
+	}
+	if writeErr == nil && verifyErr == nil {
+		return true, nil
+	}
+	attemptErr := errors.Join(writeErr, verifyErr)
+	if err := releaseHardwareMemAPWithin(ctx, *mem); err != nil {
+		return false, errors.Join(attemptErr, err)
+	}
+	*mem = nil
+	return false, attemptErr
+}
+
+func verifyHardwareScratchIdentity(ctx context.Context, dp *dap.DebugPort, expectedDPIDR, expectedAPIDR uint32) (bool, error) {
+	identity, err := dp.Connect(ctx)
+	if err != nil {
+		return true, err
+	}
+	dpidr, ok := identity.DPIDR()
+	if !ok || dpidr.Raw != expectedDPIDR {
+		return false, fmt.Errorf("reconnected DPIDR = %#08x, want %#08x", dpidr.Raw, expectedDPIDR)
+	}
+	apIdentity, err := dp.ReadAPIDR(ctx, hardwareAP)
+	if err != nil {
+		return true, err
+	}
+	if apIdentity.Raw != expectedAPIDR {
+		return false, fmt.Errorf("reconnected APIDR = %#08x, want %#08x", apIdentity.Raw, expectedAPIDR)
+	}
+	return false, nil
 }
 
 func readHardwareBytes(ctx context.Context, mem *dap.MemAP, addr uint64, size int) ([]byte, error) {

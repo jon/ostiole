@@ -127,9 +127,10 @@ pull-request metadata, and broken local Markdown links or anchors. The `commits`
 check runs formatting, build, vet, and race tests independently at every commit.
 The `quality` and macOS checks validate the final tip with the additional
 linters, vulnerability scan, integration-tag compilation, and native C checks
-applicable to their hosts. The `CodeQL` workflow analyzes Go and native C/C++
-with the security-extended query suite on every pull request, including pull
-requests from forks.
+applicable to their hosts. Linux and macOS lint both ordinary and
+integration-tagged Go, including the native macOS implementation. The `CodeQL`
+workflow analyzes Go and native C/C++ with the security-extended query suite on
+every pull request, including pull requests from forks.
 
 Policy annotations remain advisory when judgment is required. These include 73-
 through 120-column subjects, ambiguous imperative mood, weak bodies, commits
@@ -156,6 +157,16 @@ suggestions does not satisfy the gate. A Codex opinion does not count as an
 approval. Resolve its actionable conversations or explain the disposition before
 merging. If Codex completes after the gate's polling window, rerun the failed
 `codex-reviewed` job to evaluate the completed result.
+
+Changes to policy tooling, lint and format configuration, files under
+`.github/`, and `AGENTS*.md` instruction files receive a review-policy warning
+and are assigned to the maintainer in CODEOWNERS.
+
+The policy job builds its checker from the pull request's base revision and
+checks the proposed head's commits and Markdown. The Codex gate also loads its
+review evaluator from the base revision. It checks the pull request's current
+head and draft state before accepting a review, including on reruns of older
+workflow events. Failed or empty commit enumeration fails the per-commit job.
 
 Untrusted pull-request workflows receive no secrets or write-capable checkout
 credentials and never run HIL. CodeQL uses the ordinary `pull_request` event and
