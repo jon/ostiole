@@ -43,13 +43,15 @@ type Config struct {
 // The zero value is invalid.
 // It owns no transport or cleanup and never assigns a debugger's halt claim.
 type Core struct {
-	profile Profile
-	state   Snapshot
+	profile      Profile
+	state        Snapshot
+	unsafeMemory bool
 }
 
 const (
 	enabled        = uint32(1)
 	haltRequest    = uint32(2)
+	step           = uint32(4)
 	maskInterrupts = uint32(8)
 	snapStall      = uint32(32)
 	registerReady  = uint32(1 << 16)
@@ -75,6 +77,7 @@ func New(cfg Config) (*Core, error) {
 	}
 	return &Core{
 		profile: cfg.Profile, state: cfg.Initial,
+		unsafeMemory: cfg.Initial.DHCSR&snapStall != 0,
 	}, nil
 }
 
@@ -127,10 +130,20 @@ func (c *Core) Read(ctx context.Context, addr uint64, data []byte) error {
 	return nil
 }
 
-// Write implements dap/sim.MemoryDevice. This read-only model bus-faults writes.
+// Write implements dap/sim.MemoryDevice. DFSR is write-one-to-clear. DHCSR
+// requires DEBUGKEY; unsupported execution or unpredictable control changes
+// return ErrUnsupported before effects. Unknown register addresses bus-fault.
 func (c *Core) Write(ctx context.Context, addr uint64, data []byte) error {
 	if err := c.validate(ctx, addr, data); err != nil {
 		return err
 	}
-	return dapsim.ErrBusFault
+	switch addr {
+	case 0xe000ed30:
+		c.state.DFSR &^= binary.LittleEndian.Uint32(data) & 31
+		return nil
+	case 0xe000edf0:
+		return c.writeControl(binary.LittleEndian.Uint32(data))
+	default:
+		return dapsim.ErrBusFault
+	}
 }

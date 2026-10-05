@@ -243,8 +243,8 @@ go run ./examples/simple/cortexm-control \
 ```
 
 The public [debug simulator](cortexm-simulation.md) composes M0 and Secure M33
-register observations through real shared Arm/SWD/DAP owners. Focused
-hardware-independent tests also model DHCSR control and execution state,
+control through real shared Arm/SWD/DAP owners with immediate completion.
+Focused hardware-independent tests also model DHCSR control and execution state,
 including partial writes, canceled operations, ignored writes, failed cleanup,
 and retry. They do not establish physical halt/resume behavior on a bench
 program.

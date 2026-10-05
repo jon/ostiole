@@ -30,21 +30,27 @@ snapshot := core.Snapshot()
 
 Use separate cores through separate APs for private debug windows. Compose the
 existing `swd/sim` wire and public probe interface, then use `armdebug.Connect`,
-`OpenMemAP` and `cortexm.Identify`. Close the shared Arm owner after memory
-consumers finish; retain dependencies when cleanup is pending. Serialize traffic
+`OpenMemAP` and `cortexm.AcquireGroup`. Release the group before closing the
+shared Arm owner; retain dependencies when cleanup is pending. Serialize traffic
 and all fixture operations.
 
-The model supplies only register observations. All writes and unknown register
-addresses bus-fault, as do non-word accesses. DHCSR reads consume sticky reset,
-retirement and M33 restart status; snapshots do not. New cores validate their
-initial profile, reserved bits and supported inherited Debug state. Constructor
-and snapshots perform no target traffic.
+Keyed DHCSR writes enable debug and request halt/resume; completion is
+immediate. Unkeyed writes are ignored. DHCSR reads consume sticky reset,
+retirement and M33 restart status; snapshots do not. DFSR is write-one-to-clear.
+Secure halt requests are ignored when reported S_SDE is zero. Unsupported
+profiles, stepping and setting snap-stall fail explicitly. Initial snap-stall
+can exercise acquisition refusal; clearing its control bit does not recover
+memory or permit resume. Unknown registers and non-word accesses bus-fault;
+unpredictable interrupt-mask writes and disabling debug while halted return
+`ErrUnsupported` before effects. Through `dap/sim`, model errors become
+`ErrDeviceFailure` without protocol classifications or replay.
 
-Tests identify two M0 or Secure M33 cores through shared Arm/SWD/DAP owners,
-including RP2350-shaped ADIv6 APs, then close the owner without changing CPU
-debug state. These tests do not establish physical debug behavior. Control
-writes, event scheduling, register transfers, instruction execution, alternate
-security profiles, CTI and USB/probe emulation are outside this read-only model.
+Tests run two M0 or Secure M33 cores through shared Arm/SWD/DAP owners,
+including RP2350-shaped ADIv6 APs. They cover inherited halts, selected resume,
+restoration and retained cleanup after shared transport loss. These tests do not
+establish physical halt/resume behavior. Register transfers, instruction
+execution, alternate security profiles, interrupts, full reset/boot behavior,
+CTI and USB/probe emulation are outside this model.
 
 The modeled rules follow Arm DDI 0419E C1.5/C1.6.2–3 and DDI 0553B.y
 D1.2.38/D1.2.39; see [Cortex-M control](cortexm.md) for the architecture

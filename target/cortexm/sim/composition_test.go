@@ -2,6 +2,8 @@ package sim_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/jon/ostiole/armdebug"
@@ -88,35 +90,90 @@ func compose(t *testing.T, p sim.Profile, inherited bool) *composition {
 		t.Fatal(err)
 	}
 	b.owner = owner
-	for i := range selectors {
+	members := make([]cortexm.Member, 2)
+	for i := range members {
 		m, err := owner.OpenMemAP(t.Context(), selectors[i])
 		if err != nil {
 			t.Fatal(err)
 		}
 		b.memories = append(b.memories, m)
+		members[i] = cortexm.Member{ID: cortexm.CoreID(i + 1), Memory: m}
+	}
+	b.group, err = cortexm.AcquireGroup(t.Context(), members)
+	if err != nil {
+		t.Fatal(err)
 	}
 	return b
 }
 
-func TestIdentityThroughSharedArmDAPSWDOwners(t *testing.T) {
+func TestGroupThroughSharedArmDAPSWDOwners(t *testing.T) {
 	for _, p := range []sim.Profile{sim.M0, sim.M33} {
-		b := compose(t, p, false)
-		for i, m := range b.memories {
-			before := b.cores[i].Snapshot()
-			identity, err := cortexm.Identify(t.Context(), m)
-			if err != nil {
-				t.Fatal(err)
-			}
-			want := uint32(0x410cc200)
-			if p == sim.M33 {
-				want = 0x411fd210
-			}
-			if identity.Raw != want || b.cores[i].Snapshot() != before {
-				t.Fatal("identity changed debug state")
-			}
+		for _, inherited := range []bool{false, true} {
+			t.Run(fmt.Sprintf("profile%d/inherited%t", p, inherited), func(t *testing.T) { checkGroupOwnership(t, p, inherited) })
 		}
-		if err := b.owner.Close(); err != nil || b.probe.closes != 1 {
-			t.Fatalf("shared owner cleanup: %v", err)
+	}
+}
+
+func checkGroupOwnership(t *testing.T, p sim.Profile, inherited bool) {
+	t.Helper()
+
+	b := compose(t, p, inherited)
+	if _, err := b.group.Halt(t.Context(), 1, 2); err != nil {
+		t.Fatal(err)
+	}
+	result, err := b.group.Resume(t.Context(), 1, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result[0].Skipped || result[1].Skipped != inherited {
+		t.Fatalf("ownership outcome %+v", result)
+	}
+	if b.cores[0].Snapshot().DHCSR&halted != 0 || (b.cores[1].Snapshot().DHCSR&halted != 0) != inherited {
+		t.Fatal("selected resume altered inherited halt")
+	}
+	if _, err := b.group.Release(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if b.probe.closes != 0 {
+		t.Fatal("group closed lower owner")
+	}
+	if err := b.owner.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if b.probe.closes != 1 {
+		t.Fatal("shared probe not closed exactly once")
+	}
+	for i, c := range b.cores {
+		expected := uint32(0)
+		if inherited && i == 1 {
+			expected = 3 | halted
 		}
+		if c.Snapshot().DHCSR&(3|halted) != expected {
+			t.Fatalf("core %d not restored: %+v", i, c.Snapshot())
+		}
+	}
+}
+
+func TestSharedTransportFailureRetainsCleanup(t *testing.T) {
+	b := compose(t, sim.M33, false)
+	if _, err := b.group.Halt(t.Context(), 1); err != nil {
+		t.Fatal(err)
+	}
+	before := b.cores[0].Snapshot()
+	b.probe.fail = errors.New("lost shared wire")
+	if _, err := b.group.Status(t.Context(), 2); !errors.Is(err, b.probe.fail) {
+		t.Fatal(err)
+	}
+	if _, err := b.group.Release(t.Context()); err == nil {
+		t.Fatal("group released through failed transport")
+	}
+	if err := b.owner.Close(); err == nil || b.probe.closes != 0 {
+		t.Fatalf("owner discarded dependencies: %v", err)
+	}
+	if b.cores[0].Snapshot() != before {
+		t.Fatal("failed shared transport resumed peer")
+	}
+	if result := b.group.Results(); !result[0].CleanupPending || !result[1].CleanupPending {
+		t.Fatal("cleanup obligations lost")
 	}
 }
