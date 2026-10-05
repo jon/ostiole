@@ -168,12 +168,13 @@ func isTestFile(path string) bool {
 }
 
 func isReviewPolicy(path string) bool {
-	return path == "CONTRIBUTING.md" ||
-		path == ".github/CODEOWNERS" ||
-		path == ".github/pull_request_template.md" ||
-		path == "AGENTS.md" ||
-		strings.HasSuffix(path, "/AGENTS.md") ||
-		strings.HasPrefix(path, ".github/workflows/") ||
+	name := filepath.Base(path)
+	return path == "CONTRIBUTING.md" || path == "SECURITY.md" ||
+		path == "CODE_OF_CONDUCT.md" ||
+		(strings.HasPrefix(name, "AGENTS") && strings.HasSuffix(name, ".md")) ||
+		(strings.HasPrefix(path, ".golangci") && strings.HasSuffix(path, ".yml")) ||
+		path == ".markdownlint-cli2.yaml" || path == ".prettierrc.json" ||
+		strings.HasPrefix(path, ".github/") ||
 		strings.HasPrefix(path, "internal/ci/")
 }
 

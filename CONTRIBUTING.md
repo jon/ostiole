@@ -157,6 +157,10 @@ approval. Resolve its actionable conversations or explain the disposition before
 merging. If Codex completes after the gate's polling window, rerun the failed
 `codex-reviewed` job to evaluate the completed result.
 
+Changes to policy tooling, lint and format configuration, files under
+`.github/`, and `AGENTS*.md` instruction files receive a review-policy warning
+and are assigned to the maintainer in CODEOWNERS.
+
 Untrusted pull-request workflows receive no secrets or write-capable checkout
 credentials and never run HIL. CodeQL uses the ordinary `pull_request` event and
 GitHub's built-in token; it does not use `pull_request_target` or a maintainer

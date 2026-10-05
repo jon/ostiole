@@ -42,6 +42,30 @@ func TestCheckCommitChangesWarnsAboutPolicyFiles(t *testing.T) {
 	}
 }
 
+func TestReviewPolicyIncludesGateAndInstructionInputs(t *testing.T) {
+	for _, path := range []string{
+		".github/scripts/codex-review-signal.jq",
+		".github/scripts/codex-review-signal_test.sh",
+		".github/actionlint.yaml",
+		".github/ISSUE_TEMPLATE/bug-report.yml",
+		".golangci.yml", ".golangci.tests.yml",
+		".markdownlint-cli2.yaml", ".prettierrc.json",
+		"SECURITY.md", "CODE_OF_CONDUCT.md",
+		"AGENTS.override.md", "usb/AGENTS.override.md",
+	} {
+		t.Run(path, func(t *testing.T) {
+			if !isReviewPolicy(path) {
+				t.Fatalf("%s is missing from review policy", path)
+			}
+		})
+	}
+	for _, path := range []string{"usb/device.go", "docs/usb.md", "internal/ci-example.go"} {
+		if isReviewPolicy(path) {
+			t.Errorf("%s is not a review-policy input", path)
+		}
+	}
+}
+
 func TestCheckCommitChangesWarnsAboutRenamedPolicyFiles(t *testing.T) {
 	repo := newRepository(t)
 	commitPaths(t, repo, "Establish the base.\n", map[string]string{
