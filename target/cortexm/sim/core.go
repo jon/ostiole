@@ -35,6 +35,10 @@ type Snapshot struct {
 type Config struct {
 	Profile Profile
 	Initial Snapshot
+	// Clock defaults to a private zero clock. Share one clock for multiple cores.
+	Clock *Clock
+	// Delays are virtual ticks; zero completes at acceptance, NoCompletion never completes.
+	HaltDelay, ResumeDelay uint64
 }
 
 // Core supplies absolute-address, little-endian word accesses to CPUID, DHCSR
@@ -43,9 +47,12 @@ type Config struct {
 // The zero value is invalid.
 // It owns no transport or cleanup and never assigns a debugger's halt claim.
 type Core struct {
-	profile      Profile
-	state        Snapshot
-	unsafeMemory bool
+	profile                Profile
+	state                  Snapshot
+	clock                  *Clock
+	haltDelay, resumeDelay uint64
+	generation             uint64
+	unsafeMemory           bool
 }
 
 const (
@@ -75,8 +82,12 @@ func New(cfg Config) (*Core, error) {
 	if cfg.Initial.DHCSR&inDebug != 0 && (cfg.Initial.DHCSR&(enabled|haltRequest) != enabled|haltRequest || cfg.Profile == M33 && cfg.Initial.DHCSR&secureDebug == 0) {
 		return nil, errors.New("cortexm/sim: unsupported inherited Debug state")
 	}
+	if cfg.Clock == nil {
+		cfg.Clock = new(Clock)
+	}
 	return &Core{
-		profile: cfg.Profile, state: cfg.Initial,
+		profile: cfg.Profile, state: cfg.Initial, clock: cfg.Clock,
+		haltDelay: cfg.HaltDelay, resumeDelay: cfg.ResumeDelay,
 		unsafeMemory: cfg.Initial.DHCSR&snapStall != 0,
 	}, nil
 }
