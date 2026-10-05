@@ -68,6 +68,18 @@ class PublicationGuards(unittest.TestCase):
         self.assertIn('ref: ${{ github.event.pull_request.base.sha }}', checkout)
         self.assertNotIn('github.event.pull_request.draft', review)
 
+    def test_integration_lint_on_both_hosts(self):
+        workflow = (ROOT / '.github/workflows/test.yml').read_text()
+        for job, following in [('quality', 'macos'), ('macos', 'codex-reviewed')]:
+            commands = workflow.split('  ' + job + ':', 1)[1]
+            commands = commands.split('  ' + following + ':', 1)[0]
+            for command in [
+                'staticcheck -tags integration ./...',
+                'golangci-lint run --build-tags integration --config .golangci.yml ./...',
+                'golangci-lint run --build-tags integration --config .golangci.tests.yml ./...',
+            ]:
+                self.assertIn(command, commands, job + ' is missing ' + command)
+
     def test_empty_commit_range_fails(self):
         (self.repo / 'fixture').write_text('base')
         sha = self.commit()
