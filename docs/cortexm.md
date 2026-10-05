@@ -242,9 +242,12 @@ go run ./examples/simple/cortexm-control \
   -provider cmsisdap -serial SERIAL -ap 0 -clock 1000000 -allow-control -step
 ```
 
-Hardware-independent tests model DHCSR control and execution state, including
-partial writes, canceled operations, ignored writes, failed cleanup, and retry.
-They do not establish physical halt/resume behavior on a bench program.
+The public [debug simulator](cortexm-simulation.md) composes M0 and Secure M33
+register observations through real shared Arm/SWD/DAP owners. Focused
+hardware-independent tests also model DHCSR control and execution state,
+including partial writes, canceled operations, ignored writes, failed cleanup,
+and retry. They do not establish physical halt/resume behavior on a bench
+program.
 
 ## Independent RP2350 cores
 

@@ -385,6 +385,12 @@ fixed before target traffic. `dap/sim.RAM` can supply shared byte storage
 through several APs, while separate devices model private register windows at
 the same address. Unmapped addresses keep their ordinary fixture memory.
 
+`target/cortexm/sim` supplies core-local M0 and Secure M33 debug registers
+behind those MEM-APs. This read-only model supplies CPUID, DHCSR and DFSR
+observations. Status reads observe hardware state; the real Cortex-M drivers
+retain halt ownership and restoration. See
+[Cortex-M simulation](cortexm-simulation.md) for supported state and limits.
+
 Production packages do not import their simulators. Tests and downstream
 programs may compose them explicitly, which keeps hardware-free behavior
 replaceable while exercising the public protocol and DAP layers.
