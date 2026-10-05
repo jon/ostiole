@@ -93,9 +93,10 @@ func checkRegisterFirmware(t *testing.T, ctx context.Context, memory *dap.MemAP)
 	// Match the linked vectors and instructions before changing processor state.
 	for addr := uint32(0); addr < 0xc0; addr += 4 {
 		want := uint32(0xcd)
-		if addr == 0 {
+		switch addr {
+		case 0:
 			want = 0x20004000
-		} else if addr == 4 {
+		case 4:
 			want = 0xc1
 		}
 		got, err := memory.ReadWord(ctx, addr)

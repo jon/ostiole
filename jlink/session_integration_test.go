@@ -142,28 +142,7 @@ func observeJLinkTarget(t *testing.T, ctx context.Context, readyOnOpen bool) tar
 	if err != nil {
 		t.Fatal(err)
 	}
-	dpidr, ok := identity.DPIDR()
-	if !ok {
-		t.Fatal("SW-DP identity has no DPIDR")
-	}
-	transaction := debugPort.NewTxn()
-	dpidrResult := transaction.ReadDP(dap.DPIDR)
-	apidrResult := transaction.ReadAPIDR(dap.NewAPSel(0))
-	if err := transaction.Commit(ctx); err != nil {
-		t.Fatal(err)
-	}
-	confirmedDPIDR, err := dpidrResult.Value()
-	if err != nil {
-		t.Fatal(err)
-	}
-	apidrRaw, err := apidrResult.Value()
-	if err != nil {
-		t.Fatal(err)
-	}
-	apidr := dap.DecodeAPIDR(apidrRaw)
-	if confirmedDPIDR != dpidr.Raw || apidr.Raw == 0 || apidr.Class != 8 {
-		t.Fatalf("debug identities = DPIDR %#08x/%#08x AP0 %+v", dpidr.Raw, confirmedDPIDR, apidr)
-	}
+	dpidr, apidr := confirmJLinkTargetIdentities(t, ctx, debugPort, identity)
 	savedCSW, err := debugPort.ReadRawAP(ctx, dap.NewAPSel(0).Address(0x00))
 	if err != nil {
 		t.Fatal(err)
@@ -208,6 +187,33 @@ func observeJLinkTarget(t *testing.T, ctx context.Context, readyOnOpen bool) tar
 		dpidr: dpidr.Raw, apidr: apidr.Raw, cpuid: core.Raw, dhcsr: dhcsr,
 		part: core.Part, calls: len(recorder.calls), packedFrames: packed,
 	}
+}
+
+func confirmJLinkTargetIdentities(t *testing.T, ctx context.Context, debugPort *dap.DebugPort, identity dap.Identity) (dap.DPIDRInfo, dap.APIDRInfo) {
+	t.Helper()
+	dpidr, ok := identity.DPIDR()
+	if !ok {
+		t.Fatal("SW-DP identity has no DPIDR")
+	}
+	transaction := debugPort.NewTxn()
+	dpidrResult := transaction.ReadDP(dap.DPIDR)
+	apidrResult := transaction.ReadAPIDR(dap.NewAPSel(0))
+	if err := transaction.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	confirmedDPIDR, err := dpidrResult.Value()
+	if err != nil {
+		t.Fatal(err)
+	}
+	apidrRaw, err := apidrResult.Value()
+	if err != nil {
+		t.Fatal(err)
+	}
+	apidr := dap.DecodeAPIDR(apidrRaw)
+	if confirmedDPIDR != dpidr.Raw || apidr.Raw == 0 || apidr.Class != 8 {
+		t.Fatalf("debug identities = DPIDR %#08x/%#08x AP0 %+v", dpidr.Raw, confirmedDPIDR, apidr)
+	}
+	return dpidr, apidr
 }
 
 func assertAPRegister(t *testing.T, ctx context.Context, debugPort *dap.DebugPort, address uint8, want uint32) {

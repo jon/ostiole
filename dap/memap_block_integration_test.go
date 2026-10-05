@@ -111,6 +111,13 @@ func TestWriteMEMAPBlocksOverFTDI(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	aligned, unaligned := exerciseHardwareBlockWrites(t, ctx, mem, addr, original)
+	restored = true
+	t.Logf("block writes: scratch=%#x aligned=%d unaligned=%d neighbors=unchanged restored=true", addr, aligned, unaligned)
+}
+
+func exerciseHardwareBlockWrites(t *testing.T, ctx context.Context, mem *dap.MemAP, addr uint64, original []byte) (int, int) {
+	t.Helper()
 	aligned := make([]byte, hardwareScratchSize)
 	for i := range aligned {
 		aligned[i] = byte(i*29 + 3)
@@ -138,8 +145,7 @@ func TestWriteMEMAPBlocksOverFTDI(t *testing.T) {
 	if err := writeAndVerifyHardwareBlock(ctx, mem, addr, original, original); err != nil {
 		t.Fatal(err)
 	}
-	restored = true
-	t.Logf("block writes: scratch=%#x aligned=%d unaligned=%d neighbors=unchanged restored=true", addr, len(aligned), len(unaligned))
+	return len(aligned), len(unaligned)
 }
 
 func writeAndVerifyHardwareBlock(ctx context.Context, mem *dap.MemAP, addr uint64, data, want []byte) error {

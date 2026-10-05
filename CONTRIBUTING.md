@@ -127,9 +127,10 @@ pull-request metadata, and broken local Markdown links or anchors. The `commits`
 check runs formatting, build, vet, and race tests independently at every commit.
 The `quality` and macOS checks validate the final tip with the additional
 linters, vulnerability scan, integration-tag compilation, and native C checks
-applicable to their hosts. The `CodeQL` workflow analyzes Go and native C/C++
-with the security-extended query suite on every pull request, including pull
-requests from forks.
+applicable to their hosts. Linux and macOS lint both ordinary and
+integration-tagged Go, including the native macOS implementation. The `CodeQL`
+workflow analyzes Go and native C/C++ with the security-extended query suite on
+every pull request, including pull requests from forks.
 
 Policy annotations remain advisory when judgment is required. These include 73-
 through 120-column subjects, ambiguous imperative mood, weak bodies, commits
