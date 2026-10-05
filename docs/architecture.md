@@ -386,9 +386,9 @@ through several APs, while separate devices model private register windows at
 the same address. Unmapped addresses keep their ordinary fixture memory.
 
 `target/cortexm/sim` supplies core-local M0 and Secure M33 debug registers
-behind those MEM-APs. An explicit virtual clock schedules halt and resume
-completion. Status reads observe hardware state; the real Cortex-M drivers
-retain halt ownership and restoration. See
+behind those MEM-APs. One explicit virtual clock can schedule completion and
+external events across cores. Status reads observe hardware state; the real
+Cortex-M drivers retain halt ownership and restoration. See
 [Cortex-M simulation](cortexm-simulation.md) for supported state and limits.
 
 Production packages do not import their simulators. Tests and downstream

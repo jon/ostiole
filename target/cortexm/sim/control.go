@@ -70,12 +70,10 @@ func (c *Core) completeResume() {
 		c.state.DHCSR |= restarted
 	}
 	c.state.DHCSR &^= inDebug
+	c.updatePermission()
 }
 
 func (c *Core) invalidateTransition() {
 	c.generation++
-}
-
-func (c *Core) debugAllowed() bool {
-	return c.profile == M0 || c.state.DHCSR&secureDebug != 0
+	c.haltReady = false
 }

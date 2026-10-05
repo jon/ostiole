@@ -97,11 +97,20 @@ func (c *Core) completeTransition(generation uint64, halt bool) {
 		return
 	}
 	if halt {
-		if c.debugAllowed() && c.state.DHCSR&(enabled|haltRequest) == enabled|haltRequest {
-			c.state.DHCSR |= inDebug | registerReady
-			c.state.DFSR |= 1
+		if c.state.DHCSR&(enabled|haltRequest) == enabled|haltRequest {
+			c.haltReady = true
+			c.completeReadyHalt()
 		}
 	} else if c.state.DHCSR&haltRequest == 0 {
 		c.completeResume()
 	}
+}
+
+func (c *Core) completeReadyHalt() {
+	if !c.haltReady || !c.debugAllowed() {
+		return
+	}
+	c.haltReady = false
+	c.state.DHCSR |= inDebug | registerReady
+	c.state.DFSR |= 1
 }
