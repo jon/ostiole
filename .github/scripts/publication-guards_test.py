@@ -147,6 +147,18 @@ func main() {
         result = self.run_review('transient')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_clean_receipt_comment_is_attributed(self):
+        result = self.run_review('receipt')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_unknown_receipt_version_cannot_pass(self):
+        result = self.run_review('unknown-receipt')
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_quoted_receipt_cannot_pass(self):
+        result = self.run_review('quoted-receipt')
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_fork_run_is_attributed(self):
         result = self.run_review('fork')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -184,6 +196,10 @@ elif '/timeline?' in endpoint:
         {'event': 'commented', 'user': {'login': actor},
          'body': "Codex Review: Didn't find any major issues.\n**Reviewed commit:** `" + head + '`'},
     ]
+    if entries and 'receipt' in mode:
+        marker = '<!-- codex-review-receipt:v2 -->' if mode == 'unknown-receipt' else '<!-- codex-review-receipt:v1 -->'
+        prefix = 'Quoted review:\n' if mode == 'quoted-receipt' else ''
+        entries[-1]['body'] = prefix + marker + '\n\n' + entries[-1]['body']
     print(json.dumps([entries]))
 elif '/comments?' in endpoint:
     rows = [] if 'fork' not in mode else [{

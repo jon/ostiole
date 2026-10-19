@@ -149,14 +149,14 @@ in the Markdown source. On the final head, comment `@codex review`; a clean
 review may instead complete with a SHA-labeled Codex result comment. Automatic
 review begins when a pull request becomes ready, and the connector reacts to the
 pull request with a thumbs-up after a clean review. The gate accepts a
-SHA-labeled clean result, or a completed Code Review row whose displayed commit
-resolves to the exact head together with the connector's current thumbs-up.
-After a head change, the thumbs-up must also be created after the earliest
-GitHub Actions run for that pull request and head. A formal review with
-suggestions does not satisfy the gate. A Codex opinion does not count as an
-approval. Resolve its actionable conversations or explain the disposition before
-merging. If Codex completes after the gate's polling window, rerun the failed
-`codex-reviewed` job to evaluate the completed result.
+SHA-labeled clean result, including Codex receipt comments, or a completed Code
+Review row whose displayed commit resolves to the exact head together with the
+connector's current thumbs-up. After a head change, the thumbs-up must also be
+created after the earliest GitHub Actions run for that pull request and head. A
+formal review with suggestions does not satisfy the gate. A Codex opinion does
+not count as an approval. Resolve its actionable conversations or explain the
+disposition before merging. If Codex completes after the gate's polling window,
+rerun the failed `codex-reviewed` job to evaluate the completed result.
 
 Changes to policy tooling, lint and format configuration, files under
 `.github/`, and `AGENTS*.md` instruction files receive a review-policy warning
