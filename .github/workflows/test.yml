@@ -278,7 +278,9 @@ jobs:
             jq -r '.[] | select(
               .event == "commented"
               and .user.login == "chatgpt-codex-connector[bot]"
-              and (.body // "" | startswith("Codex Review: Didn\u0027t find any major issues."))
+              and (.body // ""
+                | ltrimstr("<!-- codex-review-receipt:v1 -->\n\n")
+                | startswith("Codex Review: Didn\u0027t find any major issues."))
             ) | try (.body | capture("\\*\\*Reviewed commit:\\*\\* `(?\u003cprefix\u003e[0-9a-f]{7,40})`").prefix) catch empty' \
               <<< "$post_head_entries"
           }
