@@ -60,10 +60,10 @@ class PublicationGuards(unittest.TestCase):
         result = self.run_step('Test every pull-request commit')
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_review_evaluator_uses_base_checkout(self):
+    def test_review_signal_parser_uses_base_checkout(self):
         workflow = (ROOT / '.github/workflows/test.yml').read_text()
         review = workflow.split('  codex-reviewed:', 1)[1]
-        checkout = review.split('      - name: Check out the review policy', 1)[1]
+        checkout = review.split('      - name: Check out the base signal parser', 1)[1]
         checkout = checkout.split('      - name: Wait for Codex', 1)[0]
         self.assertIn('ref: ${{ github.event.pull_request.base.sha }}', checkout)
         self.assertNotIn('github.event.pull_request.draft', review)

@@ -163,10 +163,17 @@ Changes to policy tooling, lint and format configuration, files under
 and are assigned to the maintainer in CODEOWNERS.
 
 The policy job builds its checker from the pull request's base revision and
-checks the proposed head's commits and Markdown. The Codex gate also loads its
-review evaluator from the base revision. It checks the pull request's current
-head and draft state before accepting a review, including on reruns of older
-workflow events. Failed or empty commit enumeration fails the per-commit job.
+checks the proposed head's commits and Markdown. The Codex gate loads its jq
+signal parser from the base revision; its polling and acceptance logic remains
+in the pull-request workflow. It checks the pull request's current head and
+draft state before accepting a review, including on reruns of older workflow
+events. Failed or empty commit enumeration fails the per-commit job.
+
+The workflow runs the base versions of the checker and parser even when a pull
+request changes those tools. It does not prevent a pull request from changing
+the workflow itself or producing a check with the same name. Maintainers must
+review workflow and review-policy changes before merging; CODEOWNERS identifies
+the maintainer, but does not by itself enforce approval.
 
 Untrusted pull-request workflows receive no secrets or write-capable checkout
 credentials and never run HIL. CodeQL uses the ordinary `pull_request` event and
