@@ -127,9 +127,10 @@ pull-request metadata, and broken local Markdown links or anchors. The `commits`
 check runs formatting, build, vet, and race tests independently at every commit.
 The `quality` and macOS checks validate the final tip with the additional
 linters, vulnerability scan, integration-tag compilation, and native C checks
-applicable to their hosts. The `CodeQL` workflow analyzes Go and native C/C++
-with the security-extended query suite on every pull request, including pull
-requests from forks.
+applicable to their hosts. Linux and macOS lint both ordinary and
+integration-tagged Go, including the native macOS implementation. The `CodeQL`
+workflow analyzes Go and native C/C++ with the security-extended query suite on
+every pull request, including pull requests from forks.
 
 Policy annotations remain advisory when judgment is required. These include 73-
 through 120-column subjects, ambiguous imperative mood, weak bodies, commits
@@ -148,14 +149,31 @@ in the Markdown source. On the final head, comment `@codex review`; a clean
 review may instead complete with a SHA-labeled Codex result comment. Automatic
 review begins when a pull request becomes ready, and the connector reacts to the
 pull request with a thumbs-up after a clean review. The gate accepts a
-SHA-labeled clean result, or a completed Code Review row whose displayed commit
-resolves to the exact head together with the connector's current thumbs-up.
-After a head change, the thumbs-up must also be created after the earliest
-GitHub Actions run for that pull request and head. A formal review with
-suggestions does not satisfy the gate. A Codex opinion does not count as an
-approval. Resolve its actionable conversations or explain the disposition before
-merging. If Codex completes after the gate's polling window, rerun the failed
-`codex-reviewed` job to evaluate the completed result.
+SHA-labeled clean result, including Codex receipt comments, or a completed Code
+Review row whose displayed commit resolves to the exact head together with the
+connector's current thumbs-up. After a head change, the thumbs-up must also be
+created after the earliest GitHub Actions run for that pull request and head. A
+formal review with suggestions does not satisfy the gate. A Codex opinion does
+not count as an approval. Resolve its actionable conversations or explain the
+disposition before merging. If Codex completes after the gate's polling window,
+rerun the failed `codex-reviewed` job to evaluate the completed result.
+
+Changes to policy tooling, lint and format configuration, files under
+`.github/`, and `AGENTS*.md` instruction files receive a review-policy warning
+and are assigned to the maintainer in CODEOWNERS.
+
+The policy job builds its checker from the pull request's base revision and
+checks the proposed head's commits and Markdown. The Codex gate loads its jq
+signal parser from the base revision; its polling and acceptance logic remains
+in the pull-request workflow. It checks the pull request's current head and
+draft state before accepting a review, including on reruns of older workflow
+events. Failed or empty commit enumeration fails the per-commit job.
+
+The workflow runs the base versions of the checker and parser even when a pull
+request changes those tools. It does not prevent a pull request from changing
+the workflow itself or producing a check with the same name. Maintainers must
+review workflow and review-policy changes before merging; CODEOWNERS identifies
+the maintainer, but does not by itself enforce approval.
 
 Untrusted pull-request workflows receive no secrets or write-capable checkout
 credentials and never run HIL. CodeQL uses the ordinary `pull_request` event and

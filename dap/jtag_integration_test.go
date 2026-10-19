@@ -58,32 +58,7 @@ func exerciseJTAGDPMemory(t *testing.T, ctx context.Context, discovered bool) (u
 	}
 	dp := NewDebugPort(JTAGDP(chain, 0), WithMaxWaits(100))
 	var mem *MemAP
-	defer func() {
-		for range 3 {
-			cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			err = mem.Release(cleanup)
-			if err == nil {
-				err = dp.Release(cleanup)
-			}
-			cancel()
-			if err == nil {
-				break
-			}
-			if errors.Is(err, ftdi.ErrChannelPoisoned) {
-				break
-			}
-		}
-		if err != nil {
-			t.Errorf("stopping without closing the probe after failed DAP cleanup: %v", err)
-			return
-		}
-		for range 3 {
-			if err = closeOwner(); err == nil {
-				return
-			}
-		}
-		t.Errorf("close probe: %v", err)
-	}()
+	defer closeJTAGDPBench(t, dp, &mem, closeOwner)
 	identity, err := dp.Connect(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -132,36 +107,39 @@ func exerciseJTAGDPMemory(t *testing.T, ctx context.Context, discovered bool) (u
 	return power, overrun
 }
 
+func closeJTAGDPBench(t *testing.T, dp *DebugPort, mem **MemAP, closeOwner func() error) {
+	t.Helper()
+	var err error
+	for range 3 {
+		cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		err = (*mem).Release(cleanup)
+		if err == nil {
+			err = dp.Release(cleanup)
+		}
+		cancel()
+		if err == nil {
+			break
+		}
+		if errors.Is(err, ftdi.ErrChannelPoisoned) {
+			break
+		}
+	}
+	if err != nil {
+		t.Errorf("stopping without closing the probe after failed DAP cleanup: %v", err)
+		return
+	}
+	for range 3 {
+		if err = closeOwner(); err == nil {
+			return
+		}
+	}
+	t.Errorf("close probe: %v", err)
+}
+
 func openJTAGDPBench(t *testing.T, ctx context.Context, discovered bool) (jtag.Wire, func() error) {
 	t.Helper()
 	if discovered {
-		var registry discover.Registry
-		if err := ftdidiscovery.Register(&registry); err != nil {
-			t.Fatal(err)
-		}
-		inventory, err := registry.Probes(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		candidate, err := inventory.Select(discover.Selection{Provider: ftdidiscovery.ID, Serial: "01691", Function: "A"})
-		if errors.Is(err, discover.ErrCandidateNotFound) || errors.Is(err, discover.ErrCandidateAmbiguous) {
-			t.Skip(err)
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		owner, err := candidate.Open(ctx)
-		if err != nil {
-			if owner != nil {
-				err = errors.Join(err, owner.Close())
-			}
-			t.Fatal(err)
-		}
-		wire, err := owner.JTAG(ctx, probe.JTAGConfig{MaxClockHz: 100_000})
-		if err != nil {
-			t.Fatal(errors.Join(err, owner.Close()))
-		}
-		return wire, owner.Close
+		return openDiscoveredJTAGDPBench(t, ctx)
 	}
 	bus := usb.New()
 	devices, err := bus.List(ctx, []usb.DeviceFilter{usb.ExactDevice(ftdi.VID, ftdi.PIDFT4232H)})
@@ -190,4 +168,35 @@ func openJTAGDPBench(t *testing.T, ctx context.Context, discovered bool) (jtag.W
 		t.Fatal(errors.Join(err, closeOwner()))
 	}
 	return channel, channel.Close
+}
+
+func openDiscoveredJTAGDPBench(t *testing.T, ctx context.Context) (jtag.Wire, func() error) {
+	t.Helper()
+	var registry discover.Registry
+	if err := ftdidiscovery.Register(&registry); err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := registry.Probes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := inventory.Select(discover.Selection{Provider: ftdidiscovery.ID, Serial: "01691", Function: "A"})
+	if errors.Is(err, discover.ErrCandidateNotFound) || errors.Is(err, discover.ErrCandidateAmbiguous) {
+		t.Skip(err)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := candidate.Open(ctx)
+	if err != nil {
+		if owner != nil {
+			err = errors.Join(err, owner.Close())
+		}
+		t.Fatal(err)
+	}
+	wire, err := owner.JTAG(ctx, probe.JTAGConfig{MaxClockHz: 100_000})
+	if err != nil {
+		t.Fatal(errors.Join(err, owner.Close()))
+	}
+	return wire, owner.Close
 }
