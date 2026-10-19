@@ -570,6 +570,17 @@ Reading the discovery registers alone does not discover or acquire an AP.
 Immediate and queued `SELECT` and `SELECT1` writes reject address bits beyond
 DPIDR1.ASIZE before traffic; the low DPBANKSEL bits remain independent.
 
+After an immediate `SELECT` write, the next banked DP access settles that write
+through RDBUFF before using or changing the bank. This also applies to SELECT1
+when addressing an AP above 32 bits, and while clearing selection during
+`Release`. Cancellation or WAIT exhaustion during confirmation returns the
+operation error; a fresh release attempt resumes cleanup instead of rejecting
+the pending selection without traffic. A failed confirmation never sends the
+banked access whose selection it could not establish. Each explicit release
+attempt, including protocol re-entry after a failed confirmation, uses the
+caller's context; provide a fresh bounded context for the retry. Recovery inside
+a failed transport operation can still finish under its own independent budget.
+
 ```go
 width, err := dp.ReadDP(ctx, dap.DPIDR1)
 if err != nil {

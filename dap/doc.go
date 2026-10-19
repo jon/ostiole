@@ -63,11 +63,14 @@
 //
 // A failed Connect attempts bounded cleanup before returning. If that cleanup
 // also fails, Release remains available but other debug-port and access-port
-// operations fail until cleanup succeeds. A failed Release has the same
-// cleanup-only behavior and may be retried. WithCleanupTimeout configures each
-// independent recovery attempt: one second by default for SWD, thirty for JTAG.
-// JTAG recovery revalidates the exact chain and reacquires the TAP before
-// restoration. The debug port never closes or automatically reopens the probe.
+// operations fail until cleanup succeeds. A failure after Release starts
+// restoration has the same cleanup-only behavior and may be retried. Calling
+// Release with an expired or canceled context sends no traffic and leaves a
+// connected port usable.
+// WithCleanupTimeout configures each independent recovery attempt: one second
+// by default for SWD, thirty for JTAG. JTAG recovery revalidates the exact chain
+// and reacquires the TAP before restoration. The debug port never closes or
+// automatically reopens the probe.
 //
 // A DebugPort does not replay a request which returns FAULT. It reads
 // bank-zero CTRL/STAT when the register selection is known, clears the sticky

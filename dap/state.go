@@ -82,10 +82,6 @@ func (s *debugPortState) resolveSELECTFromCTRLSTAT(ctrlStat uint32) {
 	s.confirmSELECT()
 }
 
-func (s *debugPortState) dpBankAmbiguous() bool {
-	return s.selectPending && (!s.priorSELECT.valid || s.priorSELECT.value&0x0f != s.selectDP.value&0x0f)
-}
-
 func (s *debugPortState) confirmResponse(state uint32) {
 	if state&overrunDetect == 0 {
 		s.response = responseSimple

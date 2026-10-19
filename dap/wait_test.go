@@ -1200,17 +1200,16 @@ func TestDebugPortKeepsSELECTProvisionalAfterDPIDRRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := len(target.requests)
-	if _, err := dp.ReadDP(t.Context(), dap.CTRLSTAT); err == nil || !strings.Contains(err.Error(), "bank is ambiguous") {
-		t.Fatalf("ReadDP(CTRLSTAT) error = %v, want ambiguous bank", err)
+	if _, err := dp.ReadDP(t.Context(), dap.CTRLSTAT); !errors.Is(err, dap.ErrFault) {
+		t.Fatalf("ReadDP(CTRLSTAT) error = %v, want SELECT completion FAULT", err)
 	}
-	if got := len(target.requests); got != before {
-		t.Fatalf("requests after ambiguous CTRL/STAT read = %d, want %d", got, before)
+	if len(target.requests) != before+1 || target.requests[before] != dpRead(12) {
+		t.Fatalf("requests after SELECT failure = %+v, want only RDBUFF", target.requests[before:])
 	}
-	if err := dp.WriteDP(t.Context(), dap.CTRLSTAT, overrunDetect); err == nil || !strings.Contains(err.Error(), "bank is ambiguous") {
-		t.Fatalf("WriteDP(CTRLSTAT) error = %v, want ambiguous bank", err)
-	}
-	if got := len(target.requests); got != before {
-		t.Fatalf("requests after ambiguous CTRL/STAT write = %d, want %d", got, before)
+	before = len(target.requests)
+	assertRepairBlocksTraffic(t, dp, target, before)
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -1267,7 +1266,7 @@ func TestConnectRepairsFailedRDBUFFConfirmation(t *testing.T) {
 	}
 }
 
-func TestDebugPortRejectsAmbiguousCTRLSTATReadBeforeTraffic(t *testing.T) {
+func TestDebugPortRejectsFailedSELECTBeforeCTRLSTAT(t *testing.T) {
 	target := newWaitTarget()
 	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
@@ -1281,11 +1280,14 @@ func TestDebugPortRejectsAmbiguousCTRLSTATReadBeforeTraffic(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := len(target.requests)
-	if _, err := dp.ReadDP(t.Context(), dap.CTRLSTAT); err == nil || !strings.Contains(err.Error(), "bank is ambiguous") {
-		t.Fatalf("ReadDP(CTRLSTAT) error = %v, want ambiguous bank", err)
+	if _, err := dp.ReadDP(t.Context(), dap.CTRLSTAT); !errors.Is(err, dap.ErrFault) {
+		t.Fatalf("ReadDP(CTRLSTAT) error = %v, want SELECT completion FAULT", err)
 	}
-	if got := len(target.requests); got != before {
-		t.Fatalf("requests after ambiguous CTRL/STAT read = %d, want %d", got, before)
+	if len(target.requests) != before+1 || target.requests[before] != dpRead(12) {
+		t.Fatalf("requests after SELECT failure = %+v, want only RDBUFF", target.requests[before:])
+	}
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 }
 

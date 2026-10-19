@@ -13,10 +13,10 @@ import (
 )
 
 type cleanupBudgetWire struct {
-	inner       swd.Wire
-	fail        bool
-	calls       int
-	entryBudget time.Duration
+	inner         swd.Wire
+	fail          bool
+	calls         int
+	entryDeadline time.Time
 }
 
 func (w *cleanupBudgetWire) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
@@ -28,7 +28,7 @@ func (w *cleanupBudgetWire) SWDIO(ctx context.Context, direction, output []byte,
 	if bits == 136 {
 		deadline, ok := ctx.Deadline()
 		if ok {
-			w.entryBudget = time.Until(deadline)
+			w.entryDeadline = deadline
 		}
 	}
 	return w.inner.SWDIO(ctx, direction, output, bits)
@@ -53,7 +53,7 @@ func TestConnectRejectsNilContextBeforeTraffic(t *testing.T) {
 	}
 }
 
-func TestRecoveryUsesConfiguredIndependentBudget(t *testing.T) {
+func TestReleaseReentryUsesCallerBudget(t *testing.T) {
 	wire := &cleanupBudgetWire{inner: swdsim.New(sim.New(0x2ba01477))}
 	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)), dap.WithCleanupTimeout(3*time.Second))
 	if _, err := dp.Connect(t.Context()); err != nil {
@@ -65,10 +65,52 @@ func TestRecoveryUsesConfiguredIndependentBudget(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
+	before := wire.calls
+	if err := dp.Release(ctx); !errors.Is(err, context.Canceled) || wire.calls != before {
+		t.Fatalf("canceled release = %v, wire calls = %d; want %d", err, wire.calls, before)
+	}
+	ctx, cancel = context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	deadline, _ := ctx.Deadline()
 	if err := dp.Release(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if wire.entryBudget < 2*time.Second || wire.entryBudget > 3*time.Second {
-		t.Fatalf("recovery entry budget = %v", wire.entryBudget)
+	if wire.entryDeadline != deadline {
+		t.Fatalf("release entry deadline = %v, want %v", wire.entryDeadline, deadline)
+	}
+}
+
+type recoveryBudgetTarget struct {
+	*waitTarget
+	abortBudget time.Duration
+}
+
+func (target *recoveryBudgetTarget) Write(ctx context.Context, req swdsim.Request, value uint32) error {
+	if req == dpWrite(0) && value == 1 {
+		deadline, _ := ctx.Deadline()
+		target.abortBudget = time.Until(deadline)
+	}
+	return target.waitTarget.Write(ctx, req, value)
+}
+
+func TestRecoveryUsesConfiguredIndependentBudget(t *testing.T) {
+	target := &recoveryBudgetTarget{waitTarget: newWaitTarget()}
+	addAP(t, target.waitTarget, 0, 0x24770011)
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(swdsim.New(target))),
+		dap.WithMaxWaits(1), dap.WithCleanupTimeout(3*time.Second))
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	target.arm(apRead(12), 1)
+	if _, err := dp.ReadAPIDR(ctx, dap.NewAPSel(0)); !errors.Is(err, dap.ErrWait) {
+		t.Fatalf("AP WAIT = %v", err)
+	}
+	if target.abortBudget < 2*time.Second || target.abortBudget > 3*time.Second {
+		t.Fatalf("independent recovery budget = %v", target.abortBudget)
+	}
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 }

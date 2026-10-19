@@ -124,10 +124,10 @@ func (dp *DebugPort) readDP(ctx context.Context, reg DPRegister) (uint32, error)
 	if dp.jtag != nil {
 		return dp.jtag.readDP(ctx, reg)
 	}
-	if !info.bankIndependent && dp.state.dpBankAmbiguous() {
-		return 0, errors.New("dap: DP register bank is ambiguous after an unconfirmed SELECT write")
-	}
 	if !info.bankIndependent {
+		if err := dp.confirmPendingSELECT(ctx); err != nil {
+			return 0, err
+		}
 		if err := dp.selectDPBank(ctx, info.bank); err != nil {
 			return 0, err
 		}
@@ -280,10 +280,10 @@ func (dp *DebugPort) writeDP(ctx context.Context, reg DPRegister, value uint32) 
 }
 
 func (dp *DebugPort) prepareDPWrite(ctx context.Context, reg DPRegister, info dpRegisterInfo) error {
-	if !info.bankIndependent && dp.state.dpBankAmbiguous() {
-		return errors.New("dap: DP register bank is ambiguous after an unconfirmed SELECT write")
-	}
 	if !info.bankIndependent {
+		if err := dp.confirmPendingSELECT(ctx); err != nil {
+			return err
+		}
 		if err := dp.selectDPBank(ctx, info.bank); err != nil {
 			return err
 		}

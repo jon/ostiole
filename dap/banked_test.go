@@ -29,7 +29,7 @@ func TestBankedDPAccessPreservesSELECTFields(t *testing.T) {
 	if value != dlcr {
 		t.Fatalf("DLCR = %#08x, want %#08x", value, dlcr)
 	}
-	wantRequests := []swdsim.Request{dpWrite(0x08), dpRead(0x0c), dpRead(0x04)}
+	wantRequests := []swdsim.Request{dpRead(0x0c), dpWrite(0x08), dpRead(0x0c), dpRead(0x04)}
 	if got := target.requests[beforeBankedRead : beforeBankedRead+len(wantRequests)]; !equalRequests(got, wantRequests) {
 		t.Fatalf("banked DP requests = %#v, want %#v", got, wantRequests)
 	}
