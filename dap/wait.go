@@ -110,6 +110,10 @@ func (e *swdExecutor) resolveSELECT(req transferRequest, value uint32, err error
 		return
 	}
 	switch {
+	case errors.Is(err, swd.ErrWait):
+		if e.dp.state.response == responseOverrun {
+			e.dp.state.loseFraming()
+		}
 	case isABORTWrite(req):
 		e.resolveSELECTAfterABORT(err)
 	case isDPIDRRead(req):
@@ -118,7 +122,7 @@ func (e *swdExecutor) resolveSELECT(req transferRequest, value uint32, err error
 		if err == nil {
 			e.dp.state.resolveSELECTFromCTRLSTAT(value)
 		}
-	case err == nil || err == swd.ErrWait || err == swd.ErrParity:
+	case err == nil || err == swd.ErrParity:
 		e.dp.state.confirmSELECT()
 	}
 }

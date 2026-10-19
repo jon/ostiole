@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/jon/ostiole/jtag"
 )
@@ -34,6 +35,7 @@ type jtagDPWire struct {
 	fail         bool
 	failAfter    bool
 	expire       bool
+	deadline     time.Time
 }
 
 type jtagRequest struct {
@@ -148,6 +150,7 @@ func (m *jtagDPModel) execute(r jtagRequest) uint32 {
 
 func (w *jtagDPWire) MaxTransferBits() int { return w.limit }
 func (w *jtagDPWire) JTAGIO(ctx context.Context, tms, tdi []byte, bits int) ([]byte, error) {
+	w.deadline, _ = ctx.Deadline()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

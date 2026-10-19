@@ -161,8 +161,10 @@ func (dp *DebugPort) failConnect(cause error) error {
 
 // Release restores volatile debug-port state owned by this connection.
 //
-// Release may be retried. Once an attempt starts, other DP and AP operations
-// remain blocked until Release succeeds.
+// Release may be retried. Each attempt, including protocol re-entry, uses ctx.
+// Once an attempt starts, other DP and AP operations remain blocked until
+// Release succeeds. Supply a fresh bounded context for cleanup retries.
+// Recovery inside a failed transport operation retains its independent budget.
 func (dp *DebugPort) Release(ctx context.Context) error {
 	if !dp.bound() {
 		return nil
@@ -173,23 +175,22 @@ func (dp *DebugPort) Release(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("dap: nil context")
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	dp.state.beginRepair()
-	releaseCtx := ctx
 	if !dp.state.responseKnown() {
-		var cancel context.CancelFunc
-		releaseCtx, cancel = dp.cleanupContext()
-		defer cancel()
-		if err := dp.reenter(releaseCtx); err != nil {
+		if err := dp.reenter(ctx); err != nil {
 			return fmt.Errorf("dap: restore protocol state for release: %w", err)
 		}
 	}
-	if err := dp.selectAPAddress(releaseCtx, 0); err != nil {
+	if err := dp.selectAPAddress(ctx, 0); err != nil {
 		return fmt.Errorf("dap: clear selection while releasing debug port: %w", err)
 	}
-	if err := dp.releasePower(releaseCtx); err != nil {
+	if err := dp.releasePower(ctx); err != nil {
 		return err
 	}
-	if err := dp.releaseLink(releaseCtx); err != nil {
+	if err := dp.releaseLink(ctx); err != nil {
 		return err
 	}
 	dp.completeRelease()

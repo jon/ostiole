@@ -289,7 +289,7 @@ func TestJTAGReservedACKInvalidatesProtocol(t *testing.T) {
 	}
 }
 
-func TestJTAGRecoveryDeadlineCanBeRetriedIndependently(t *testing.T) {
+func TestJTAGReleaseReentryHonorsCallerContext(t *testing.T) {
 	_, wire, chain := jtagModelChain(t, 4, 0)
 	dp := dap.NewDebugPort(dap.JTAGDP(chain, 0), dap.WithCleanupTimeout(time.Second))
 	if _, err := dp.Connect(t.Context()); err != nil {
@@ -302,11 +302,21 @@ func TestJTAGRecoveryDeadlineCanBeRetriedIndependently(t *testing.T) {
 	wire.expire = true
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
+	before := wire.calls
+	if err := dp.Release(ctx); !errors.Is(err, context.Canceled) || wire.calls != before {
+		t.Fatalf("canceled release = %v, wire calls = %d; want %d", err, wire.calls, before)
+	}
+	ctx, cancel = context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	deadline, _ := ctx.Deadline()
 	if err := dp.Release(ctx); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("bounded revalidation: %v", err)
 	}
-	if err := dp.Release(ctx); err != nil {
-		t.Fatalf("fresh recovery with canceled caller: %v", err)
+	if wire.deadline != deadline {
+		t.Fatalf("release scan deadline = %v, want %v", wire.deadline, deadline)
+	}
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatalf("fresh release attempt: %v", err)
 	}
 }
 

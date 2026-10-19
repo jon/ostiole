@@ -2,9 +2,11 @@ package dap_test
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/jon/ostiole/dap"
 	"github.com/jon/ostiole/dap/sim"
@@ -95,5 +97,47 @@ func nilContextOperations(dp *dap.DebugPort, mem *dap.MemAP, sel dap.APSel, link
 			}
 			return err
 		},
+	}
+}
+
+func TestReleasePreflightContextPreservesConnectedPort(t *testing.T) {
+	for _, link := range []string{"SWD", "JTAG"} {
+		for _, failure := range []string{"canceled", "expired"} {
+			t.Run(link+"/"+failure, func(t *testing.T) {
+				checkReleasePreflightContext(t, link, failure)
+			})
+		}
+	}
+}
+
+func checkReleasePreflightContext(t *testing.T, link, failure string) {
+	t.Helper()
+	wire := &cleanupBudgetWire{inner: swdsim.New(sim.New(0x2ba01477))}
+	port := dap.SWDP(swd.New(wire))
+	calls := func() int { return wire.calls }
+	if link == "JTAG" {
+		_, jwire, chain := jtagModelChain(t, 4, 0)
+		port = dap.JTAGDP(chain, 0)
+		calls = func() int { return jwire.calls }
+	}
+	dp := dap.NewDebugPort(port)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	if failure == "expired" {
+		cancel()
+		ctx, cancel = context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+	}
+	cancel()
+	before := calls()
+	if err := dp.Release(ctx); !errors.Is(err, ctx.Err()) || calls() != before {
+		t.Fatalf("Release = %v, wire calls = %d; want %d", err, calls(), before)
+	}
+	if _, err := dp.ReadDP(t.Context(), dap.CTRLSTAT); err != nil {
+		t.Fatalf("preflight context invalidated connected port: %v", err)
+	}
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 }
