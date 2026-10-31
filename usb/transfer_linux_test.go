@@ -448,3 +448,61 @@ func linuxTransferTestClaim(device *Device) *ClaimedInterface {
 		0x81: {Address: 0x81, TransferType: TransferBulk, MaxPacketSize: 512},
 	}}
 }
+
+func TestLinuxUnplugDrainsTransfersAndReleasesHandle(t *testing.T) {
+	device, claim, fake := linuxTransferTest(t)
+	transfers := make([]*BulkTransfer, 2)
+	for i, endpoint := range []uint8{0x81, 0x02} {
+		var err error
+		transfers[i], err = claim.SubmitBulk(t.Context(), endpoint, make([]byte, 8))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	fake.mu.Lock()
+	for urb := range fake.pending {
+		urb.Status = -int32(syscall.ENODEV)
+		fake.completed = append(fake.completed, urb)
+	}
+	fake.mu.Unlock()
+	releases := 0
+	ioctl := device.ioctl
+	device.ioctl = func(fd, request uintptr, argument any) (uintptr, error) {
+		if request == usbfsReleaseInterface {
+			releases++
+		}
+		if request != usbfsReapURBNoDelay {
+			return 0, syscall.ENODEV
+		}
+		return ioctl(fd, request, argument)
+	}
+	fake.poller.signal(errLinuxBulkPollerTerminal)
+	if err := device.Close(); !errors.Is(err, syscall.ENODEV) {
+		t.Fatalf("Close() = %v, want device loss", err)
+	}
+	for _, transfer := range transfers {
+		select {
+		case <-transfer.Done():
+		default:
+			t.Fatal("closed handle before transfer ownership returned")
+		}
+		if count, err := transfer.backend.result(); count != 0 || !errors.Is(err, syscall.ENODEV) {
+			t.Fatalf("transfer result = %d, %v", count, err)
+		}
+	}
+	fake.mu.Lock()
+	pending := len(fake.pending)
+	fake.mu.Unlock()
+	if pending != 0 || claim.device != nil || device.claim != nil {
+		t.Fatalf("cleanup retained pending=%d or claim", pending)
+	}
+	if _, err := device.file.Stat(); !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("file.Stat() = %v, want closed handle", err)
+	}
+	if err := device.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if releases != 1 {
+		t.Fatalf("release ioctls = %d, want one", releases)
+	}
+}

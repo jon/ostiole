@@ -93,15 +93,18 @@ func sameAttachmentIdentity(info, expected DeviceInfo) bool {
 		info.Product == expected.Product && info.Serial == expected.Serial
 }
 
-// Close releases the open usbfs attachment. If interface release fails, the
-// device remains open and Close can be retried.
+// Close releases the open usbfs attachment. Device disappearance ends the
+// claim and closes the file while preserving the loss error. Other interface
+// release failures retain the open device so Close can be retried.
 func (d *Device) Close() error {
 	if d == nil {
 		return nil
 	}
+	var releaseErr error
 	if d.claim != nil {
-		if err := d.claim.Close(); err != nil {
-			return err
+		releaseErr = d.claim.Close()
+		if d.claim != nil {
+			return releaseErr
 		}
 	}
 	d.closeOnce.Do(func() {
@@ -109,5 +112,5 @@ func (d *Device) Close() error {
 			d.closeErr = d.file.Close()
 		}
 	})
-	return d.closeErr
+	return errors.Join(releaseErr, d.closeErr)
 }

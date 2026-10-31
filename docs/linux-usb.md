@@ -87,3 +87,11 @@ command's status, and reports restoration failure after a successful command.
 
 Never reuse a sysfs interface name after reconnecting the adapter without
 identifying it again.
+
+## Cleanup after disappearance
+
+After a device disappears, Linux may return `ENODEV` when releasing its
+interface. The claim is finished, and `Device.Close` continues closing the usbfs
+file while returning the disappearance error. Pending bulk transfers are drained
+before interface release. A later close does not repeat the interface-release
+request. Other release errors retain the claim and file for a retry.
