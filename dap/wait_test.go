@@ -1183,7 +1183,7 @@ func TestDebugPortDoesNotReadCTRLSTATAfterAbandonedBankZeroSELECT(t *testing.T) 
 	}
 }
 
-func TestDebugPortKeepsSELECTProvisionalAfterDPIDRRead(t *testing.T) {
+func TestDebugPortSettlesSELECTBeforeDPIDRRead(t *testing.T) {
 	target := newWaitTarget()
 	dp := newDebugPort(t, target)
 	if _, err := dp.Connect(t.Context()); err != nil {
@@ -1196,12 +1196,9 @@ func TestDebugPortKeepsSELECTProvisionalAfterDPIDRRead(t *testing.T) {
 	if err := dp.WriteDP(t.Context(), dap.SELECT, 1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := dp.ReadDP(t.Context(), dap.DPIDR); err != nil {
-		t.Fatal(err)
-	}
 	before := len(target.requests)
-	if _, err := dp.ReadDP(t.Context(), dap.CTRLSTAT); !errors.Is(err, dap.ErrFault) {
-		t.Fatalf("ReadDP(CTRLSTAT) error = %v, want SELECT completion FAULT", err)
+	if _, err := dp.ReadDP(t.Context(), dap.DPIDR); !errors.Is(err, dap.ErrFault) {
+		t.Fatalf("ReadDP(DPIDR) error = %v, want SELECT completion FAULT", err)
 	}
 	if len(target.requests) != before+1 || target.requests[before] != dpRead(12) {
 		t.Fatalf("requests after SELECT failure = %+v, want only RDBUFF", target.requests[before:])

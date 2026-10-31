@@ -203,7 +203,7 @@ func (dp *DebugPort) settlePreviousDPWrite(ctx context.Context) error {
 	}
 	_, err := dp.conn.transferDPWriteBarrier(ctx)
 	if err != nil {
-		return fmt.Errorf("dap: settle previous DP write before transaction: %w", err)
+		return fmt.Errorf("dap: settle previous DP write: %w", err)
 	}
 	return nil
 }

@@ -295,6 +295,13 @@ CTRL/STAT reads and ABORT writes are exceptions: the DP must not stall them, and
 using one too early can abandon buffered writes and set WDATAERR. A RDBUFF read
 is therefore a useful completion barrier after AP writes.
 
+`DebugPort` settles an earlier DP write through RDBUFF before reading DPIDR or
+CTRL/STAT. This also completes power-request writes before polling their
+acknowledgements. If a power-request write is lost, `DebugPort` returns the
+captured FAULT state instead of polling unchanged power bits until the caller's
+deadline. Release retains power ownership after a failed attempt so that cleanup
+can be retried.
+
 WAIT applies to the physical request which received it. If SELECT returns WAIT,
 repeat SELECT. If the AP request returns WAIT, repeat that AP request. Once the
 AP request returns OK, however, it has been accepted. If the following RDBUFF

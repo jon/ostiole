@@ -102,7 +102,7 @@ func responseSettlesPreviousDPWrite(req transferRequest, err error) bool {
 	if err != nil && err != swd.ErrWait && err != swd.ErrParity {
 		return false
 	}
-	return req.AP || req.Read && req.Addr != dpRegisterOffset(DPIDR)
+	return req.AP || req.Read && req.Addr != dpRegisterOffset(DPIDR) && req.Addr != dpRegisterOffset(CTRLSTAT)
 }
 
 func (e *swdExecutor) resolveSELECT(req transferRequest, value uint32, err error) {
