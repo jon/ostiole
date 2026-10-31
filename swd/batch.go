@@ -270,7 +270,7 @@ func (b *Batch) overrunChunkEnd(start, limit int) int {
 	shadow := *b.conn
 	for i := start; i < limit; i++ {
 		op := b.ops[i]
-		boundary := shadow.selectPending && isBankZeroCTRLSTATRead(op.req, shadow.bank, shadow.priorBank)
+		boundary := shadow.selectPending && isPossibleCTRLSTATRead(op.req, shadow.priorBank)
 		shadow.observeTransfer(op.req, 0, op.data, nil)
 		if boundary {
 			return i + 1

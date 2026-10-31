@@ -8,6 +8,9 @@ import (
 
 // ReadDP reads one debug-port register without retrying. Connect must have
 // succeeded, and addr must be 0x00, 0x04, 0x08, or 0x0c.
+// After a SELECT write, read RDBUFF to settle it before interpreting a banked
+// register value. A DPIDR read, WAIT, or possible old CTRL/STAT response does
+// not confirm a changed bank.
 func (c *Conn) ReadDP(ctx context.Context, addr uint8) (uint32, error) {
 	return c.read(ctx, false, addr)
 }
@@ -162,7 +165,8 @@ func (c *Conn) observePendingSelection(req request, result uint32, err error) {
 	case isDPIDRRead(req):
 	case isBankZeroCTRLSTATRead(req, c.bank, c.priorBank):
 		c.resolveBankZeroCTRLSTAT(result, err)
-	case err == nil || err == ErrWait || err == ErrParity:
+	case isPossibleCTRLSTATRead(req, c.priorBank):
+	case err == nil || err == ErrParity:
 		c.confirmBank()
 	}
 }
@@ -188,6 +192,10 @@ func isDPIDRRead(req request) bool {
 
 func isBankZeroCTRLSTATRead(req request, bank, prior bankSelection) bool {
 	return !req.isAP() && req.isRead() && req.address() == 0x04 && bank.valid && bank.bank == 0 && prior.valid && prior.bank == 0
+}
+
+func isPossibleCTRLSTATRead(req request, prior bankSelection) bool {
+	return !req.isAP() && req.isRead() && req.address() == 0x04 && (!prior.valid || prior.bank == 0)
 }
 
 func completeTransfer(err error) bool {

@@ -131,6 +131,14 @@ bank. If it returns FAULT with WDATAERR, the DP might have abandoned the SELECT
 data and kept the previous bank. Re-enter SWD before trying again. Only after
 RDBUFF returns OK is `0x04` known to name CTRL/STAT.
 
+`Conn` and `Batch` keep a changed SELECT pending after WAIT or a DPIDR read.
+When the previous bank was zero or unknown, a read at `0x04` may still return
+the old CTRL/STAT and cannot confirm the new bank. Packed batches end the
+physical chunk after that read. Settle SELECT with RDBUFF before interpreting
+the banked value. An ABORT while SELECT is pending invalidates the known bank;
+later writes at `0x04` are rejected before traffic until the bank is established
+again.
+
 A WAIT or FAULT during this bootstrap leaves the response grammar unknown:
 ORUNDETECT might be set, in which case the response has a data phase the host
 has not consumed. Checking ORUNDETECT only after retrying is too late. Re-enter
