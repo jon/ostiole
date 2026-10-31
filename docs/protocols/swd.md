@@ -143,7 +143,12 @@ A WAIT or FAULT during this bootstrap leaves the response grammar unknown:
 ORUNDETECT might be set, in which case the response has a data phase the host
 has not consumed. Checking ORUNDETECT only after retrying is too late. Re-enter
 SWD before trying again; ordinary replay would assume the grammar which the
-bootstrap is meant to establish.
+bootstrap is meant to establish. `Conn` makes one fresh entry after a bootstrap
+WAIT, aborts the inherited AP transaction through DAPABORT, and retries the
+bootstrap. If that recovery fails, Release retains the same bounded retry path.
+DAPABORT cannot restore the interrupted AP access or its register state. The
+first validated DPIDR is retained through retries and failed-entry cleanup; a
+changed identity stops recovery before DAPABORT.
 
 The specification says to retry read data after a parity error. That advice is
 less mechanical for an AP read because AP reads are posted: by the time parity

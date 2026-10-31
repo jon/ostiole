@@ -320,21 +320,57 @@ func TestJTAGReleaseReentryHonorsCallerContext(t *testing.T) {
 	}
 }
 
-func TestJTAGFailedInitialEntryDoesNotAbortInheritedWork(t *testing.T) {
-	m, _, chain := jtagModelChain(t, 4, 0)
-	m.pending, m.waits, m.ctrl = &jtagRequest{ap: true, read: true, addr: 12}, 100, 1<<12
-	dp := dap.NewDebugPort(dap.JTAGDP(chain, 0), dap.WithMaxWaits(2))
-	if _, err := dp.Connect(t.Context()); !errors.Is(err, dap.ErrWait) {
-		t.Fatalf("inherited WAIT: %v", err)
+func TestJTAGEntryAbortsInheritedStalledWork(t *testing.T) {
+	for _, ir := range []int{4, 8} {
+		m, _, chain := jtagModelChain(t, ir, 0)
+		m.pending, m.waits = &jtagRequest{ap: true, read: true, addr: 12}, 100
+		completions := 0
+		m.complete = func(jtagRequest) uint32 { completions++; return 0 }
+		dp := dap.NewDebugPort(dap.JTAGDP(chain, 0), dap.WithMaxWaits(2))
+		if _, err := dp.Connect(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if m.aborts != 1 || m.waits != 0 || completions != 0 {
+			t.Fatalf("entry aborts=%d waits=%d completions=%d", m.aborts, m.waits, completions)
+		}
+		if err := dp.Release(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if m.ctrl&allPower != 0 {
+			t.Fatalf("power after release = %#x", m.ctrl)
+		}
 	}
-	if m.aborts != 0 || m.pending == nil || m.ctrl != 1<<12 {
-		t.Fatal("entry altered inherited work")
+}
+
+func TestJTAGInheritedAbortFailureRetainsReleaseRetry(t *testing.T) {
+	m, wire, chain := jtagModelChain(t, 4, 0)
+	m.pending, m.waits = &jtagRequest{ap: true, read: false, addr: 12, data: 42}, 100
+	completions := 0
+	m.complete = func(jtagRequest) uint32 { completions++; return 0 }
+	m.onAbort = func() { wire.failAfter = true }
+	dp := dap.NewDebugPort(dap.JTAGDP(chain, 0), dap.WithMaxWaits(1))
+	if _, err := dp.Connect(t.Context()); err == nil {
+		t.Fatal("Connect succeeded despite failed abort scan")
 	}
-	m.waits = 0
+	before := wire.calls
+	if _, err := dp.ReadDP(t.Context(), dap.CTRLSTAT); err == nil {
+		t.Fatal("ReadDP succeeded during repair")
+	}
+	if wire.calls != before {
+		t.Fatal("repair-only port sent normal traffic")
+	}
+	m.onAbort = nil
 	if err := dp.Release(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if m.aborts != 0 || m.ctrl != 1<<12 {
-		t.Fatal("cleanup aborted inherited work")
+	if completions != 0 || m.ctrl&allPower != 0 || m.aborts == 0 {
+		t.Fatalf("completions=%d power=%#x aborts=%d", completions, m.ctrl, m.aborts)
+	}
+	before = wire.calls
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if wire.calls != before {
+		t.Fatal("successful release repeated traffic")
 	}
 }

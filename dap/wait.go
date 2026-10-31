@@ -75,7 +75,7 @@ func (e *swdExecutor) transferWithAPRecovery(ctx context.Context, req transferRe
 	waits := 0
 	for {
 		if err := ctx.Err(); err != nil {
-			return 0, e.stopWaiting(waits, err, apWork)
+			return 0, e.stopWaiting(waits, err)
 		}
 		value, err := e.transferOnce(ctx, req, data)
 		e.resolveSELECT(req, value, err)
@@ -92,7 +92,7 @@ func (e *swdExecutor) transferWithAPRecovery(ctx context.Context, req transferRe
 			return 0, err
 		}
 		waits++
-		if err := e.stopAfterWAIT(ctx, waits, apWork); err != nil {
+		if err := e.stopAfterWAIT(ctx, waits); err != nil {
 			return 0, err
 		}
 	}
@@ -145,19 +145,19 @@ func isCTRLSTATRead(req transferRequest) bool {
 	return !req.AP && req.Read && req.Addr == dpRegisterOffset(CTRLSTAT)
 }
 
-func (e *swdExecutor) stopWaiting(waits int, cause error, apWork bool) error {
+func (e *swdExecutor) stopWaiting(waits int, cause error) error {
 	if waits == 0 {
 		return &requestNotSentError{cause: cause}
 	}
-	return e.finishWait(cause, apWork)
+	return e.finishWait(cause)
 }
 
-func (e *swdExecutor) stopAfterWAIT(ctx context.Context, waits int, apWork bool) error {
+func (e *swdExecutor) stopAfterWAIT(ctx context.Context, waits int) error {
 	if err := ctx.Err(); err != nil {
-		return e.stopWaiting(waits, err, apWork)
+		return e.stopWaiting(waits, err)
 	}
 	if e.dp.maxWaits != 0 && uint(waits) >= e.dp.maxWaits {
-		return e.finishWait(swd.ErrWait, apWork)
+		return e.finishWait(swd.ErrWait)
 	}
 	return nil
 }
@@ -292,12 +292,8 @@ func (e rejectedRequestError) Unwrap() error {
 	return e.error
 }
 
-func (e *swdExecutor) finishWait(cause error, apWork bool) error {
-	cause = rejectedRequestError{error: cause}
-	if !apWork {
-		return cause
-	}
-	return e.abortWait(cause)
+func (e *swdExecutor) finishWait(cause error) error {
+	return e.abortWait(rejectedRequestError{error: cause})
 }
 
 func requestWasRejected(err error) bool {
@@ -315,6 +311,11 @@ func waitMayAffectAP(req transferRequest) bool {
 }
 
 func (e *swdExecutor) abortWait(cause error) error {
+	if e.recovering {
+		return cause
+	}
+	e.recovering = true
+	defer func() { e.recovering = false }()
 	e.dp.state.invalidateAP()
 	ctx, cancel := e.dp.cleanupContext()
 	defer cancel()
@@ -332,12 +333,15 @@ func (e *swdExecutor) abortWait(cause error) error {
 }
 
 func (e *swdExecutor) restoreAfterAbort(ctx context.Context) error {
+	if !e.dp.state.faultBankZero() {
+		return e.dp.reenter(ctx)
+	}
 	state, err := e.transferOnce(ctx, dpTransferRequest(CTRLSTAT, true), 0)
 	if err != nil {
 		return fmt.Errorf("dap: read sticky state after DAP abort: %w", err)
 	}
 	e.dp.confirmResponse(state)
-	clear := stickyClearForState(state, e.dp.identity.dpidr.Minimal)
+	clear := stickyClearForState(state, e.faultIdentityMinimal(state))
 	if clear != 0 {
 		if _, err := e.transferOnce(ctx, dpTransferRequest(ABORT, false), clear); err != nil {
 			return fmt.Errorf("dap: clear sticky state after DAP abort: %w", err)

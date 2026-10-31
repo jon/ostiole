@@ -144,8 +144,9 @@ func TestExemptReadBarrierWAITRetainsCleanupForRetry(t *testing.T) {
 	if _, err := dp.ReadDP(t.Context(), dap.CTRLSTAT); !errors.Is(err, swd.ErrWait) {
 		t.Fatalf("ReadDP() = %v, want WAIT", err)
 	}
-	if target.executed[dpRead(4)] != before {
-		t.Fatal("CTRL/STAT poll ran despite unsettled write")
+	assertDAPABORT(t, target)
+	if target.executed[dpRead(4)] != before+1 {
+		t.Fatal("want only the post-abort CTRL/STAT check, without an ordinary poll")
 	}
 	target.armed = false
 	if err := dp.Release(t.Context()); err != nil {

@@ -139,16 +139,17 @@ operation at a time. SWD retains its packed physical requests and
 confirmed-prefix behavior. Both paths leave the unsent transaction suffix
 unexecuted after a failure; MEM-AP does not interpret either wire protocol.
 
-Connection setup primes the pipeline, establishes SELECT zero, clears sticky
-status, and temporarily disables inherited ORUNDETECT. Release restores that
-setting. Active pushed-operation or transaction-counter modes are rejected, and
-owned CTRL/STAT writes cannot enable them. A pending AP operation that exhausts
-its WAIT bound requires ABORT and invalidates AP-derived state; its error is
-indeterminate, not “not executed.” Cancellation remains the primary operation
-error, and recovery uses the independent cleanup budget. Abort recovery also
-checks and clears sticky status left by an operation finishing during the abort.
-A failed check blocks further AP access and chain release until cleanup
-succeeds.
+Connection setup aborts inherited AP work if pipeline priming reaches its WAIT
+bound, then primes once more. A canceled or failed prime leaves an abort pending
+for bounded cleanup. Setup establishes SELECT zero, clears sticky status, and
+temporarily disables inherited ORUNDETECT. Release restores that setting. Active
+pushed-operation or transaction-counter modes are rejected, and owned CTRL/STAT
+writes cannot enable them. A pending AP operation that exhausts its WAIT bound
+requires ABORT and invalidates AP-derived state; its error is indeterminate, not
+“not executed.” Cancellation remains the primary operation error, and recovery
+uses the independent cleanup budget. Abort recovery also checks and clears
+sticky status left by an operation finishing during the abort. A failed check
+blocks further AP access and chain release until cleanup succeeds.
 
 After scan-state loss, cleanup revalidates the exact chain and reacquires the
 selected TAP before restoring AP or DAP state. If the identity has changed,
@@ -351,9 +352,19 @@ Re-entering SWD repairs the request boundary; it does not repair AP state.
 Restore saved AP registers before releasing debug power or disconnecting.
 Successful cleanup does not make an invalidated AP handle usable again.
 
+A WAIT limit or cancellation after WAIT on SELECT or a DP completion barrier can
+also indicate an inherited stalled AP access. Recovery aborts that access and
+invalidates existing MEM-AP clients, even when the rejected request itself was a
+DP operation. It does not replay the interrupted access. If restoring SELECT
+reaches the WAIT bound, DAP keeps the current recovery budget instead of
+starting another DAPABORT recovery.
+
 Post-abort repair is ordered traffic, not a best-effort checklist. If the
 CTRL/STAT read or sticky-clear write fails, SWD framing might be unknown; do not
-follow it with SELECT. Re-establish framing before sending another request.
+follow it with SELECT. Re-establish framing before sending another request. If
+bank zero is uncertain after DAPABORT, re-enter SWD and establish it before
+interpreting offset `0x04` as CTRL/STAT. Sticky clearing uses the identity from
+the current protocol entry.
 
 FAULT is different again. It reports sticky state and must not be replayed as if
 it were WAIT. CTRL/STAT identifies the recorded conditions; an ABORT write

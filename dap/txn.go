@@ -601,7 +601,7 @@ func (t *swdTxn) handleBatchFailure(ctx context.Context, steps []txnStep, result
 
 func (t *swdTxn) handleBatchNotExecuted(step txnStep, batchErr error, waits int) error {
 	if waits > 0 {
-		return t.failStep(step, t.dp.conn.finishWait(batchErr, stepMayAffectAP(step)))
+		return t.failStep(step, t.dp.conn.finishWait(batchErr))
 	}
 	return t.failStep(step, batchErr)
 }
@@ -633,7 +633,7 @@ func (t *swdTxn) retryBatchWAIT(ctx context.Context, steps []txnStep, results []
 		return t.failStep(step, err)
 	}
 	(*waits)++
-	if err := t.dp.conn.stopAfterWAIT(ctx, *waits, stepMayAffectAP(step)); err != nil {
+	if err := t.dp.conn.stopAfterWAIT(ctx, *waits); err != nil {
 		return t.failStep(step, err)
 	}
 	return nil
