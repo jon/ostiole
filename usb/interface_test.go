@@ -5,6 +5,7 @@ package usb
 import (
 	"errors"
 	"os"
+	"syscall"
 	"testing"
 )
 
@@ -106,5 +107,77 @@ func TestClaimedInterfaceRetainsOwnershipAfterFailedRelease(t *testing.T) {
 	}
 	if _, err := device.ClaimInterface(2); err != nil {
 		t.Fatalf("ClaimInterface() after release: %v", err)
+	}
+}
+
+func TestDeviceCloseReleasesGoneClaimAndFile(t *testing.T) {
+	file, err := os.CreateTemp(t.TempDir(), "gone-usb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = file.Close() })
+	device := &Device{file: file}
+	releases := 0
+	device.ioctl = func(_ uintptr, request uintptr, _ any) (uintptr, error) {
+		if request == usbfsReleaseInterface {
+			releases++
+			return 0, syscall.ENODEV
+		}
+		return 0, nil
+	}
+	claim, err := device.ClaimInterface(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := device.Close(); !errors.Is(err, syscall.ENODEV) {
+		t.Fatalf("Close() = %v, want device loss", err)
+	}
+	if claim.device != nil || device.claim != nil {
+		t.Fatal("device-gone release retained the claim")
+	}
+	if _, err := file.Stat(); !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("file.Stat() = %v, want closed handle", err)
+	}
+	if err := claim.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := device.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if releases != 1 {
+		t.Fatalf("release ioctls = %d, want one", releases)
+	}
+}
+
+func TestGoneReleasePreservesFileCloseError(t *testing.T) {
+	file, err := os.CreateTemp(t.TempDir(), "gone-usb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	device := &Device{file: file}
+	releases := 0
+	device.ioctl = func(_ uintptr, request uintptr, _ any) (uintptr, error) {
+		if request == usbfsReleaseInterface {
+			releases++
+			return 0, syscall.ENODEV
+		}
+		return 0, nil
+	}
+	if _, err := device.ClaimInterface(0); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	err = device.Close()
+	if !errors.Is(err, syscall.ENODEV) || !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("Close() = %v, want release and file errors", err)
+	}
+	err = device.Close()
+	if !errors.Is(err, os.ErrClosed) || errors.Is(err, syscall.ENODEV) {
+		t.Fatalf("repeated Close() = %v, want cached file error only", err)
+	}
+	if releases != 1 || device.claim != nil {
+		t.Fatalf("release ioctls=%d, claim=%v", releases, device.claim)
 	}
 }

@@ -48,11 +48,14 @@ func (d *Device) releaseInterface(claim *ClaimedInterface) error {
 		return errors.New("usb: claimed interface is not owned by this device")
 	}
 	value := uint32(claim.number)
-	if _, err := d.runIOCTL(usbfsReleaseInterface, &value); err != nil {
+	_, err := d.runIOCTL(usbfsReleaseInterface, &value)
+	if err == nil || errors.Is(err, syscall.ENODEV) {
+		d.claim = nil
+		claim.device = nil
+	}
+	if err != nil {
 		return fmt.Errorf("usb: release interface %d: %w", claim.number, err)
 	}
-	d.claim = nil
-	claim.device = nil
 	return nil
 }
 

@@ -41,8 +41,8 @@ func (c *ClaimedInterface) SetAltSetting(alternate uint8) error {
 	return nil
 }
 
-// Close releases the interface. A failed release retains the claim so Close
-// can be retried.
+// Close releases the interface. If the host retains the claim after an error,
+// Close can be retried.
 func (c *ClaimedInterface) Close() error {
 	if c == nil || c.device == nil {
 		return nil
