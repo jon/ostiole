@@ -124,6 +124,11 @@ func (dp *DebugPort) readDP(ctx context.Context, reg DPRegister) (uint32, error)
 	if dp.jtag != nil {
 		return dp.jtag.readDP(ctx, reg)
 	}
+	if (reg == CTRLSTAT || reg == DPIDR) && dp.state.dpWritePending {
+		if err := dp.settlePreviousDPWrite(ctx); err != nil {
+			return 0, err
+		}
+	}
 	if !info.bankIndependent {
 		if err := dp.confirmPendingSELECT(ctx); err != nil {
 			return 0, err
@@ -306,7 +311,7 @@ func (dp *DebugPort) recordDPWriteState(reg DPRegister, value uint32) {
 }
 
 func (dp *DebugPort) recordDPRead(reg DPRegister, value uint32) {
-	if dpRegisterOffset(reg) != 0 {
+	if reg != DPIDR && reg != CTRLSTAT {
 		dp.state.settleDPWrite()
 	}
 	if reg == CTRLSTAT && dp.state.selectDP.valid && dp.state.dpBank() == 0 {
