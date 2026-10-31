@@ -30,7 +30,9 @@ const (
 // restores the setting found during bootstrap but does not restore SELECT
 // or cleared sticky state. Connect cleans up a failed attempt when
 // possible; a joined cleanup error leaves Release available for retry.
-// Calling Connect again repairs framing and rejects a changed DPIDR.
+// A bootstrap WAIT triggers one fresh entry and DAPABORT before retrying.
+// This can abandon an inherited AP transaction. Calling Connect again repairs
+// framing and rejects a changed DPIDR.
 func (c *Conn) Connect(ctx context.Context) (dpidr uint32, err error) {
 	if c == nil || c.wire == nil {
 		return 0, errors.New("swd: nil connection")
@@ -68,8 +70,6 @@ func (c *Conn) prepareConnection(ctx context.Context) (uint32, uint32, error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	c.identity = dpidr
-	c.identityKnown = true
 	state, err := c.readRaw(ctx, 0x04)
 	if err != nil {
 		c.requireRepair()
@@ -81,10 +81,6 @@ func (c *Conn) prepareConnection(ctx context.Context) (uint32, uint32, error) {
 func (c *Conn) cleanupFailedConnect(connectErr *error) {
 	if *connectErr == nil {
 		return
-	}
-	if !c.originalKnown {
-		c.identity = 0
-		c.identityKnown = false
 	}
 	if c.state == connectionIdle {
 		return
@@ -190,6 +186,23 @@ func (c *Conn) finishRelease() {
 }
 
 func (c *Conn) bootstrap(ctx context.Context) (uint32, error) {
+	dpidr, err := c.bootstrapAttempt(ctx, false)
+	if !errors.Is(err, ErrWait) {
+		return dpidr, err
+	}
+	c.response = responseSimple
+	c.invalidateBank()
+	if retryErr := c.enterSWD(ctx); retryErr != nil {
+		return 0, errors.Join(err, fmt.Errorf("swd: re-enter after bootstrap WAIT: %w", retryErr))
+	}
+	dpidr, retryErr := c.bootstrapAttempt(ctx, true)
+	if retryErr != nil {
+		return 0, errors.Join(err, retryErr)
+	}
+	return dpidr, nil
+}
+
+func (c *Conn) bootstrapAttempt(ctx context.Context, abort bool) (uint32, error) {
 	dpidr, err := c.readEntryIdentity(ctx)
 	if err != nil {
 		c.requireRepair()
@@ -209,7 +222,11 @@ func (c *Conn) bootstrap(ctx context.Context) (uint32, error) {
 		c.requireRepair()
 		return 0, fmt.Errorf("swd: DPIDR changed from %#08x to %#08x", c.identity, dpidr)
 	}
+	c.identity, c.identityKnown = dpidr, true
 	clear := clearStickyError | clearWriteDataError | clearStickyOverrun
+	if abort {
+		clear |= 1
+	}
 	if dpidr>>16&1 == 0 {
 		clear |= clearStickyCompare
 	}

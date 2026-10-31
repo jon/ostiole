@@ -55,7 +55,7 @@ func (e *jtagExecutor) enter(ctx context.Context) error {
 	if err := e.abortPending(ctx); err != nil {
 		return err
 	}
-	if err := e.prime(ctx); err != nil {
+	if err := e.primeEntry(ctx); err != nil {
 		e.dp.state.loseFraming()
 		return err
 	}
@@ -91,6 +91,26 @@ func (e *jtagExecutor) release(ctx context.Context) error {
 	if err := e.chain.Release(ctx); err != nil {
 		e.dp.state.loseFraming()
 		return err
+	}
+	return nil
+}
+
+func (e *jtagExecutor) primeEntry(ctx context.Context) error {
+	err := e.prime(ctx)
+	if err == nil {
+		return nil
+	}
+	e.abortRequired = true
+	e.dp.state.invalidateAP()
+	if !errors.Is(err, ErrWait) {
+		return err
+	}
+	if abortErr := e.abortPending(ctx); abortErr != nil {
+		return errors.Join(err, abortErr)
+	}
+	if retryErr := e.prime(ctx); retryErr != nil {
+		e.abortRequired = true
+		return errors.Join(err, retryErr)
 	}
 	return nil
 }

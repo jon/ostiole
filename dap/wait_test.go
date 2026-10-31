@@ -483,7 +483,7 @@ func TestDebugPortStopsAtConfiguredWAITLimit(t *testing.T) {
 	}
 }
 
-func TestDebugPortConfiguredWAITLimitDoesNotAbortDPWork(t *testing.T) {
+func TestDebugPortConfiguredWAITLimitAbortsStallableDPWork(t *testing.T) {
 	target := newWaitTarget()
 	dp := dap.NewDebugPort(dap.SWDP(swd.New(swdsim.New(target))), dap.WithMaxWaits(1))
 	if _, err := dp.Connect(t.Context()); err != nil {
@@ -500,11 +500,7 @@ func TestDebugPortConfiguredWAITLimitDoesNotAbortDPWork(t *testing.T) {
 	if target.attempts != 1 {
 		t.Fatalf("DLCR read attempts = %d, want 1", target.attempts)
 	}
-	for _, value := range target.abortValues {
-		if value&1 != 0 {
-			t.Fatalf("ABORT writes = %#v, want no DAPABORT for DP work", target.abortValues)
-		}
-	}
+	assertDAPABORT(t, target)
 	if _, err := dp.ReadDP(t.Context(), dap.DPIDR); err != nil {
 		t.Fatalf("ReadDP(DPIDR) after WAIT limit: %v", err)
 	}
@@ -730,8 +726,8 @@ func TestConnectRepairsRejectedBootstrapByReenteringSWD(t *testing.T) {
 		{
 			name:         "WAIT",
 			arm:          func(target *waitTarget, req swdsim.Request) { target.arm(req, 1) },
-			want:         swd.ErrWait,
-			wantAttempts: 2,
+			want:         nil,
+			wantAttempts: 1,
 		},
 		{
 			name:         "FAULT",
@@ -759,6 +755,12 @@ func TestConnectRepairsRejectedBootstrapByReenteringSWD(t *testing.T) {
 			if wire.reentryAttempts != 1 {
 				t.Fatalf("SWD re-entry attempts = %d, want 1", wire.reentryAttempts)
 			}
+			if test.want == nil {
+				assertDAPABORT(t, target)
+				if err := dp.Release(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if _, err := dp.Connect(t.Context()); err != nil {
 				t.Fatalf("Connect() after automatic repair: %v", err)
 			}
@@ -778,7 +780,7 @@ func TestConnectCanRetryAfterBootstrapRepair(t *testing.T) {
 		{
 			name: "WAIT",
 			arm:  func(target *waitTarget, req swdsim.Request) { target.arm(req, 1) },
-			want: swd.ErrWait,
+			want: nil,
 		},
 		{
 			name: "FAULT",
@@ -795,6 +797,12 @@ func TestConnectCanRetryAfterBootstrapRepair(t *testing.T) {
 
 			if _, err := dp.Connect(t.Context()); !errors.Is(err, test.want) {
 				t.Fatalf("Connect() error = %v, want %v", err, test.want)
+			}
+			if test.want == nil {
+				assertDAPABORT(t, target)
+				if err := dp.Release(t.Context()); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if _, err := dp.Connect(t.Context()); err != nil {
 				t.Fatalf("Connect() after recovery: %v", err)
@@ -1022,7 +1030,7 @@ func TestDebugPortAbortsWAITWhenContextEndsAndClearsAbandonedWrite(t *testing.T)
 	}
 }
 
-func TestDebugPortDoesNotAbortDPWAITWhenContextEnds(t *testing.T) {
+func TestDebugPortAbortsDPWAITWhenContextEnds(t *testing.T) {
 	base := newWaitTarget()
 	target := &cancelAfterOverrunClearTarget{waitTarget: base}
 	addAP(t, target, 0, 0x24770011)
@@ -1038,11 +1046,7 @@ func TestDebugPortDoesNotAbortDPWAITWhenContextEnds(t *testing.T) {
 	if !errors.Is(err, context.Canceled) || errors.Is(err, swd.ErrWait) {
 		t.Fatalf("ReadAPIDR() error = %v, want context cancellation without ErrWait", err)
 	}
-	for _, value := range target.abortValues {
-		if value&1 != 0 {
-			t.Fatalf("ABORT writes = %#v, DAPABORT is reserved for an AP transaction", target.abortValues)
-		}
-	}
+	assertDAPABORT(t, base)
 }
 
 func TestDebugPortDropsOriginalWAITWhenRetryIsCanceledInFlight(t *testing.T) {
@@ -1238,7 +1242,7 @@ func TestConnectRepairsFailedRDBUFFConfirmation(t *testing.T) {
 		arm  func(*waitTarget, swdsim.Request)
 		want error
 	}{
-		{name: "WAIT", arm: func(target *waitTarget, req swdsim.Request) { target.arm(req, 1) }, want: swd.ErrWait},
+		{name: "WAIT", arm: func(target *waitTarget, req swdsim.Request) { target.arm(req, 1) }, want: nil},
 		{name: "FAULT", arm: func(target *waitTarget, req swdsim.Request) { target.armFault(req) }, want: swd.ErrFault},
 	}
 	for _, test := range tests {
@@ -1255,6 +1259,12 @@ func TestConnectRepairsFailedRDBUFFConfirmation(t *testing.T) {
 			}
 			if wire.reentryAttempts != 1 {
 				t.Fatalf("SWD re-entry attempts = %d, want 1", wire.reentryAttempts)
+			}
+			if test.want == nil {
+				assertDAPABORT(t, target)
+				if err := dp.Release(t.Context()); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if _, err := dp.Connect(t.Context()); err != nil {
 				t.Fatalf("Connect() after repaired SELECT confirmation: %v", err)
