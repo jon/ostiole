@@ -120,7 +120,7 @@ People and coding agents changing Ostiole itself should follow the shared
 
 ## Requirements
 
-Ostiole requires Go 1.25.12 or newer. On macOS 12 or newer, install Xcode or the
+Ostiole requires Go 1.26.10 or newer. On macOS 12 or newer, install Xcode or the
 Xcode command-line tools. The native USB implementation uses cgo to call the
 system IOKit and CoreFoundation frameworks; it does not require libusb or a
 third-party USB package.
