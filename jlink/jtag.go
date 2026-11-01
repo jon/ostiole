@@ -17,7 +17,8 @@ func (s *Session) ConfigureJTAG(ctx context.Context, maxClockHz uint32) error {
 // JTAGIO clocks packed TMS and TDI streams and returns packed TDO samples,
 // earliest bit first. It requires successful JTAG configuration, never switches
 // interfaces, and does not modify or retain the buffers. Zero clocks perform
-// no traffic. A nonzero scan status requires reconfiguration; an ambiguous
+// no traffic. A nonzero scan status requires reconfiguration; probe-owned
+// sessions perform it before the next valid nonempty request. An ambiguous
 // transfer poisons the session. Scans are never replayed.
 func (s *Session) JTAGIO(ctx context.Context, tms, tdi []byte, bits int) ([]byte, error) {
 	if bits < 0 || bits > defaultTransferBits || len(tms)*8 < bits || len(tdi)*8 < bits {
@@ -26,7 +27,7 @@ func (s *Session) JTAGIO(ctx context.Context, tms, tdi []byte, bits int) ([]byte
 	if err := s.transportReady(ctx); err != nil {
 		return nil, err
 	}
-	if !s.configured || s.info.SelectedInterface != interfaceJTAG {
+	if (!s.configured && !s.recoverableScan()) || s.info.SelectedInterface != interfaceJTAG {
 		return nil, errors.New("jlink: JTAG is not configured")
 	}
 	if bits > s.transferBits {
@@ -34,6 +35,9 @@ func (s *Session) JTAGIO(ctx context.Context, tms, tdi []byte, bits int) ([]byte
 	}
 	if bits == 0 {
 		return []byte{}, nil
+	}
+	if err := s.recoverScan(ctx); err != nil {
+		return nil, err
 	}
 	size := (bits + 7) / 8
 	control, drive := append([]byte(nil), tms[:size]...), append([]byte(nil), tdi[:size]...)

@@ -124,6 +124,13 @@ For a smaller binary, blank-import just `jlink/discovery`, `ftdi/discovery`, or
 `cmsisdap/discovery`. The core `discover` and `probe` packages import no USB
 implementation or concrete driver. Registration performs no hardware I/O.
 
+A probe-owned J-Link wire retains its configuration after a complete scan-status
+error and reconfigures before the next valid nonempty cleanup request. The
+failed scan is not replayed. Keep the protocol owner for its normal restoration
+retry; a scan-status error alone does not establish terminal loss. Direct J-Link
+sessions still require explicit reconfiguration. See the
+[J-Link session boundary](protocols/jlink.md#session-boundary).
+
 For an owned Arm debug connection, `armdebug.Open` combines discovery and
 `Connect`, using the same selection and configuration:
 
