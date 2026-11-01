@@ -77,20 +77,30 @@ successful clock response says that the request was accepted; CMSIS-DAP does not
 report the rate the probe attained. Reconfiguring an active session disconnects
 it first.
 
-The configured session implements `swd.Wire` with [DAP_SWD_Sequence][sequence],
-which is available in CMSIS-DAP 1.2 and later. For each set direction bit, the
-probe drives SWDIO; for each clear bit, it samples SWDIO. Each run carries at
-most 64 cycles, with 64 encoded as zero; data is packed least-significant bit
-first. Output bytes are absent from input sequences, so a caller's output bits
-are never driven while the target owns SWDIO.
+The configured session provides explicit sequences through
+[DAP_SWD_Sequence][sequence], available in CMSIS-DAP 1.2 and later. For each set
+direction bit, the probe drives SWDIO; for each clear bit, it samples SWDIO.
+Each run carries at most 64 cycles, with 64 encoded as zero; data is packed
+least-significant bit first. Output bytes are absent from input sequences, so a
+caller's output bits are never driven while the target owns SWDIO.
 
-One command can contain several runs. The driver keeps both its request and
-expected response within the negotiated packet size, then starts another command
-when either side is full or the 255-sequence count is exhausted. It does not use
-the reported packet count to pipeline commands. One logical `SWDIO` call may
-therefore complete several command exchanges, in order, up to the driver's
-conservative 16,384-bit limit. A failure stops at that packet and no command is
-replayed; the probe may already have clocked the prefix sent in earlier packets.
+One command can contain several runs. The driver preflights the entire call,
+keeping every request and response within the negotiated packet size and every
+command within the 255-sequence limit. A target-driven phase must fit entirely
+in one command, even when it needs several 64-cycle descriptors. A call must end
+with host ownership. An unsafe plan is rejected without sending any command.
+Arm's [reference firmware][firmware] enables SWDIO output at each command's end;
+splitting a target-driven phase would therefore drive against the target.
+
+These restrictions mean that `Session` cannot serve as a general `swd.Wire`. Do
+not compose it with `swd.New`. `OpenProbe` acquires only the USB attachment; its
+`SWD` and `JTAG` calls return the corresponding unsupported-capability error
+before claiming or configuring an interface. Direct `Open` remains metadata-only
+unless configured explicitly. One safe `SWDIO` call may contain several ordered,
+unpipelined commands, up to 16,384 bits. Commands are never replayed.
+
+[firmware]:
+  https://github.com/ARM-software/CMSIS-DAP/blob/main/Firmware/Source/DAP.c
 
 When the probe returns a complete `DAP_ERROR`, `SWDIO` returns an error naming
 that packet but leaves the command stream synchronized. A response with the
@@ -120,7 +130,11 @@ resources are released, further session closes return nil without traffic.
 Release borrowed target and DAP owners before closing the session; freeing host
 resources does not restore a halted target.
 
-## Bench observation
+## Historical bench observations
+
+The target-access observations below used the earlier unrestricted sequence
+adapter. They do not establish target access through the current safe sequence
+surface. Metadata-only reopen and passive v1 rejection remain applicable.
 
 The `0d28:0204` BBC micro:bit attached to the macOS bench identifies itself as
 `BBC micro:bit CMSIS-DAP` and exposes the v2 bulk command interface. The HIL
@@ -170,19 +184,15 @@ driver was unchanged. DPIDR was `0x0bb11477`, AP0 IDR was `0x04770021`, and
 CPUID was `0x410cc200`. Both sessions restored AP0 CSW and TAR and closed their
 owners.
 
-The read-only HIL now requests 1 MHz:
+The historical read-only HIL requested 1 MHz.
 
-```sh
-OSTIOLE_CMSISDAP_HIL=1 \
-OSTIOLE_CMSISDAP_HIL_SERIAL=9900360140124e4500279015000000360000000097969901 \
-go test -tags integration ./cmsisdap \
-  -run '^TestHILCMSISDAPSWDReadOnlyStateRestoration$' -count=1 -v
-```
+The current integration suite retains metadata-only reopen and passive v1
+rejection. It does not offer the earlier target-restoration procedure.
 
-For a startup check, physically unplug/replug before running the command and
-leave other debuggers stopped. Reopening a session alone does not reproduce
-power-on state. The earlier 100 kHz evidence above covers an active interface;
-it does not establish startup from power-on. The new result covers one board and
+The startup observation used a physical unplug/replug before the test, with
+other debuggers stopped. Reopening a session alone does not reproduce power-on
+state. The earlier 100 kHz evidence above covers an active interface; it does
+not establish startup from power-on. The new result covers one board and
 firmware revision, with no measurement of the attained clock or guarantee of
 target-specific activation timing on other devices.
 

@@ -5,16 +5,14 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/jon/ostiole/swd"
 )
-
-var _ swd.Wire = (*Session)(nil)
-var _ swd.TransferLimits = (*Session)(nil)
 
 type swdSequencePeer struct {
 	*swdCommandPeer
 	sequenceCommands      [][]byte
+	commandEnds           []int
+	swdioOutput           bool
+	packetSize            int
 	sequenceStatusAt      int
 	sequenceUnimplemented bool
 	wrongSequenceCommand  bool
@@ -24,7 +22,7 @@ type swdSequencePeer struct {
 }
 
 func newSWDSequencePeer(packetSize uint16) *swdSequencePeer {
-	peer := &swdSequencePeer{swdCommandPeer: newSWDCommandPeer(packetSize)}
+	peer := &swdSequencePeer{swdCommandPeer: newSWDCommandPeer(packetSize), packetSize: int(packetSize)}
 	peer.device.claim.handle = peer.handle
 	return peer
 }
@@ -34,6 +32,9 @@ func (p *swdSequencePeer) handle(request []byte) ([]byte, error) {
 		return p.swdCommandPeer.handle(request)
 	}
 	p.commands = append(p.commands, append([]byte(nil), request...))
+	if len(request) > p.packetSize {
+		return nil, errors.New("peer: sequence request exceeds negotiated packet size")
+	}
 	return p.handleSWDSequence(request)
 }
 
@@ -62,6 +63,8 @@ func (p *swdSequencePeer) handleSWDSequence(request []byte) ([]byte, error) {
 	if offset != len(request) {
 		return nil, errors.New("peer: trailing sequence data")
 	}
+	p.swdioOutput = true
+	p.commandEnds = append(p.commandEnds, p.cycles)
 	if p.wrongSequenceCommand {
 		response[0] = commandSWJClock
 		p.wrongSequenceCommand = false
@@ -84,6 +87,7 @@ func (p *swdSequencePeer) handleSWDSequenceRun(request []byte, offset int) ([]by
 		bits = 64
 	}
 	input := info&0x80 != 0
+	p.swdioOutput = !input
 	bytes := (bits + 7) / 8
 	if !input && offset+bytes > len(request) {
 		return nil, offset, errors.New("peer: short sequence output")
@@ -168,7 +172,7 @@ func TestCloseAbandonsDisconnectAfterAmbiguousSequence(t *testing.T) {
 		t.Fatal(err)
 	}
 	peer.device.claim.inputErr = errors.New("response failed")
-	if _, err := session.SWDIO(t.Context(), []byte{0}, []byte{0}, 1); !errors.Is(err, ErrSessionPoisoned) {
+	if _, err := session.SWDIO(t.Context(), []byte{2}, []byte{0}, 2); !errors.Is(err, ErrSessionPoisoned) {
 		t.Fatalf("SWDIO error = %v", err)
 	}
 	before := len(peer.effectCommands())
@@ -299,11 +303,11 @@ func TestSWDIOMalformedResponsePoisonsSession(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := session.SWDIO(t.Context(), []byte{0}, []byte{0}, 1); !errors.Is(err, ErrSessionPoisoned) {
+			if _, err := session.SWDIO(t.Context(), []byte{2}, []byte{0}, 2); !errors.Is(err, ErrSessionPoisoned) {
 				t.Fatalf("SWDIO error = %v", err)
 			}
 			before := len(peer.commands)
-			if _, err := session.SWDIO(t.Context(), []byte{0}, []byte{0}, 1); !errors.Is(err, ErrSessionPoisoned) {
+			if _, err := session.SWDIO(t.Context(), []byte{2}, []byte{0}, 2); !errors.Is(err, ErrSessionPoisoned) {
 				t.Fatalf("second SWDIO error = %v", err)
 			}
 			if len(peer.commands) != before {
@@ -321,10 +325,10 @@ func TestSWDIOCommandNotImplementedDoesNotPoisonSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.SWDIO(t.Context(), []byte{0}, []byte{0}, 1); err == nil || errors.Is(err, ErrSessionPoisoned) {
+	if _, err := session.SWDIO(t.Context(), []byte{2}, []byte{0}, 2); err == nil || errors.Is(err, ErrSessionPoisoned) {
 		t.Fatalf("unimplemented SWDIO error = %v", err)
 	}
-	if _, err := session.SWDIO(t.Context(), []byte{0}, []byte{0}, 1); err != nil {
+	if _, err := session.SWDIO(t.Context(), []byte{2}, []byte{0}, 2); err != nil {
 		t.Fatalf("SWDIO after defined error: %v", err)
 	}
 	if err := session.Close(); err != nil {

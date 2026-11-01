@@ -14,7 +14,7 @@ USB host access
   |                             v
   |                           Arm JTAG-DP --> DAP transactions and MEM-AP
   |
-  +-- FTDI MPSSE, J-Link, or CMSIS-DAP v2
+  +-- FTDI MPSSE or J-Link
         |
         v
       Serial Wire Debug
@@ -35,25 +35,25 @@ service.
 
 ## Package responsibilities
 
-| Package           | Responsibility                                                                                                                                                                                              |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `usb`             | Enumerate, open, inspect the active standard configuration, claim, transfer through, and close one host USB attachment, including explicit asynchronous bulk transfers.                                     |
-| `probe`           | Own one supplied implementation and lend its supported protocol surfaces; the implementation retains its transport and cleanup obligations.                                                                 |
-| `armdebug`        | Own a probe, its connected SW-DP or baseline JTAG-DP, and explicitly acquired MEM-APs; restore APs before releasing DAP and its connection or chain, then close the probe.                                  |
-| `discover`        | Enumerate registered transports, classify probe bindings, and select one candidate without owning an open probe.                                                                                            |
-| `discover/probes` | Register all bundled probe providers for generic tools.                                                                                                                                                     |
-| `ftdi`            | Own one explicitly selected FTDI MPSSE port and expose direction-safe SWD bits or packed JTAG clocks.                                                                                                       |
-| `jlink`           | Find one reviewed J-Link USB application interface, own its command session, configure SWD or JTAG, and adapt scan v3 to the selected wire protocol.                                                        |
-| `cmsisdap`        | Shortlist CMSIS-DAP product strings, validate one explicitly selected v2 bulk interface, own its command session, configure SWD, and adapt packet-bounded sequence commands to direction-explicit SWD bits. |
-| `swd`             | Enter SWD, establish its response grammar, and encode, execute, and validate individual or packed DP/AP register transactions.                                                                              |
-| `jtag`            | Track TAP state, scan registers, discover reset entries, measure IR length, and validate explicit chains for selected-TAP access over a caller-supplied wire.                                               |
-| `swd/sim`         | Model SWD protocol entry, register transfers, fixed-frame packing, and transfer limits without hardware.                                                                                                    |
-| `dap`             | Bind SW-DP or baseline ADIv5 JTAG-DP, manage identity and power, execute ordered DP/AP transactions, and provide scalar or block MEM-AP access.                                                             |
-| `dap/sim`         | Model the DP, AP, and byte-addressed target-memory state consumed by `dap`.                                                                                                                                 |
-| `coresight`       | Identify debug components and walk ROM tables through borrowed scalar memory, with explicit bounds and no resource acquisition or target-memory writes.                                                     |
-| `target/cortexm`  | Identify Cortex-M processors and own Cortex-M0/M33 halting debug, with halted register access, over borrowed word memory.                                                                                   |
-| `examples/...`    | Demonstrate public package compositions as executable programs.                                                                                                                                             |
-| `cmd/ost`         | Provide a small command hierarchy over the same public packages.                                                                                                                                            |
+| Package           | Responsibility                                                                                                                                                                                                       |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `usb`             | Enumerate, open, inspect the active standard configuration, claim, transfer through, and close one host USB attachment, including explicit asynchronous bulk transfers.                                              |
+| `probe`           | Own one supplied implementation and lend its supported protocol surfaces; the implementation retains its transport and cleanup obligations.                                                                          |
+| `armdebug`        | Own a probe, its connected SW-DP or baseline JTAG-DP, and explicitly acquired MEM-APs; restore APs before releasing DAP and its connection or chain, then close the probe.                                           |
+| `discover`        | Enumerate registered transports, classify probe bindings, and select one candidate without owning an open probe.                                                                                                     |
+| `discover/probes` | Register all bundled probe providers for generic tools.                                                                                                                                                              |
+| `ftdi`            | Own one explicitly selected FTDI MPSSE port and expose direction-safe SWD bits or packed JTAG clocks.                                                                                                                |
+| `jlink`           | Find one reviewed J-Link USB application interface, own its command session, configure SWD or JTAG, and adapt scan v3 to the selected wire protocol.                                                                 |
+| `cmsisdap`        | Shortlist CMSIS-DAP product strings, validate one explicitly selected v2 bulk interface, own its command session, configure SWD, and execute preflighted explicit SWD sequences within command direction boundaries. |
+| `swd`             | Enter SWD, establish its response grammar, and encode, execute, and validate individual or packed DP/AP register transactions.                                                                                       |
+| `jtag`            | Track TAP state, scan registers, discover reset entries, measure IR length, and validate explicit chains for selected-TAP access over a caller-supplied wire.                                                        |
+| `swd/sim`         | Model SWD protocol entry, register transfers, fixed-frame packing, and transfer limits without hardware.                                                                                                             |
+| `dap`             | Bind SW-DP or baseline ADIv5 JTAG-DP, manage identity and power, execute ordered DP/AP transactions, and provide scalar or block MEM-AP access.                                                                      |
+| `dap/sim`         | Model the DP, AP, and byte-addressed target-memory state consumed by `dap`.                                                                                                                                          |
+| `coresight`       | Identify debug components and walk ROM tables through borrowed scalar memory, with explicit bounds and no resource acquisition or target-memory writes.                                                              |
+| `target/cortexm`  | Identify Cortex-M processors and own Cortex-M0/M33 halting debug, with halted register access, over borrowed word memory.                                                                                            |
+| `examples/...`    | Demonstrate public package compositions as executable programs.                                                                                                                                                      |
+| `cmd/ost`         | Provide a small command hierarchy over the same public packages.                                                                                                                                                     |
 
 Raw USB requests stay in `usb` and adapter drivers. MPSSE framing stays in
 `ftdi`. SWD request, acknowledgement, and parity rules stay in `swd`. Debug-port
@@ -160,10 +160,9 @@ and released in reverse order.
 | `*dap.MemAP`        | `OpenMemAP` validates the selected AP and saves its CSW, TAR, and optional TARHI. `Release` retries failed restoration; if DAPABORT interrupts cleanup, the next `Release` retries every saved value. Calls sharing the MEM-AP or its debug port must be serialized.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 An application that reaches the MEM-AP layer releases the MEM-AP before the
-debug port, then closes its FTDI channel, J-Link session, or CMSIS-DAP session.
-A metadata-only CMSIS-DAP composition closes its session directly. Cleanup
-errors remain meaningful and should be joined with the operation error rather
-than discarded.
+debug port, then closes its FTDI channel or J-Link session. A metadata-only
+CMSIS-DAP composition closes its session directly. Cleanup errors remain
+meaningful and should be joined with the operation error rather than discarded.
 
 `probe.CleanupState` and `probe.RestorationState` are optional backend
 contracts. `Probe.CleanupPending` reports whether the owned backend still needs
@@ -213,13 +212,15 @@ packet limits, target-port connection, maximum-clock request, packet-bounded
 before its command. Packet count remains metadata; the driver does not pipeline
 commands.
 
-The FTDI channel and configured J-Link or CMSIS-DAP session clock
-direction-explicit bit streams. None interprets SWD requests. FTDI owns MPSSE
-framing; J-Link owns its scan framing and status; CMSIS-DAP owns its sequence
-commands and response status. Each adapter owns its clock and transfer limits.
-`swd.Conn` owns request framing, turnaround, acknowledgements, data parity, line
-reset, the JTAG-to-SWD selection sequence, and the CTRL/STAT.ORUNDETECT setting
-which selects the response grammar.
+The FTDI channel and configured J-Link session provide general
+direction-explicit bit streams. CMSIS-DAP offers restricted explicit sequences,
+not a general SWD wire: firmware enables output at command end. Its generic
+probe owner therefore advertises no wire backend. None interprets SWD requests.
+FTDI owns MPSSE framing; J-Link owns its scan framing and status; CMSIS-DAP owns
+its sequence commands and response status. Each adapter owns its clock and
+transfer limits. `swd.Conn` owns request framing, turnaround, acknowledgements,
+data parity, line reset, the JTAG-to-SWD selection sequence, and the
+CTRL/STAT.ORUNDETECT setting which selects the response grammar.
 
 `swd.Conn.Connect` tries JTAG-to-SWD first. If the initial DPIDR read has an
 invalid ACK and its trailing clocks complete, it tries JTAG-to-dormant and

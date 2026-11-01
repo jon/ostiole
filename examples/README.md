@@ -40,8 +40,8 @@ inspect memory through one ADIv6 MEM-AP. The same probe selection and cleanup
 rules apply. See the [RP2350 procedure][rp2350-procedure].
 
 The `arm-info`, `coresight-info`, and `cortexm-control` examples accept `-clock`
-in Hz and default to 1 MHz. This also suits the micro:bit nRF51: its debug
-interface needs at least 125 kHz during startup. See the
-[startup evidence](../docs/protocols/cmsisdap.md#nrf51-startup-clock).
+in Hz and default to 1 MHz. They require a provider with a general SWD wire,
+such as FTDI or J-Link. The CMSIS-DAP owner provides attachment ownership only;
+its safe explicit sequences cannot supply these target compositions.
 
 [rp2350-procedure]: ../docs/coresight.md#adiv6-and-the-rp2350

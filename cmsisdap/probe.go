@@ -8,14 +8,9 @@ import (
 	"github.com/jon/ostiole/usb"
 )
 
-// OpenProbe opens one exact USB attachment. The owner's SWD call validates
-// the CMSIS-DAP v2 command interface and configures SWD before lending a wire.
+// OpenProbe opens one exact USB attachment without claiming a command interface.
+// The returned owner does not advertise a wire backend: DAP_SWD_Sequence cannot
+// preserve the direction boundaries required by a general SWD wire.
 func OpenProbe(ctx context.Context, identity usb.DeviceInfo) (*probe.Probe, error) {
-	return probeusb.Open(ctx, identity, "", func(ctx context.Context, device *usb.Device, config probe.SWDConfig) (probeusb.Session, error) {
-		session, err := Open(ctx, device, WithSWD(config.MaxClockHz))
-		if session == nil {
-			return nil, err
-		}
-		return session, err
-	})
+	return probeusb.OpenAttachment(ctx, identity)
 }
