@@ -113,17 +113,19 @@ func canceledWAITCause(ctx context.Context, err error) error {
 	return omitWAIT(err)
 }
 
+// canceledWAITError keeps the diagnostic and non-WAIT causes without exposing
+// the original chain through Unwrap, which would restore WAIT classification.
+type canceledWAITError struct{ error }
+
+func (e *canceledWAITError) Is(target error) bool {
+	return target != ErrWait && target != swd.ErrWait && errors.Is(e.error, target)
+}
+
+func (e *canceledWAITError) As(target any) bool { return errors.As(e.error, target) }
+
 func omitWAIT(err error) error {
-	if err == swd.ErrWait {
-		return nil
-	}
-	joined, ok := err.(interface{ Unwrap() []error })
-	if !ok {
+	if !errors.Is(err, ErrWait) && !errors.Is(err, swd.ErrWait) {
 		return err
 	}
-	var causes []error
-	for _, cause := range joined.Unwrap() {
-		causes = append(causes, omitWAIT(cause))
-	}
-	return errors.Join(causes...)
+	return &canceledWAITError{error: err}
 }
