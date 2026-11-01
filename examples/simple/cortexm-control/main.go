@@ -12,6 +12,7 @@ import (
 	"github.com/jon/ostiole/dap"
 	"github.com/jon/ostiole/discover"
 	_ "github.com/jon/ostiole/discover/probes"
+	"github.com/jon/ostiole/internal/command"
 	"github.com/jon/ostiole/probe"
 	"github.com/jon/ostiole/target/cortexm"
 )
@@ -42,7 +43,9 @@ func run() error {
 }
 
 func runControl(selection discover.Selection, ap dap.APSel, clock uint32, step bool) (err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	signalCtx, stop := command.SignalContext()
+	defer stop()
+	ctx, cancel := context.WithTimeout(signalCtx, 20*time.Second)
 	defer cancel()
 	c, err := armdebug.Open(ctx, selection, armdebug.Config{
 		Port: armdebug.SWDP(probe.SWDConfig{MaxClockHz: clock}),

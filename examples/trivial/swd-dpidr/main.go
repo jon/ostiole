@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jon/ostiole/ftdi"
+	"github.com/jon/ostiole/internal/command"
 	"github.com/jon/ostiole/swd"
 	"github.com/jon/ostiole/usb"
 )
@@ -25,7 +26,9 @@ func main() {
 }
 
 func run() error {
-	ctx, cancel := context.WithTimeout(context.Background(), transferTimeout)
+	signalCtx, stop := command.SignalContext()
+	defer stop()
+	ctx, cancel := context.WithTimeout(signalCtx, transferTimeout)
 	defer cancel()
 	dpidr, err := readDPIDR(ctx)
 	if err != nil {

@@ -14,6 +14,7 @@ import (
 	"github.com/jon/ostiole/dap"
 	"github.com/jon/ostiole/discover"
 	_ "github.com/jon/ostiole/discover/probes"
+	"github.com/jon/ostiole/internal/command"
 	"github.com/jon/ostiole/probe"
 )
 
@@ -49,7 +50,9 @@ func run() (err error) {
 	if flag.NArg() != 0 {
 		return errors.New("no positional arguments permitted")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	signalCtx, stop := command.SignalContext()
+	defer stop()
+	ctx, cancel := context.WithTimeout(signalCtx, 10*time.Second)
 	defer cancel()
 	c, err := armdebug.Open(ctx, discover.Selection{
 		Provider: discover.ProviderID(*provider), Serial: *serial, Function: *function,

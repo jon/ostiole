@@ -10,6 +10,7 @@ import (
 
 	"github.com/jon/ostiole/dap"
 	"github.com/jon/ostiole/ftdi"
+	"github.com/jon/ostiole/internal/command"
 	"github.com/jon/ostiole/swd"
 	"github.com/jon/ostiole/usb"
 )
@@ -34,7 +35,9 @@ func main() {
 }
 
 func run() error {
-	ctx, cancel := context.WithTimeout(context.Background(), operationTimeout)
+	signalCtx, stop := command.SignalContext()
+	defer stop()
+	ctx, cancel := context.WithTimeout(signalCtx, operationTimeout)
 	defer cancel()
 
 	info, err := readIdentity(ctx)
