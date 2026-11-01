@@ -3,13 +3,16 @@ package ftdi
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/jon/ostiole/usb"
 )
 
-// Open initializes one MPSSE port and clock, leaving target pins as inputs. A non-nil channel
-// owns device even on error and must be closed; after a Close error, retain it
-// while CleanupPending reports true.
+// Open initializes one MPSSE port and clock, leaving target pins as inputs.
+// It verifies synchronization after configuration to reject command echoes
+// from unsupported FT2232 generations sharing the same product identifier.
+// A non-nil channel owns device even on error and must be closed; after a
+// Close error, retain it while CleanupPending reports true.
 // A nil channel leaves device with the caller. No reset pin is driven.
 // Each transfer establishes its pin directions; the caller verifies wiring.
 func Open(ctx context.Context, device *usb.Device, config Config) (*Channel, error) {
@@ -51,6 +54,9 @@ func prepareChannel(ctx context.Context, channel *Channel) (_ *Channel, err erro
 	}
 	if err = channel.configure(ctx); err != nil {
 		return nil, err
+	}
+	if err = channel.synchronize(ctx); err != nil {
+		return nil, fmt.Errorf("ftdi: verify H-part configuration: %w", err)
 	}
 	channel.active = true
 	return channel, nil

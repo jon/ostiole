@@ -11,38 +11,40 @@ import (
 )
 
 type fakeUSBDevice struct {
-	identity        usb.DeviceInfo
-	claimed         uint8
-	released        uint8
-	request         uint8
-	value           uint16
-	index           uint16
-	wroteEP         uint8
-	readEP          uint8
-	closed          bool
-	writeN          []int
-	readData        [][]byte
-	controls        []controlRecord
-	writes          [][]byte
-	claimErr        error
-	releaseErr      error
-	claim           *fakeUSBClaim
-	writeErr        int
-	writesN         int
-	readErr         error
-	readWaitGates   []<-chan struct{}
-	readsN          int
-	releases        int
-	submittedReads  int
-	maxPendingReads int
-	outReadDepth    []int
-	aborts          int
-	abortErr        error
-	abortErrEP      uint8
-	abortedEP       []uint8
-	pendingOUT      int
-	pendingReads    []*fakeUSBTransfer
-	mu              sync.Mutex
+	writeResponses    func([]byte) [][]byte
+	endpointOverrides map[uint8]usb.Endpoint
+	identity          usb.DeviceInfo
+	claimed           uint8
+	released          uint8
+	request           uint8
+	value             uint16
+	index             uint16
+	wroteEP           uint8
+	readEP            uint8
+	closed            bool
+	writeN            []int
+	readData          [][]byte
+	controls          []controlRecord
+	writes            [][]byte
+	claimErr          error
+	releaseErr        error
+	claim             *fakeUSBClaim
+	writeErr          int
+	writesN           int
+	readErr           error
+	readWaitGates     []<-chan struct{}
+	readsN            int
+	releases          int
+	submittedReads    int
+	maxPendingReads   int
+	outReadDepth      []int
+	aborts            int
+	abortErr          error
+	abortErrEP        uint8
+	abortedEP         []uint8
+	pendingOUT        int
+	pendingReads      []*fakeUSBTransfer
+	mu                sync.Mutex
 }
 
 type fakeUSBTransfer struct {
@@ -128,6 +130,9 @@ type fakeUSBClaim struct {
 }
 
 func (c *fakeUSBClaim) Endpoint(_ context.Context, address uint8) (usb.Endpoint, error) {
+	if endpoint, ok := c.device.endpointOverrides[address]; ok {
+		return endpoint, nil
+	}
 	return usb.Endpoint{Address: address, TransferType: usb.TransferBulk, MaxPacketSize: 512}, nil
 }
 
@@ -344,6 +349,9 @@ func (d *fakeUSBDevice) write(_ context.Context, endpoint uint8, data []byte) (i
 	}
 	d.wroteEP = endpoint
 	d.writes = append(d.writes, append([]byte(nil), data...))
+	if d.writeResponses != nil {
+		d.readData = append(d.readData, d.writeResponses(data)...)
+	}
 	d.completeReads()
 	if len(d.writeN) != 0 {
 		count := d.writeN[0]

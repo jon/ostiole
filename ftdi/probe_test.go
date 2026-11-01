@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/jon/ostiole/usb"
@@ -12,12 +13,12 @@ import (
 func TestOpenProbeRejectsUnsupportedBinding(t *testing.T) {
 	for _, port := range []Port{0, PortB} {
 		p, err := OpenProbe(t.Context(), usb.DeviceInfo{VID: VID, PID: PIDFT232H}, port)
-		if p != nil || err == nil {
-			t.Fatal("invalid port opened")
+		if p != nil || err == nil || !strings.Contains(err.Error(), "ftdi: unsupported probe binding") {
+			t.Fatalf("invalid port preflight: %v", err)
 		}
 	}
-	if p, err := OpenProbe(t.Context(), usb.DeviceInfo{}, PortA); p != nil || err == nil {
-		t.Fatal("invalid device opened")
+	if p, err := OpenProbe(t.Context(), usb.DeviceInfo{}, PortA); p != nil || err == nil || !strings.Contains(err.Error(), "ftdi: unsupported probe binding") {
+		t.Fatalf("invalid device preflight: %v", err)
 	}
 }
 

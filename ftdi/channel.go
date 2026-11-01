@@ -14,7 +14,8 @@ const (
 	// VID is FTDI's USB vendor identifier.
 	VID = 0x0403
 
-	// PIDFT2232H identifies an FT2232H USB attachment.
+	// PIDFT2232H is shared with earlier FT2232 generations. Open also checks
+	// that the selected function accepted its H-series configuration.
 	PIDFT2232H = 0x6010
 	// PIDFT4232H identifies an FT4232H USB attachment.
 	PIDFT4232H = 0x6011

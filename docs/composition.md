@@ -520,6 +520,14 @@ Pass the opened device to `ftdi.Open` with the MPSSE port and maximum requested
 clock. The driver reads and validates the product from the device identity;
 discovery does not choose the port or clock.
 
+`ftdi.Open` checks MPSSE synchronization both before and after applying the
+H-series clock configuration. FT2232 generations share product identifier
+`0x6010`; a matching identifier alone does not establish support. A rejected
+configuration command leaves a bad-command echo ahead of the second
+synchronization response, so opening fails rather than treating that echo as
+protocol data. This check does not select a port or identify an exact chip
+revision.
+
 `ftdi.Open` initializes MPSSE and the clock with target pins as inputs. The
 returned channel supplies both `SWDIO` and `JTAGIO`; each call establishes its
 own directions. A non-nil channel owns the USB device even on error; close that
