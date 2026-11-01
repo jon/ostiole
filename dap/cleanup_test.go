@@ -96,7 +96,7 @@ func (target *recoveryBudgetTarget) Write(ctx context.Context, req swdsim.Reques
 func TestRecoveryUsesConfiguredIndependentBudget(t *testing.T) {
 	target := &recoveryBudgetTarget{waitTarget: newWaitTarget()}
 	addAP(t, target.waitTarget, 0, 0x24770011)
-	dp := dap.NewDebugPort(dap.SWDP(swd.New(swdsim.New(target))),
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(swdsim.New(target), swd.WithCompletionTimeout(3*time.Second))),
 		dap.WithMaxWaits(1), dap.WithCleanupTimeout(3*time.Second))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)

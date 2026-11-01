@@ -66,9 +66,14 @@ func (c *Conn) transfer(ctx context.Context, req request, value uint32) (uint32,
 	if err := c.validateTransfer(req, value); err != nil {
 		return 0, notExecuted(err)
 	}
-	result, err := c.execute(ctx, req, value)
+	completionCtx, cancel, err := c.completionContext(ctx)
+	if err != nil {
+		return 0, notExecuted(err)
+	}
+	defer cancel()
+	result, err := c.executeFrame(completionCtx, req, value)
 	c.observeTransfer(req, result, value, err)
-	return result, err
+	return result, completionError(ctx, err)
 }
 
 func notExecuted(cause error) error {
@@ -76,6 +81,15 @@ func notExecuted(cause error) error {
 }
 
 func (c *Conn) execute(ctx context.Context, req request, value uint32) (uint32, error) {
+	completionCtx, cancel, err := c.completionContext(ctx)
+	if err != nil {
+		return 0, notExecuted(err)
+	}
+	defer cancel()
+	return c.executeFrame(completionCtx, req, value)
+}
+
+func (c *Conn) executeFrame(ctx context.Context, req request, value uint32) (uint32, error) {
 	result, err := c.transferFrame(ctx, req, value)
 	if c.response != responseOverrun || err != ErrWait {
 		return result, err

@@ -50,16 +50,33 @@ func (e *swdExecutor) Release(ctx context.Context) error {
 }
 
 func (e *swdExecutor) exchange(ctx context.Context, req transferRequest, data uint32) (uint32, error) {
-	if req.AP && req.Read {
-		return e.ReadAP(ctx, req.Addr)
+	batch := e.NewBatch()
+	var read *swd.ReadResult
+	var write *swd.WriteResult
+	switch {
+	case req.AP && req.Read:
+		read = batch.ReadAP(req.Addr)
+	case req.AP:
+		write = batch.WriteAP(req.Addr, data)
+	case req.Read:
+		read = batch.ReadDP(req.Addr)
+	default:
+		write = batch.WriteDP(req.Addr, data)
 	}
-	if req.AP {
-		return 0, e.WriteAP(ctx, req.Addr, data)
+	// Commit reports cancellation separately from the physical result. The
+	// logical owner records that result before reporting caller cancellation.
+	commitErr := batch.Commit(ctx)
+	var value uint32
+	var err error
+	if read != nil {
+		value, err = read.Value()
+	} else {
+		err = write.Err()
 	}
-	if req.Read {
-		return e.ReadDP(ctx, req.Addr)
+	if errors.Is(err, swd.ErrNotExecuted) {
+		err = errors.Join(err, commitErr)
 	}
-	return 0, e.WriteDP(ctx, req.Addr, data)
+	return value, err
 }
 
 type swdQueuedResult struct {

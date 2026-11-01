@@ -206,8 +206,15 @@ func observeReleaseContext(t *testing.T, mode string, ctx context.Context, cance
 			}
 			return
 		}
-		if got != ctx {
-			t.Error("release substituted caller context")
+		if bits == 136 {
+			if got != ctx {
+				t.Error("entry substituted caller context")
+			}
+			return
+		}
+		deadline, ok := got.Deadline()
+		if got == ctx || !ok || time.Until(deadline) <= 0 || time.Until(deadline) > time.Second {
+			t.Error("started release frame lacks independent bounded completion")
 		}
 	}
 }

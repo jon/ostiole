@@ -23,7 +23,8 @@ type debugPortOptions struct {
 // WithCleanupTimeout sets the independent budget for each recovery attempt.
 // The default is one second for SWD and thirty seconds for JTAG. Connect
 // rejects nonpositive durations before traffic. Ordinary operations remain
-// bounded by their caller's context.
+// bounded by their caller's context between frames; a started SWD frame uses
+// the connection's independent completion budget.
 func WithCleanupTimeout(timeout time.Duration) Option {
 	return Option{apply: func(options *debugPortOptions) {
 		options.cleanupTimeout = timeout
@@ -110,7 +111,8 @@ func (dp *DebugPort) ReadDP(ctx context.Context, reg DPRegister) (uint32, error)
 	if err := dp.requireOperational(ctx); err != nil {
 		return 0, err
 	}
-	return dp.readDP(ctx, reg)
+	value, err := dp.readDP(ctx, reg)
+	return value, callerError(ctx, err)
 }
 
 func (dp *DebugPort) readDP(ctx context.Context, reg DPRegister) (uint32, error) {
@@ -166,7 +168,7 @@ func (dp *DebugPort) WriteDP(ctx context.Context, reg DPRegister, value uint32) 
 	if err := dp.requireOperational(ctx); err != nil {
 		return err
 	}
-	return dp.writeDP(ctx, reg, value)
+	return callerError(ctx, dp.writeDP(ctx, reg, value))
 }
 
 func (dp *DebugPort) selectDPBank(ctx context.Context, bank uint8) error {

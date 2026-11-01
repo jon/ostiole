@@ -136,7 +136,9 @@ func (b *Batch) queue(op batchOp) *batchResult {
 // it clears STICKYORUN and returns the WAIT. Later frames in the same physical
 // chunk which the target abandoned report FAULT. Operations in later chunks
 // report ErrNotExecuted. If STICKYORUN cleanup fails, Commit and the WAITed
-// result return both errors.
+// result return both errors. Cancellation stops the next frame or chunk;
+// completed results retain their physical outcomes while Commit reports the
+// context error. Started frames use the independent completion budget.
 func (b *Batch) Commit(ctx context.Context) error {
 	if b == nil || b.committed {
 		return ErrBatchCommitted
@@ -180,6 +182,9 @@ func (b *Batch) validate(ctx context.Context) error {
 		return errors.New("swd: connection is not ready; call Connect")
 	}
 	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := b.conn.validateCompletion(); err != nil {
 		return err
 	}
 	shadow := *b.conn
@@ -232,14 +237,18 @@ func (b *Batch) commitSequential(ctx context.Context) error {
 			return err
 		}
 		op := &b.ops[i]
-		value, err := b.conn.transfer(ctx, op.req, op.data)
+		value, err := b.conn.transfer(context.WithoutCancel(ctx), op.req, op.data)
 		if err != nil && !completeTransfer(err) {
 			err = errors.Join(ErrIndeterminate, err)
 		}
 		op.result.resolve(value, err)
 		if err != nil {
 			b.resolveSuffix(i + 1)
-			return fmt.Errorf("swd: batch stopped at operation %d: %w", i, err)
+			return completionError(ctx, fmt.Errorf("swd: batch stopped at operation %d: %w", i, err))
+		}
+		if err := ctx.Err(); err != nil {
+			b.resolveSuffix(i + 1)
+			return err
 		}
 	}
 	return nil
@@ -280,17 +289,23 @@ func (b *Batch) overrunChunkEnd(start, limit int) int {
 }
 
 func (b *Batch) commitOverrunChunk(ctx context.Context, start, end int) error {
+	completionCtx, cancel, err := b.conn.completionContext(ctx)
+	if err != nil {
+		b.resolveSuffix(start)
+		return err
+	}
+	defer cancel()
 	seq := &sequence{}
 	for i := start; i < end; i++ {
 		seq.appendSequence(b.conn.fixedFrame(b.ops[i].req, b.ops[i].data))
 	}
-	input, err := b.conn.exchange(ctx, seq)
+	input, err := b.conn.exchange(completionCtx, seq)
 	if err != nil {
-		return b.failOverrunExchange(start, end, err)
+		return completionError(ctx, b.failOverrunExchange(start, end, err))
 	}
 	values, errs, firstError := b.decodeOverrunChunk(input, start, end)
 	waitWithPending := b.observeOverrunChunk(start, end, values, errs)
-	return b.finishOverrunChunk(ctx, start, end, errs, firstError, waitWithPending)
+	return completionError(ctx, b.finishOverrunChunk(completionCtx, start, end, errs, firstError, waitWithPending))
 }
 
 func (b *Batch) failOverrunExchange(start, end int, err error) error {

@@ -29,7 +29,7 @@ func (m *MemAP) ReadDebugBase(ctx context.Context) (address uint64, present bool
 		return 0, false, err
 	}
 	low, err := m.dp.readAP(ctx, m.sel, memAPBASE)
-	if err != nil {
+	if err = callerError(ctx, err); err != nil {
 		return 0, false, fmt.Errorf("dap: read MEM-AP BASE: %w", err)
 	}
 	present, err = debugBasePresent(low, m.largeAddress)
@@ -39,7 +39,7 @@ func (m *MemAP) ReadDebugBase(ctx context.Context) (address uint64, present bool
 	var high uint32
 	if m.largeAddress {
 		high, err = m.dp.readAP(ctx, m.sel, memAPBASEHI)
-		if err != nil {
+		if err = callerError(ctx, err); err != nil {
 			return 0, false, fmt.Errorf("dap: read MEM-AP BASE upper word: %w", err)
 		}
 	}

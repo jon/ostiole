@@ -170,7 +170,7 @@ func (t *Txn) queue(op txnOp) *txnResult {
 // context ends, it supplies the operation error; independent cleanup failures
 // remain visible. Commit resolves every result before returning and can be
 // called only once.
-func (t *Txn) Commit(ctx context.Context) error {
+func (t *Txn) Commit(ctx context.Context) (err error) {
 	if t == nil || t.committed {
 		return ErrTxnCommitted
 	}
@@ -191,6 +191,7 @@ func (t *Txn) Commit(ctx context.Context) error {
 		t.resolveInvalid()
 		return err
 	}
+	defer func() { err = callerError(ctx, err) }()
 	if t.dp.jtag != nil || t.dp.reentryID.dpidr.Version == 3 {
 		return t.dp.executeSequentialTxn(ctx, t)
 	}

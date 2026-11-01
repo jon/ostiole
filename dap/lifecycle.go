@@ -26,10 +26,11 @@ const (
 // A cleanup failure is joined to that error; Release may then be retried,
 // while other DP, AP, transaction, and MEM-AP operations remain blocked. Failed
 // JTAG validation before any DP state is acquired leaves Release idle.
-func (dp *DebugPort) Connect(ctx context.Context) (Identity, error) {
+func (dp *DebugPort) Connect(ctx context.Context) (identity Identity, err error) {
 	if err := dp.validateConnect(ctx); err != nil {
 		return Identity{}, err
 	}
+	defer func() { err = callerError(ctx, err) }()
 	dp.beginConnect()
 	info, state, err := dp.connectLink(ctx)
 	if err != nil {
@@ -43,6 +44,9 @@ func (dp *DebugPort) Connect(ctx context.Context) (Identity, error) {
 		}
 	}
 	if err := dp.waitPower(ctx, powerAcks(powerRequests), true); err != nil {
+		return Identity{}, dp.failConnect(err)
+	}
+	if err := ctx.Err(); err != nil {
 		return Identity{}, dp.failConnect(err)
 	}
 	dp.completeConnect(info)
@@ -169,12 +173,13 @@ func (dp *DebugPort) failConnect(cause error) error {
 // Release restores volatile debug-port state owned by this connection.
 //
 // Release may be retried. Each attempt, including protocol re-entry, uses ctx.
+// A started SWD frame completes under its connection's independent budget.
 // Once an attempt starts, other DP and AP operations remain blocked until
 // Release succeeds. Supply a fresh bounded context for cleanup retries.
 // Recovery inside a failed transport operation retains its independent budget.
 // A failed SWD link release makes the next attempt re-enter before DP traffic;
 // a release rejected before wire traffic does not lose known framing.
-func (dp *DebugPort) Release(ctx context.Context) error {
+func (dp *DebugPort) Release(ctx context.Context) (err error) {
 	if !dp.bound() {
 		return nil
 	}
@@ -187,6 +192,7 @@ func (dp *DebugPort) Release(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	defer func() { err = callerError(ctx, err) }()
 	dp.state.beginRepair()
 	if !dp.state.responseKnown() {
 		if err := dp.reenter(ctx); err != nil {
@@ -211,6 +217,9 @@ func (dp *DebugPort) releaseLink(ctx context.Context) error {
 		return dp.jtag.release(ctx)
 	}
 	if err := dp.conn.Release(ctx); err != nil {
+		if !dp.conn.CleanupPending() && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+			return nil
+		}
 		if !errors.Is(err, swd.ErrNotExecuted) {
 			dp.state.loseFraming()
 		}
