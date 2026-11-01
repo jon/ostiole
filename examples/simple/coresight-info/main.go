@@ -39,7 +39,7 @@ func run() (err error) {
 	if *clock < 1000 || *clock > 1<<32-1 {
 		return errors.New("require -clock 1000..4294967295 Hz")
 	}
-	base, err := parseBase(*address)
+	base, err := parseBase(*address, "base")
 	if err != nil {
 		return err
 	}
@@ -112,7 +112,7 @@ func selectAP(index int, base string, debugSpace bool) (dap.APSel, error) {
 		return dap.APSel{}, nil
 	}
 	if base != "" {
-		value, err := parseBase(base)
+		value, err := parseBase(base, "ap-base")
 		if err != nil {
 			return dap.APSel{}, err
 		}
@@ -157,13 +157,13 @@ func closeConnection(c *armdebug.Conn) error {
 	return fmt.Errorf("cleanup reported errors after three attempts: %w", attempts)
 }
 
-func parseBase(value string) (uint64, error) {
+func parseBase(value, name string) (uint64, error) {
 	if value == "" {
 		return 0, nil
 	}
 	base, err := strconv.ParseUint(value, 0, 64)
 	if err != nil || base&0xfff != 0 {
-		return 0, errors.New("-base must be a 4 KiB aligned address")
+		return 0, fmt.Errorf("-%s must be a 4 KiB aligned address", name)
 	}
 	return base, nil
 }
