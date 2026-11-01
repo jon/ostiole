@@ -49,9 +49,11 @@ USB completions. Surplus bytes from a completion are retained only for the
 following response phase of that operation; bytes left after the final phase
 poison the session. One zero-length packet is tolerated while reading a known
 response; continued lack of progress, an invalid count, cancellation after a
-command is sent, or another USB failure poisons the session. The returned error
-preserves the original failure. Recovery is close, reopen, and explicit
-reconfiguration; commands are never replayed.
+command is sent, or another failure after acceptance poisons the session. A
+rejected first OUT submission leaves the stream usable unless it establishes
+device loss; a rejected submission after partial output still poisons it. The
+returned error preserves the original failure. Recovery is close, reopen, and
+explicit reconfiguration; commands are never replayed.
 
 ## Scan v3
 
@@ -62,8 +64,13 @@ target-driven cycles; JTAG preserves TDI independently of TMS and returns TDO
 without sample shifting. Neither method changes the caller's buffers. It reads
 the packed sample bytes and trailing status as distinct response phases. Status
 zero succeeds; status 6 reports insufficient probe workspace. A complete nonzero
-status leaves USB framing known but clears protocol configuration, so a caller
-must configure again.
+status leaves USB framing known but clears protocol configuration. A directly
+opened session requires explicit reconfiguration. A session acquired through
+`OpenProbe` retains its interface, clock, and transfer limit; its next valid
+nonempty borrowed-wire call reconfigures before sending the new scan. Invalid
+input and cancellation before traffic do not trigger reconfiguration. The failed
+scan is never replayed. A live configuration failure remains retryable; device
+loss or command-stream poisoning prevents recovery.
 
 The default ceiling is 504 bits, and a reported workspace can lower it. USB
 packet size does not lower the scan ceiling: the USB layer preserves full,
@@ -112,8 +119,13 @@ Both constructors leave TAP state unknown until explicit reset or discovery. Use
 an explicit `jtag.Layout` for selected-TAP operations. Retain the chain and
 release it with an independent bounded cleanup context before closing the
 session or probe. Failed cleanup remains retryable; do not discard its owner.
-Starting session close invalidates scans even if USB release needs a retry. See
-[JTAG](jtag.md) for the full chain lifecycle and cleanup example.
+`Session.RestorationPossible` and `Session.CleanupPending` query communication
+and outstanding host cleanup without I/O. A complete scan-status error alone
+does not authorize abandoning restoration. Starting session close invalidates
+scans even if USB release needs a retry. Live host failures retain ownership; a
+final error is reported on that attempt, and later closes return nil once
+resources are released. Freeing USB resources does not restore a halted target.
+See [JTAG](jtag.md) for the full chain lifecycle and cleanup example.
 
 ## Bench observations
 

@@ -58,6 +58,7 @@ func (s *Session) configureTarget(ctx context.Context, maxClockHz uint32, target
 		return err
 	}
 	s.configured = false
+	s.scanFailed = false
 	response, err := s.exchange(ctx, []byte{commandInterface, target}, 4)
 	if err != nil {
 		return fmt.Errorf("jlink: select %s interface: %w", name, err)
@@ -135,10 +136,11 @@ func (s *Session) ClockHz() uint32 {
 	return s.clockHz
 }
 
-// MaxTransferBits reports the configured scan limit, or zero while the session is not
-// configured. It does not access the probe.
+// MaxTransferBits reports the scan limit without I/O. A probe-owned session
+// retains its limit after a complete status error so cleanup can reconfigure it.
+// Other unconfigured sessions report zero.
 func (s *Session) MaxTransferBits() int {
-	if s == nil || !s.configured {
+	if s == nil || (!s.configured && !s.recoverableScan()) {
 		return 0
 	}
 	return s.transferBits
@@ -148,9 +150,10 @@ func (s *Session) MaxTransferBits() int {
 // are packed least-significant first. A set direction bit drives the matching
 // output bit; a clear direction bit samples the target and masks that output.
 // The returned stream contains one sample per clock. A complete response with
-// a nonzero status returns *ScanError and requires ConfigureSWD before another
-// scan. An ambiguous transfer poisons the session and requires close and
-// reopen. SWDIO never replays a scan.
+// a nonzero status returns *ScanError. Direct sessions require ConfigureSWD;
+// probe-owned sessions reconfigure before the next valid request. An ambiguous
+// transfer poisons the session and requires close and reopen. SWDIO never
+// replays a scan.
 func (s *Session) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
 	if bits <= 0 || len(direction)*8 < bits || len(output)*8 < bits {
 		return nil, fmt.Errorf("jlink: invalid %d-bit SWD stream", bits)
@@ -158,11 +161,14 @@ func (s *Session) SWDIO(ctx context.Context, direction, output []byte, bits int)
 	if err := s.transportReady(ctx); err != nil {
 		return nil, err
 	}
-	if !s.configured || s.info.SelectedInterface != interfaceSWD {
+	if (!s.configured && !s.recoverableScan()) || s.info.SelectedInterface != interfaceSWD {
 		return nil, errors.New("jlink: SWD is not configured")
 	}
 	if bits > s.transferBits {
 		return nil, fmt.Errorf("jlink: %d-bit SWD stream exceeds %d-bit transfer limit", bits, s.transferBits)
+	}
+	if err := s.recoverScan(ctx); err != nil {
+		return nil, err
 	}
 	control, drive := scanStreams(direction, output, bits)
 	samples, err := s.scan(ctx, control, drive, bits, "SWD")
@@ -195,6 +201,7 @@ func (s *Session) scan(ctx context.Context, control, drive []byte, bits int, nam
 	}
 	if status[0] != 0 {
 		s.configured = false
+		s.scanFailed = true
 		s.inputCarry = false
 		return nil, &ScanError{Status: status[0]}
 	}
@@ -244,4 +251,24 @@ func setStreamBit(stream []byte, bit int, value bool) {
 	} else {
 		stream[bit/8] &^= mask
 	}
+}
+
+func (s *Session) recoverableScan() bool {
+	return s.probeOwned && s.scanFailed && s.RestorationPossible()
+}
+
+func (s *Session) recoverScan(ctx context.Context) error {
+	if !s.recoverableScan() {
+		return nil
+	}
+	var err error
+	if s.info.SelectedInterface == interfaceSWD {
+		err = s.ConfigureSWD(ctx, s.clockHz)
+	} else {
+		err = s.ConfigureJTAG(ctx, s.clockHz)
+	}
+	if err != nil && s.RestorationPossible() {
+		s.scanFailed = true
+	}
+	return err
 }

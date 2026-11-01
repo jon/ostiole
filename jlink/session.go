@@ -74,9 +74,10 @@ type Session struct {
 	transferBits int
 	delayInput   bool
 	inputCarry   bool
-	closeDone    bool
+	probeOwned   bool
+	scanFailed   bool
+	gone         bool
 	closing      bool
-	closeErr     error
 }
 
 // Open claims the J-Link application interface, reads probe metadata, applies
@@ -311,30 +312,61 @@ func (s *Session) Info() Info {
 	return cloneInfo(s.info)
 }
 
-// Close releases the application interface and closes the USB device. A
-// failed interface release retains the claim so Close can retry it. Device
-// close runs once; later calls return its cached result. Starting Close blocks
-// configuration and scans even if releasing the interface fails.
+// Close releases the application interface and closes the USB device. Live
+// failures retain ownership for retry; final host errors are returned on that
+// attempt and later calls return nil. Starting Close blocks configuration and
+// scans even if host cleanup remains pending. Closing USB does not restore a
+// halted target or the probe's prior interface and clock.
 func (s *Session) Close() error {
 	if s == nil {
 		return nil
 	}
 	s.closing = true
 	s.configured = false
+	var result error
 	if s.claim != nil {
-		if err := s.claim.Close(); err != nil {
+		err := s.claim.Close()
+		s.recordLoss(err)
+		if err != nil && cleanupPending(s.claim) {
 			return err
 		}
+		result = err
 		s.claim = nil
 	}
-	if s.closeDone {
-		return s.closeErr
+	if s.device != nil {
+		err := s.device.Close()
+		s.recordLoss(err)
+		result = errors.Join(result, err)
+		if err == nil || !cleanupPending(s.device) {
+			s.device = nil
+		}
 	}
-	if s.device == nil {
-		return nil
+	return result
+}
+
+// RestorationPossible reports whether communication for restoration remains
+// possible, without I/O. Device loss, a poisoned stream, and a closing or closed
+// session report false. A complete scan-status error alone does not.
+func (s *Session) RestorationPossible() bool {
+	return s != nil && s.device != nil && !s.closing && !s.gone && !s.poisoned
+}
+
+// CleanupPending reports whether host resources still require Close, without
+// I/O. Unknown USB implementations remain conservative.
+func (s *Session) CleanupPending() bool {
+	return s != nil && ((s.claim != nil && cleanupPending(s.claim)) ||
+		(s.device != nil && cleanupPending(s.device)))
+}
+
+func cleanupPending(owner interface{ Close() error }) bool {
+	if state, ok := owner.(interface{ CleanupPending() bool }); ok {
+		return state.CleanupPending()
 	}
-	s.closeErr = s.device.Close()
-	s.closeDone = true
-	s.device = nil
-	return s.closeErr
+	return true
+}
+
+func (s *Session) recordLoss(err error) {
+	if errors.Is(err, usb.ErrDeviceGone) {
+		s.gone = true
+	}
 }

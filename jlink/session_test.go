@@ -775,7 +775,7 @@ func TestSessionCancellationPreservesConcurrentWaitFailure(t *testing.T) {
 	}
 }
 
-func TestSessionCachesDeviceCloseFailureAfterInterfaceRelease(t *testing.T) {
+func TestSessionReportsFinalDeviceCloseFailureOnce(t *testing.T) {
 	want := errors.New("device close failed")
 	device := metadataPeer(t, nil)
 	device.closeErr = want
@@ -787,8 +787,8 @@ func TestSessionCachesDeviceCloseFailureAfterInterfaceRelease(t *testing.T) {
 		t.Fatalf("session ownership after failed device close = %#v", session)
 	}
 	device.closeErr = nil
-	if err := session.Close(); !errors.Is(err, want) {
-		t.Fatalf("second Close() error = %v, want cached %v", err, want)
+	if err := session.Close(); err != nil {
+		t.Fatalf("second Close() error = %v, want nil", err)
 	}
 	if device.releases != 1 || device.closes != 1 {
 		t.Fatalf("cleanup = releases %d closes %d device %T", device.releases, device.closes, session.device)
@@ -881,3 +881,6 @@ func TestInspectApplicationCallerCancelsRetries(t *testing.T) {
 		t.Fatalf("inspections = %d, want 150", device.configurationN)
 	}
 }
+
+// The peer models the native device's one-shot final close.
+func (d *peerUSBDevice) CleanupPending() bool { return d.closes == 0 }

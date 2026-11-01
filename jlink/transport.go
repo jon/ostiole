@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/jon/ostiole/usb"
 )
 
 // ErrSessionPoisoned reports that an earlier ambiguous USB transfer left the
@@ -28,7 +30,10 @@ func (s *Session) writeExact(ctx context.Context, data []byte) error {
 			return s.poison(fmt.Errorf("jlink: invalid bulk-write count %d for %d bytes", count, len(data)-position))
 		}
 		if err != nil {
-			return s.poison(err)
+			if position != 0 {
+				return s.poison(err)
+			}
+			return err
 		}
 		if count == 0 {
 			return s.poison(io.ErrNoProgress)
@@ -107,6 +112,9 @@ func (s *Session) sessionReady() error {
 	if s.claim == nil {
 		return errors.New("jlink: application interface is closed")
 	}
+	if s.gone {
+		return usb.ErrDeviceGone
+	}
 	if s.poisoned {
 		return ErrSessionPoisoned
 	}
@@ -127,23 +135,29 @@ func (s *Session) readBulk(ctx context.Context) ([]byte, error) {
 
 func (s *Session) bulkTransfer(ctx context.Context, endpoint uint8, buffer []byte) (int, error) {
 	transfer, err := s.claim.SubmitBulk(ctx, endpoint, buffer)
+	s.recordLoss(err)
 	if err != nil {
 		return 0, err
 	}
 	count, err := transfer.Wait(ctx)
-	if err == nil || ctx.Err() == nil {
-		return count, err
+	s.recordLoss(err)
+	if err == nil {
+		return count, nil
+	}
+	if ctx.Err() == nil {
+		return count, s.poison(err)
 	}
 	transferErr := err
 	if !errors.Is(transferErr, ctx.Err()) {
 		transferErr = errors.Join(transferErr, ctx.Err())
 	}
 	abortErr := s.claim.AbortBulk(endpoint)
+	s.recordLoss(abortErr)
 	if abortErr != nil {
-		return 0, errors.Join(transferErr, abortErr)
+		return 0, s.poison(errors.Join(transferErr, abortErr))
 	}
 	_, completionErr := transfer.Wait(context.Background())
-	return 0, errors.Join(transferErr, completionErr)
+	return 0, s.poison(errors.Join(transferErr, completionErr))
 }
 
 func (s *Session) poison(err error) error {
