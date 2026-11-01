@@ -12,6 +12,8 @@ import (
 const (
 	testOverrunDetect = uint32(1 << 0)
 	testStickyOverrun = uint32(1 << 1)
+	testStickyCompare = uint32(1 << 4)
+	testStickyError   = uint32(1 << 5)
 	testWriteDataErr  = uint32(1 << 7)
 )
 
@@ -24,8 +26,10 @@ type connectionTarget struct {
 	waitRDBUFF    int
 	waitAP        int
 	waitORUN      bool
+	faultORUN     bool
 	ignoreORUN    bool
 	abortWrites   []uint32
+	abortErr      error
 	ctrlReads     int
 	ctrlWrites    int
 	failCTRLAt    int
@@ -48,7 +52,13 @@ func (t *connectionTarget) Acknowledge(_ context.Context, req sim.Request) error
 		t.waitAP--
 		return swd.ErrWait
 	}
-	if !req.AP && req.Read && req.Addr == 0x0c && t.waitORUN && t.pendingDP != nil && t.pendingDP.addr == 0x04 {
+	if t.pendingControlBarrier(req) && t.faultORUN {
+		t.faultORUN = false
+		t.pendingDP = nil
+		t.ctrlStat |= testWriteDataErr
+		return swd.ErrFault
+	}
+	if t.pendingControlBarrier(req) && t.waitORUN {
 		t.waitORUN = false
 		return swd.ErrWait
 	}
@@ -59,8 +69,16 @@ func (t *connectionTarget) Acknowledge(_ context.Context, req sim.Request) error
 	return nil
 }
 
+func (t *connectionTarget) pendingControlBarrier(req sim.Request) bool {
+	return !req.AP && req.Read && req.Addr == 0x0c && t.pendingDP != nil && t.pendingDP.addr == 0x04
+}
+
 func (t *connectionTarget) stickyFaults(req sim.Request) bool {
-	sticky := t.ctrlStat&(testStickyOverrun|testWriteDataErr) != 0
+	flags := t.ctrlStat & (testStickyOverrun | testStickyError | testWriteDataErr)
+	if t.dpidr>>16&1 == 0 {
+		flags |= t.ctrlStat & testStickyCompare
+	}
+	sticky := flags != 0
 	exempt := !req.AP && (!req.Read && req.Addr == 0x00 || req.Read && (req.Addr == 0x00 || req.Addr == 0x04 && t.selectDP&0x0f == 0))
 	return sticky && !exempt
 }
@@ -96,9 +114,20 @@ func (t *connectionTarget) Write(_ context.Context, req sim.Request, value uint3
 	switch req.Addr {
 	case 0x00:
 		t.abortWrites = append(t.abortWrites, value)
+		if t.abortErr != nil {
+			err := t.abortErr
+			t.abortErr = nil
+			return err
+		}
 		if t.pendingDP != nil {
 			t.pendingDP = nil
 			t.ctrlStat |= testWriteDataErr
+		}
+		if value&(1<<1) != 0 {
+			t.ctrlStat &^= testStickyCompare
+		}
+		if value&(1<<2) != 0 {
+			t.ctrlStat &^= testStickyError
 		}
 		if value&(1<<3) != 0 {
 			t.ctrlStat &^= testWriteDataErr
