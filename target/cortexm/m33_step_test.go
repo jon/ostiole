@@ -129,11 +129,15 @@ func TestM33StepRestartAfterCompletionBlocksCleanup(t *testing.T) {
 					}
 				}
 			}
+			before := m.writes
 			if err := core.Step(t.Context()); err == nil {
 				t.Fatal("completion failure ignored")
 			}
 			if m.launches != 1 || m.steps != 1 {
 				t.Fatal("step did not execute")
+			}
+			if phase == "during reason" && m.writes != before+1 {
+				t.Fatal("normalization wrote after restart during step completion")
 			}
 			writes := m.writes
 			m.status |= 1 << 26

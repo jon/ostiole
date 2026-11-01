@@ -38,6 +38,10 @@ func (t *Target) validateArchitectureControl(value uint32) error {
 
 func (t *Target) readDHCSR(ctx context.Context) (uint32, error) {
 	value, err := t.memory.ReadWord(ctx, dhcsrAddress)
+	if err != nil && t.identity.Part == 0xd21 && t.haltOwned {
+		t.haltOwned = false
+		t.changed = t.saved&cDebugEnable == 0
+	}
 	if err == nil && t.identity.Part == 0xd21 {
 		t.snapStalled = t.snapStalled || value&cSnapStall != 0
 		if value&(cDebugEnable|sRestart) == cDebugEnable|sRestart && (t.haltOwned || t.resumeUncertain) {

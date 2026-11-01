@@ -65,11 +65,28 @@ func runControl(selection discover.Selection, ap dap.APSel, clock uint32, step b
 	return control(ctx, core, step)
 }
 
-func control(ctx context.Context, core *cortexm.Target, step bool) error {
+type controlledTarget interface {
+	Identity() cortexm.Identity
+	Halted(context.Context) (bool, error)
+	Halt(context.Context) error
+	ReadRegister(context.Context, cortexm.Register) (uint32, error)
+	Step(context.Context) error
+	Resume(context.Context) error
+}
+
+func control(ctx context.Context, core controlledTarget, step bool) error {
+	inherited, err := core.Halted(ctx)
+	if err != nil {
+		return err
+	}
 	if err := core.Halt(ctx); err != nil {
 		return err
 	}
-	fmt.Printf("CPUID=%#08x halted\n", core.Identity().Raw)
+	if inherited {
+		fmt.Printf("CPUID=%#08x already halted; preserving halt\n", core.Identity().Raw)
+	} else {
+		fmt.Printf("CPUID=%#08x halted\n", core.Identity().Raw)
+	}
 	for _, reg := range []struct {
 		name string
 		id   cortexm.Register
@@ -79,6 +96,9 @@ func control(ctx context.Context, core *cortexm.Target, step bool) error {
 			return err
 		}
 		fmt.Printf("%s=%#08x\n", reg.name, value)
+	}
+	if inherited {
+		return nil
 	}
 	if step {
 		if err := core.Step(ctx); err != nil {

@@ -117,8 +117,7 @@ func (t *Target) registerStatus(ctx context.Context) error {
 	}
 	value, err := t.readDHCSR(ctx)
 	if err != nil {
-		t.closing = true
-		return err
+		return t.readError(err)
 	}
 	halted := value&(cDebugEnable|sHalt) == cDebugEnable|sHalt
 	restarted := t.identity.Part == 0xd21 && value&sRestart != 0

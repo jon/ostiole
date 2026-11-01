@@ -131,7 +131,7 @@ func TestAcquireRestoresDebugEnable(t *testing.T) {
 
 func TestAcquirePreservesEventInducedHalt(t *testing.T) {
 	m := newControlMemory()
-	m.control, m.halted = debugEnable, true
+	m.control, m.halted = debugEnable|haltRequest, true
 	core, err := cortexm.Acquire(t.Context(), m)
 	if err != nil {
 		t.Fatal(err)
@@ -139,7 +139,7 @@ func TestAcquirePreservesEventInducedHalt(t *testing.T) {
 	if err := core.Release(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if m.control != debugEnable || !m.halted || m.writes != 0 {
+	if m.control != debugEnable|haltRequest || !m.halted || m.writes != 0 {
 		t.Fatalf("control=%#x halted=%t writes=%d", m.control, m.halted, m.writes)
 	}
 }

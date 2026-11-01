@@ -31,8 +31,9 @@ example has been implemented.
   reporting.
 - [`simple/cortexm-control`](simple/cortexm-control) enables Cortex-M0 halting
   debug, halts and resumes the processor, then restores debug control. It
-  requires `-allow-control`; see [Cortex-M control](../docs/cortexm.md) for
-  effects and cleanup limits.
+  preserves an already halted core without stepping or resuming it. It requires
+  `-allow-control`; see [Cortex-M control](../docs/cortexm.md) for effects and
+  cleanup limits.
 
 For ADIv6 SW-DP targets, `coresight-info -debug-space -walk` inspects the DP's
 advertised discovery tree. Use `-ap-base ADDRESS` instead of `-ap INDEX` to
