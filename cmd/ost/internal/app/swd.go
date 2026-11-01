@@ -19,13 +19,17 @@ func runSWD(ctx context.Context, args []string, stdout io.Writer, ops operations
 	return err
 }
 
-func readDPIDR(ctx context.Context) (_ uint32, err error) {
-	session, err := openSWD(ctx)
+func readDPIDR(ctx context.Context) (uint32, error) {
+	return readDPIDRWith(ctx, openFTDIProbe)
+}
+
+func readDPIDRWith(ctx context.Context, open probeOpener) (_ uint32, err error) {
+	session, err := openSWDWith(ctx, open)
+	if session != nil {
+		defer func() { err = errors.Join(err, session.close()) }()
+	}
 	if err != nil {
 		return 0, err
 	}
-	defer func() {
-		err = errors.Join(err, session.close())
-	}()
 	return session.connection.ReadDP(ctx, 0x00)
 }
