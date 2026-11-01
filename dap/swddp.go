@@ -63,8 +63,9 @@ type DebugPort struct {
 	memAPs         map[APSel]struct{}
 }
 
-// NewDebugPort returns a client for port without traffic. Use SWDP or JTAGDP
-// to construct the binding. Connect validates it and performs protocol entry.
+// NewDebugPort returns a client for port without traffic. Use SWDP, JTAGDP,
+// or RegisterDP to construct the binding. Connect validates it and enters
+// the protocol.
 // The client never closes the probe. Release acquired MemAPs, then the debug
 // port, before closing the probe; retain dependencies after a cleanup failure.
 func NewDebugPort(port Port, options ...Option) *DebugPort {
@@ -79,6 +80,9 @@ func NewDebugPort(port Port, options ...Option) *DebugPort {
 	}
 	dp := &DebugPort{maxWaits: config.maxWaits, cleanupTimeout: config.cleanupTimeout}
 	dp.conn = newSWDExecutor(port.swd, dp)
+	if port.register != nil {
+		dp.conn = &swdExecutor{dp: dp, register: port.register}
+	}
 	if port.jtag {
 		dp.jtag = &jtagExecutor{dp: dp, chain: port.chain, index: port.tapIndex}
 	}
@@ -137,7 +141,7 @@ func (dp *DebugPort) readDP(ctx context.Context, reg DPRegister) (uint32, error)
 			return 0, err
 		}
 		if err := dp.selectDPBank(ctx, info.bank); err != nil {
-			return 0, err
+			return 0, &requestNotSentError{cause: errors.Join(ErrNotExecuted, err)}
 		}
 	}
 	return dp.readDPRegister(ctx, reg, info)
@@ -151,11 +155,11 @@ func (dp *DebugPort) readDPRegister(ctx context.Context, reg DPRegister, info dp
 	} else {
 		value, err = dp.conn.transfer(ctx, dpTransferRequest(reg, true), 0)
 	}
-	if err != nil {
+	if err != nil && !registerCompletionKnown(err) {
 		return 0, fmt.Errorf("dap: read %s: %w", info.name, err)
 	}
 	dp.recordDPRead(reg, value)
-	return value, nil
+	return value, err
 }
 
 // WriteDP writes one logical debug-port register. The binding owns
@@ -289,10 +293,13 @@ func (dp *DebugPort) writeDP(ctx context.Context, reg DPRegister, value uint32) 
 		return dp.jtag.writeDP(ctx, reg, value)
 	}
 	if err := dp.prepareDPWrite(ctx, reg, info); err != nil {
-		return err
+		return &requestNotSentError{cause: errors.Join(ErrNotExecuted, err)}
 	}
 	_, err = dp.conn.transfer(ctx, dpTransferRequest(reg, false), value)
 	if err != nil {
+		if registerCompletionKnown(err) {
+			dp.recordDPWrite(reg, value)
+		}
 		return fmt.Errorf("dap: write %s: %w", info.name, err)
 	}
 	dp.recordDPWrite(reg, value)
@@ -322,6 +329,10 @@ func (dp *DebugPort) recordDPWriteState(reg DPRegister, value uint32) {
 	dp.state.beginDPWrite()
 	if reg == SELECT {
 		dp.state.recordSELECT(value)
+	}
+	if dp.conn != nil && dp.conn.register != nil {
+		dp.state.confirmSELECT()
+		dp.state.settleDPWrite()
 	}
 }
 

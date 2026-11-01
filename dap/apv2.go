@@ -32,6 +32,9 @@ func (sel APSel) register(addr uint8) uint16 {
 }
 
 func (dp *DebugPort) validateSelector(sel APSel) (uint64, error) {
+	if dp.conn != nil && dp.conn.register != nil {
+		return 0, errors.New("dap: register binding does not supply access-port operations")
+	}
 	value, err := validateAPSel(sel)
 	if err != nil {
 		return 0, err

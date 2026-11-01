@@ -1,6 +1,8 @@
 // Package dap manages an Arm Debug Access Port over SWD or baseline ADIv5 JTAG-DP.
 //
-// Construct a Port with SWDP or JTAGDP and pass it to NewDebugPort. These
+// Construct a Port with SWDP, JTAGDP, or RegisterDP and pass it to NewDebugPort.
+// RegisterDP accepts completed DP operations from a caller-supplied transport.
+// That binding rejects AP and MEM-AP operations before traffic. These
 // constructors send no traffic; Connect validates the binding, enters the
 // protocol, and acquires volatile debug-port state. JTAG requires a complete
 // explicit chain and zero-based, TDO-first TAP index with a four- or eight-bit IR.

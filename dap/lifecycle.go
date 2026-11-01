@@ -107,6 +107,9 @@ func (dp *DebugPort) connectLink(ctx context.Context) (Identity, uint32, error) 
 }
 
 func (dp *DebugPort) failSWDConnect(cause error) error {
+	if dp.conn.register != nil {
+		return dp.failRegisterConnect(cause)
+	}
 	// Release returns nil on an idle connection and checks ctx before repair.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

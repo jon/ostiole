@@ -196,7 +196,7 @@ func (t *Txn) Commit(ctx context.Context) (err error) {
 		return err
 	}
 	defer func() { err = callerError(ctx, err) }()
-	if t.dp.jtag != nil || t.dp.reentryID.dpidr.Version == 3 {
+	if t.dp.jtag != nil || t.dp.conn != nil && t.dp.conn.register != nil || t.dp.reentryID.dpidr.Version == 3 {
 		return t.dp.executeSequentialTxn(ctx, t)
 	}
 	return t.dp.conn.executeTxn(ctx, t)
