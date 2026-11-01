@@ -77,8 +77,10 @@ has re-established SWD framing.
 FAULT means that a sticky error has been recorded. It is not a transient
 response to retry. An acknowledgement other than OK, WAIT, or FAULT is a
 protocol error, not a fourth response code. When no valid response is detected,
-the host leaves SWDIO undriven for at least the possible data phase before it
-tries a line reset.
+the simple-response path leaves SWDIO undriven for at least the possible data
+phase before it tries a line reset. An overrun frame is committed in one wire
+call: a write has already supplied its driven data phase when the host decodes
+an invalid ACK. It cannot replace those clocks with an undriven back-off phase.
 
 Once the response grammar is known, a complete FAULT response after one or more
 WAITs still ends at a request boundary. Return FAULT without DAPABORT; the
@@ -163,6 +165,35 @@ an unready connection, or cancellation rejects the operation before wire
 traffic. `errors.Is` still identifies the original cause. Cancellation before
 `Release` starts is classified the same way; a failure after traffic starts does
 not gain that classification.
+
+## Cancellation and frame completion
+
+Canceling before a register frame starts sends no traffic. Once the request
+starts, the connection finishes its remaining data, turnaround, and idle clocks
+under an independent completion context, then reports caller cancellation. This
+prevents a later entry sequence from supplying the remaining bits of a canceled
+write. A failed completion leaves framing unknown and ordinary register access
+unavailable until explicit repair; the connection does not replay the access.
+
+The default completion budget is one second per frame or packed batch chunk. For
+a slower wire, configure the connection before entry:
+
+```go
+conn := swd.New(wire, swd.WithCompletionTimeout(4*time.Second))
+```
+
+Existing `swd.New(wire)` calls keep the default. Nonpositive explicit budgets
+fail before traffic. A started frame can outlast its caller's deadline by this
+bounded completion attempt. The budget is separate from `WithCleanupTimeout`,
+which bounds restoration after a failed `Connect`. Protocol-entry sequences
+still use their supplied contexts. `CleanupPending` reports whether the SWD
+connection still owns restoration; completed release clears it before reporting
+final-frame cancellation, so another release sends no traffic.
+
+A batch retains the physical result of each completed operation separately from
+its `Commit` error. Cancellation stops the next frame or chunk; it does not make
+a confirmed prefix indeterminate. A packed chunk has already committed every
+frame in that chunk, so all of its responses must be decoded before stopping.
 
 ## Getting into SWD
 

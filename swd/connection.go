@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 )
 
 var (
@@ -65,33 +66,48 @@ func (r request) address() uint8 { return r.addr }
 // succeed before register access. Release restores connection-owned
 // ORUNDETECT state and may be retried after failure. Conn methods are not safe
 // for concurrent use. Register-method errors rejected before wire traffic
-// match ErrNotExecuted; errors.Is also identifies the original cause.
+// match ErrNotExecuted; errors.Is also identifies the original cause. A started
+// register frame finishes under WithCompletionTimeout before reporting caller
+// cancellation; a failed completion requires explicit framing repair.
 type Conn struct {
-	wire            Wire
-	turnaround      int
-	idleCycles      int
-	response        responseMode
-	state           connectionState
-	identity        uint32
-	identityKnown   bool
-	originalOverrun bool
-	originalKnown   bool
-	bank            bankSelection
-	priorBank       bankSelection
-	selectPending   bool
+	wire              Wire
+	turnaround        int
+	idleCycles        int
+	response          responseMode
+	state             connectionState
+	identity          uint32
+	identityKnown     bool
+	originalOverrun   bool
+	originalKnown     bool
+	bank              bankSelection
+	priorBank         bankSelection
+	selectPending     bool
+	completionTimeout time.Duration
 }
 
 // New returns an idle SWD connection using wire. It sends no traffic. The
 // caller must call Connect before register access and Release before closing
 // the wire. A higher-level client that caches protocol state requires
 // exclusive use of the connection.
-func New(w Wire) *Conn {
-	return &Conn{wire: w, turnaround: 1, idleCycles: 8}
+func New(w Wire, options ...Option) *Conn {
+	c := &Conn{wire: w, turnaround: 1, idleCycles: 8, completionTimeout: time.Second}
+	for _, option := range options {
+		if option.completionSet {
+			c.completionTimeout = option.completionTimeout
+		}
+	}
+	return c
 }
 
 func (c *Conn) exchange(ctx context.Context, seq *sequence) ([]byte, error) {
 	if c == nil || c.wire == nil {
 		return nil, errors.New("swd: nil wire")
+	}
+	if err := c.validateCompletion(); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	input, err := c.wire.SWDIO(ctx, seq.direction, seq.output, seq.bits)
 	if err != nil {
@@ -104,3 +120,7 @@ func (c *Conn) exchange(ctx context.Context, seq *sequence) ([]byte, error) {
 	}
 	return input, nil
 }
+
+// CleanupPending reports whether Connect acquired state still requiring
+// Release. It sends no traffic and does not establish restoration availability.
+func (c *Conn) CleanupPending() bool { return c != nil && c.originalKnown }

@@ -72,13 +72,13 @@ func DecodeAPIDR(value uint32) APIDRInfo {
 // The debug port must be connected and have no cleanup pending.
 func (dp *DebugPort) ReadAPIDR(ctx context.Context, sel APSel) (APIDRInfo, error) {
 	if err := dp.requireConnected(ctx); err != nil {
-		return APIDRInfo{}, err
+		return APIDRInfo{}, callerError(ctx, err)
 	}
 	value, err := dp.readAP(ctx, sel, apIDRAddress)
 	if err != nil {
-		return APIDRInfo{}, err
+		return APIDRInfo{}, callerError(ctx, err)
 	}
-	return DecodeAPIDR(value), nil
+	return DecodeAPIDR(value), callerError(ctx, nil)
 }
 
 // ReadRawAP reads the register at one complete access-port address through the
@@ -99,7 +99,7 @@ func (dp *DebugPort) ReadRawAP(ctx context.Context, addr APAddress) (uint32, err
 	if possible && dp.state.apGeneration == generation {
 		dp.state.invalidateAP()
 	}
-	return result, err
+	return result, callerError(ctx, err)
 }
 
 func (dp *DebugPort) readAP(ctx context.Context, sel APSel, addr uint8) (uint32, error) {
@@ -141,7 +141,7 @@ func (dp *DebugPort) WriteRawAP(ctx context.Context, addr APAddress, value uint3
 	if possible && dp.state.apGeneration == generation {
 		dp.state.invalidateAP()
 	}
-	return err
+	return callerError(ctx, err)
 }
 
 func (dp *DebugPort) writeAP(ctx context.Context, sel APSel, addr uint8, value uint32) error {

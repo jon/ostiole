@@ -67,13 +67,10 @@ func TestCleanupBudgetValidationAndSWDRelease(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// The wire records the independent context supplied to ordinary release.
+		// Each started SWD frame has its own one-second completion budget.
 		b.beforeTransfer = func(ctx context.Context) {
 			deadline, ok := ctx.Deadline()
-			want := budget
-			if want == 0 {
-				want = time.Second
-			}
+			want := time.Second
 			if !ok || time.Until(deadline) < want/2 || time.Until(deadline) > want {
 				t.Fatal("release did not use the configured independent budget")
 			}

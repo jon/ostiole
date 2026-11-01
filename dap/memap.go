@@ -68,7 +68,8 @@ type MemAP struct {
 // OpenMemAP validates sel and saves the state changed by target-memory access.
 // It performs AP traffic. A returned MemAP must be paired with MemAP.Release.
 // The debug port must be connected and must not have cleanup pending.
-func OpenMemAP(ctx context.Context, dp *DebugPort, sel APSel) (*MemAP, error) {
+func OpenMemAP(ctx context.Context, dp *DebugPort, sel APSel) (memory *MemAP, err error) {
+	defer func() { err = callerError(ctx, err) }()
 	selection, err := validateAPSel(sel)
 	if err != nil {
 		return nil, err
@@ -103,6 +104,9 @@ func OpenMemAP(ctx context.Context, dp *DebugPort, sel APSel) (*MemAP, error) {
 	}
 	tar, err := dp.readAP(ctx, sel, memAPTAR)
 	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	configuredCSW := csw &^ (cswSize | cswAddrInc)
@@ -333,14 +337,16 @@ func sizeMask(size TransferSize) uint64 {
 // Release remains available while debug-port cleanup is pending. Failed
 // restoration remains pending so the method can be retried. Call it before
 // DebugPort.Release. Re-entry and restoration use ctx; cancellation before
-// traffic retains the saved state for a fresh-context retry.
-func (m *MemAP) Release(ctx context.Context) error {
+// traffic retains the saved state for a fresh-context retry. Started SWD frames
+// finish under the connection's independent completion budget.
+func (m *MemAP) Release(ctx context.Context) (err error) {
 	if m == nil || m.dp == nil {
 		return nil
 	}
 	if !m.restoreCSW && !m.restoreTAR && !m.restoreTARHI {
 		return nil
 	}
+	defer func() { err = callerError(ctx, err) }()
 	if err := m.prepareRelease(ctx); err != nil {
 		return err
 	}

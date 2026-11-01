@@ -53,6 +53,7 @@ func (c *Conn) Connect(ctx context.Context, options ...ConnectOption) (dpidr uin
 		return 0, errors.New("swd: cleanup timeout must be positive")
 	}
 	defer c.cleanupFailedConnect(&err, config.cleanupTimeout)
+	defer func() { err = completionError(ctx, err) }()
 	dpidr, state, err := c.prepareConnection(ctx)
 	if err != nil {
 		return 0, err
@@ -114,13 +115,14 @@ func (c *Conn) cleanupFailedConnect(connectErr *error, timeout time.Duration) {
 // it does not restore the prior interface mode. Release is harmless on an
 // idle or nil connection. Cancellation before a release attempt returns an
 // error matching ErrNotExecuted as well as the context error.
-func (c *Conn) Release(ctx context.Context) error {
+func (c *Conn) Release(ctx context.Context) (err error) {
 	if c == nil || c.wire == nil || c.state == connectionIdle {
 		return nil
 	}
 	if err := ctx.Err(); err != nil {
 		return notExecuted(err)
 	}
+	defer func() { err = completionError(ctx, err) }()
 	if err := c.prepareRelease(ctx); err != nil {
 		return err
 	}

@@ -93,6 +93,9 @@ func (w *Wire) SWDIO(ctx context.Context, direction, output []byte, bits int) ([
 		return nil, nil
 	}
 	if resets := protocolEntryResets(direction, output, bits); resets != 0 {
+		if w.pending != nil {
+			return nil, errors.New("swd/sim: protocol entry during a pending data phase")
+		}
 		w.active = true
 		w.pending = nil
 		observeLineReset(w.target, resets)
@@ -177,7 +180,7 @@ func (w *Wire) data(ctx context.Context, direction, output []byte, bits int) ([]
 		return failedACK(direction, output, bits)
 	}
 	if req.Read {
-		return w.read(ctx, direction, bits, req)
+		return w.read(ctx, direction, output, bits, req)
 	}
 	return w.write(ctx, direction, output, bits, req)
 }
@@ -207,6 +210,10 @@ func (w *Wire) fixedFrame(ctx context.Context, direction, output, input []byte, 
 	if err := validateFixedDirection(req, direction, offset); err != nil {
 		return err
 	}
+	if !allBits(output, offset+46, 8, false) {
+		return errors.New("swd/sim: fixed frame idle cycles must be low")
+	}
+
 	ack, err := acknowledge(ctx, w.target, req)
 	if err != nil {
 		return err
@@ -314,10 +321,10 @@ func failedACK(direction, output []byte, bits int) ([]byte, error) {
 	return make([]byte, 2), nil
 }
 
-func (w *Wire) read(ctx context.Context, direction []byte, bits int, req Request) ([]byte, error) {
+func (w *Wire) read(ctx context.Context, direction, output []byte, bits int, req Request) ([]byte, error) {
 	if bits != 42 ||
 		!allBits(direction, 0, 34, false) ||
-		!allBits(direction, 34, 8, true) {
+		!allBits(direction, 34, 8, true) || !allBits(output, 34, 8, false) {
 		return nil, errors.New("swd/sim: invalid read-data direction")
 	}
 	value, err := w.target.Read(ctx, req)
@@ -333,7 +340,7 @@ func (w *Wire) read(ctx context.Context, direction []byte, bits int, req Request
 func (w *Wire) write(ctx context.Context, direction, output []byte, bits int, req Request) ([]byte, error) {
 	if bits != 42 ||
 		bitAt(direction, 0) ||
-		!allBits(direction, 1, 41, true) {
+		!allBits(direction, 1, 41, true) || !allBits(output, 34, 8, false) {
 		return nil, errors.New("swd/sim: invalid write-data direction")
 	}
 	value := uint32At(output, 1)

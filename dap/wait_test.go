@@ -104,7 +104,8 @@ func (t *cancelInFlightRetryTarget) Acknowledge(ctx context.Context, req swdsim.
 	if t.armed && req == t.waitFor && t.attempts == 1 && t.cancel != nil {
 		t.cancel()
 		t.cancel = nil
-		return ctx.Err()
+		// Inject failure of the frame itself as well as caller cancellation.
+		return context.Canceled
 	}
 	return t.waitTarget.Acknowledge(ctx, req)
 }

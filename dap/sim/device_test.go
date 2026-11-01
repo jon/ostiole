@@ -6,6 +6,7 @@ import (
 	"math"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/jon/ostiole/dap"
 	dapsim "github.com/jon/ostiole/dap/sim"
@@ -279,12 +280,14 @@ func TestMappedDeviceReceivesContextAndCancellation(t *testing.T) {
 	device := new(memoryDevice)
 	target := mappedTarget(t, 0x100, 4, device)
 	memory := openedMemory(t, target, apSel(0))
-	ctx, cancel := context.WithCancel(t.Context())
+	type contextKey struct{}
+	ctx, cancel := context.WithCancel(context.WithValue(t.Context(), contextKey{}, "mapped-read"))
 	if _, err := memory.ReadWord(ctx, 0x100); err != nil {
 		t.Fatal(err)
 	}
-	if device.ctx != ctx {
-		t.Fatal("device lost caller context")
+	deadline, ok := device.ctx.Deadline()
+	if device.ctx.Value(contextKey{}) != "mapped-read" || !ok || time.Until(deadline) > time.Second {
+		t.Fatal("device lost context values or bounded frame completion")
 	}
 	cancel()
 	before := len(device.accesses)

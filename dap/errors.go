@@ -1,6 +1,7 @@
 package dap
 
 import (
+	"context"
 	"errors"
 	"strings"
 
@@ -87,6 +88,13 @@ func (e portError) Is(target error) bool {
 func classifyPortError(err error) error {
 	if errors.Is(err, swd.ErrWait) || errors.Is(err, swd.ErrFault) || errors.Is(err, swd.ErrProtocol) {
 		return portError{err}
+	}
+	return err
+}
+
+func callerError(ctx context.Context, err error) error {
+	if ctx != nil && ctx.Err() != nil && !errors.Is(err, ctx.Err()) {
+		return errors.Join(err, ctx.Err())
 	}
 	return err
 }

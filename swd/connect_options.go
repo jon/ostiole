@@ -12,7 +12,8 @@ type ConnectOption func(*connectOptions)
 // WithCleanupTimeout sets the independent budget for restoring acquired state
 // after Connect fails. The default is one second. A nonpositive timeout rejects
 // Connect before wire traffic. It does not change the supplied operation context
-// or the contexts used by explicit Release calls.
+// or the context checked before an explicit Release begins. Started frames
+// use WithCompletionTimeout.
 func WithCleanupTimeout(timeout time.Duration) ConnectOption {
 	return func(options *connectOptions) {
 		options.cleanupTimeout = timeout
