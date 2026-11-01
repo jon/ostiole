@@ -400,8 +400,13 @@ reported by an AP. They are not interchangeable names for the same failure.
 
 A FAULT acknowledgement on an AP write means that write did not execute.
 WDATAERR at the following completion barrier likewise records abandoned write
-data. Other failures during AP work can leave its effects uncertain. Any AP
-state which might have changed still has to be read or restored explicitly
+data. An accepted SWD write whose RDBUFF completion cannot be confirmed reports
+`ErrIndeterminate` alongside the completion error, including WAIT exhaustion or
+cancellation. A complete RDBUFF response with bad data parity still confirms the
+preceding write; it reports the parity error without `ErrIndeterminate`. A
+rejected AP write remains distinct from an accepted write with uncertain
+completion. Other failures during AP work can leave its effects uncertain. Any
+AP state which might have changed still has to be read or restored explicitly
 before power is released.
 
 A complete FAULT response after one or more WAITs still ends at a request

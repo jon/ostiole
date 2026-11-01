@@ -127,7 +127,8 @@ func (dp *DebugPort) readAPEffect(ctx context.Context, sel APSel, addr uint16) (
 // restore any state the write changes. Writing a MEM-AP data register can
 // write target memory. The address must be four-byte aligned. The debug port
 // must be connected and have no cleanup pending.
-// A JTAG write with uncertain completion also reports ErrIndeterminate.
+// A write with uncertain completion also reports ErrIndeterminate. A parity
+// error on a completed SWD RDBUFF response does not make the write uncertain.
 func (dp *DebugPort) WriteRawAP(ctx context.Context, addr APAddress, value uint32) error {
 	if err := dp.requireConnected(ctx); err != nil {
 		return err

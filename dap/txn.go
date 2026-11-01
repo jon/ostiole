@@ -258,7 +258,7 @@ func (t *Txn) checkAccess(ctx context.Context) error {
 
 func (t *swdTxn) executionError(step txnStep, err error) error {
 	writeBarrier := step.settlesDPWrite || step.completesWrite
-	if writeBarrier && errors.Is(err, swd.ErrParity) {
+	if writeBarrier && confirmedSWDCompletionParity(err) {
 		return err
 	}
 	if step.operationStarted && (!writeBarrier || !faultReportsWriteDataError(err)) {
