@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // CoreID names a processor within one Group. Zero is invalid; an ID is not a
@@ -22,7 +23,8 @@ type Member struct {
 // was called; Skipped means Resume observed no owned halt to release. State is
 // unknown unless this operation observed execution. HaltOwned is the target's
 // retained halt-request claim, not proof that it stopped. CleanupPending requires
-// retaining memory and lower owners. Identity survives successful release.
+// retaining memory and lower owners. A released member has no retained halt
+// claim. Identity survives successful release.
 type CoreResult struct {
 	ID             CoreID
 	Identity       Identity
@@ -51,7 +53,9 @@ type Group struct {
 // order without requesting halts. Target acquisition effects and restrictions
 // apply to every member. Failure stops acquisition and attempts release with a
 // fresh five-second context. A non-nil group returned with an error retains
-// cleanup; only Release is available. Memory remains borrowed on every return.
+// cleanup; only Release is available. The error retains acquisition and cleanup
+// failures, including cleanup failures resolved by a later acquisition-time
+// retry. Memory remains borrowed on every return.
 func AcquireGroup(ctx context.Context, members []Member) (*Group, error) {
 	if err := validateMembers(members); err != nil {
 		return nil, err
@@ -110,13 +114,16 @@ func (g *Group) Results() []CoreResult {
 	results := make([]CoreResult, len(g.cores))
 	for i, core := range g.cores {
 		results[i] = core.result
-		results[i].HaltOwned = core.target != nil && core.target.haltOwned
+		results[i].HaltOwned = core.result.CleanupPending && core.target != nil && core.target.haltOwned
 	}
 	return results
 }
 
 // Release restores each pending target in reverse membership order and attempts
-// independent members even after a failure, while ctx permits. It retains
+// independent members even after a failure, while ctx permits. It divides the
+// remaining caller deadline among remaining members; without a deadline each
+// attempt has a five-second budget. A started lower operation may need its own
+// bounded completion interval after cancellation. It retains
 // failures for retry and never repeats successful release. Keep lower owners
 // live until every CleanupPending is false. Use a fresh bounded context after
 // cancellation. Nil and inactive groups require no cleanup. Once release begins,
@@ -142,18 +149,23 @@ func (g *Group) release(ctx context.Context, preserve bool) ([]CoreResult, error
 		return g.Results(), nil
 	}
 	var errs []error
+	remaining := g.pendingCount()
 	for i := len(g.cores) - 1; i >= 0; i-- {
 		core := &g.cores[i]
 		if !core.result.CleanupPending {
 			continue
 		}
+		attempts := remaining
+		remaining--
 		if err := liveContext(ctx); err != nil {
 			core.result.Err = errors.Join(core.result.Err, err)
-			errs = append(errs, err)
-			break
+			errs = append(errs, coreError(core.result.ID, err))
+			continue
 		}
+		attempt, cancel := groupReleaseContext(ctx, attempts)
 		core.result.Attempted = true
-		err := core.target.Release(ctx)
+		err := core.target.Release(attempt)
+		cancel()
 		core.result.Err = errors.Join(core.result.Err, err)
 		core.result.CleanupPending = err != nil
 		if err != nil {
@@ -163,13 +175,24 @@ func (g *Group) release(ctx context.Context, preserve bool) ([]CoreResult, error
 	return g.Results(), errors.Join(errs...)
 }
 
-func (g *Group) pending() bool {
+func (g *Group) pending() bool { return g.pendingCount() != 0 }
+
+func (g *Group) pendingCount() int {
+	count := 0
 	for _, core := range g.cores {
 		if core.result.CleanupPending {
-			return true
+			count++
 		}
 	}
-	return false
+	return count
+}
+
+func groupReleaseContext(ctx context.Context, remaining int) (context.Context, context.CancelFunc) {
+	budget := acquireCleanupTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		budget = time.Until(deadline) / time.Duration(remaining)
+	}
+	return context.WithTimeout(ctx, budget)
 }
 
 func coreError(id CoreID, err error) error {
