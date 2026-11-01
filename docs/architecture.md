@@ -277,6 +277,15 @@ without making MEM-AP interpret SWD errors. After interpreting SWD responses,
 the executor adds DAP error classifications to completed operations and
 individual transaction results while retaining their original causes.
 
+`dap.RegisterDP` also accepts a caller-supplied completed-register SW-DP
+transport. The transport owns entry, response framing, its ORUNDETECT change,
+and protocol release. DAP owns logical DP register selection, WAIT retries,
+power, ordered transactions, and restoration. A completed write includes its
+completion barrier. This binding supplies DP operations; AP and MEM-AP calls are
+rejected during preflight, including mixed transactions before their DP prefix.
+Rejected requests remain distinct from accepted or uncertain operations. No host
+resource is closed by this binding.
+
 Connection setup validates the context and options before protocol entry. Power
 acquisition starts only after entry establishes the identity and control state;
 failed setup and ordinary release use the same link cleanup.

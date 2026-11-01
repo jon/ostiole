@@ -30,6 +30,7 @@ func (r transferResult) err() error { return r.cause }
 type swdExecutor struct {
 	*swd.Conn
 	dp          *DebugPort
+	register    RegisterTransport
 	recovering  bool
 	pendingRead bool
 }
@@ -42,15 +43,25 @@ func newSWDExecutor(conn *swd.Conn, dp *DebugPort) *swdExecutor {
 }
 
 func (e *swdExecutor) Connect(ctx context.Context) (uint32, error) {
+	if e.register != nil {
+		return e.register.Connect(ctx)
+	}
 	value, err := e.Conn.Connect(ctx, swd.WithCleanupTimeout(e.dp.cleanupTimeout))
 	return value, classifyPortError(err)
 }
 
 func (e *swdExecutor) Release(ctx context.Context) error {
+	if e.register != nil {
+		return e.releaseRegister(ctx)
+	}
 	return classifyPortError(e.Conn.Release(ctx))
 }
 
 func (e *swdExecutor) exchange(ctx context.Context, req transferRequest, data uint32) (uint32, error) {
+	if e.register != nil {
+		r := e.registerExchange(ctx, req, data)
+		return r.data, r.cause
+	}
 	batch := e.NewBatch()
 	var read *swd.ReadResult
 	var write *swd.WriteResult
@@ -156,4 +167,11 @@ func (e *swdExecutor) executeTxn(ctx context.Context, txn *Txn) error {
 		result.err = classifyPortError(result.err)
 	}
 	return classifyPortError(err)
+}
+
+func (e *swdExecutor) CleanupPending() bool {
+	if e.register != nil {
+		return e.register.CleanupPending()
+	}
+	return e.Conn.CleanupPending()
 }

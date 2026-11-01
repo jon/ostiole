@@ -6,9 +6,10 @@ import (
 )
 
 // Port binds a debug port to one protocol connection without traffic.
-// Its zero value is invalid. Construct it with SWDP or JTAGDP.
+// Its zero value is invalid. Construct it with SWDP, JTAGDP, or RegisterDP.
 type Port struct {
 	swd      *swd.Conn
+	register RegisterTransport
 	chain    *jtag.Chain
 	tapIndex int
 	jtag     bool

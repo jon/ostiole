@@ -52,6 +52,9 @@ func apTransferRequest(addr uint8, read bool) transferRequest {
 }
 
 func (e *swdExecutor) transfer(ctx context.Context, req transferRequest, data uint32) (uint32, error) {
+	if e.register != nil {
+		return e.transferRegister(ctx, req, data)
+	}
 	value, err := e.transferWithAPRecovery(ctx, req, data, waitMayAffectAP(req), true)
 	return value, classifyPortError(err)
 }

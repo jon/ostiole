@@ -600,6 +600,18 @@ same initial AP1 CSW/TAR (`0x80000042`/`0`) and connected CTRL/STAT
 restoration; it does not independently measure power after closing the probe. No
 halt, target reset, or target-memory write was performed.
 
+## Bind completed DP operations
+
+Use `dap.NewDebugPort(dap.RegisterDP(transport))` when a caller-supplied
+`dap.RegisterTransport` completes each physical DP read or write internally. DAP
+retains identity, bank selection, power, WAIT policy, transactions, and
+restoration. The transport owns protocol entry and framing. Give the DP owner
+exclusive use, retain both values after a cleanup failure, and release the DP
+before closing its transport. This binding rejects AP and MEM-AP operations
+before traffic; the SWD-wire and JTAG bindings support those compositions. See
+the [completed DP helper](ports/dap.md#completed-dp-register-operations) for
+entry, error handling, and bounded cleanup.
+
 ## Choose between raw SWD and DAP
 
 Use `swd.Conn` when the application needs one explicit wire-protocol transaction

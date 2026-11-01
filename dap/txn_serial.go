@@ -15,7 +15,11 @@ func (dp *DebugPort) executeSequentialTxn(ctx context.Context, txn *Txn) error {
 	for i := range txn.ops {
 		op := &txn.ops[i]
 		value, err := dp.executeOp(ctx, op)
-		op.result.resolve(value, err)
+		if registerCompletionKnown(err) {
+			op.result.resolve(value, nil)
+		} else {
+			op.result.resolve(value, err)
+		}
 		if err != nil {
 			txn.resolveSuffix(i + 1)
 			return err
@@ -28,7 +32,7 @@ func (dp *DebugPort) executeOp(ctx context.Context, op *txnOp) (uint32, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
-	if dp.conn != nil && op.kind != txnWriteAPSequence {
+	if dp.conn != nil && dp.conn.register == nil && op.kind != txnWriteAPSequence {
 		return dp.executeSWDOp(ctx, op)
 	}
 	switch op.kind {
