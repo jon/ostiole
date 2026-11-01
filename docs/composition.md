@@ -74,10 +74,17 @@ it when owner cleanup begins. A manually acquired MEM-AP must be released before
 closing the owner.
 
 `Close` releases DAP, which releases SWD or the JTAG chain, before closing the
-probe. A failed release retains the live probe for another attempt. Cleanup uses
-fresh bounded contexts, not the operation's possibly canceled context. There is
-no forced abandonment. `Port()` returns nil once cleanup starts; previously
-returned pointers are governed by the borrowing contract, not forcibly revoked.
+probe. A live release failure retains the probe for another attempt. Cleanup
+uses fresh bounded contexts, not the operation's possibly canceled context. If
+the backend reports restoration impossible after device loss or a poisoned
+stream, `Close` stops target traffic, reports
+`armdebug.ErrRestorationAbandoned`, and continues host cleanup. It preserves any
+restoration and host-close errors from that attempt. Retrying `Close` then
+retries only pending host cleanup; a fully released owner returns nil. Freeing
+host resources does not resume a halted target or restore its debug state.
+Backends without the optional restoration contract retain conservative retry
+behavior. `Port()` returns nil once cleanup starts; previously returned pointers
+are governed by the borrowing contract, not forcibly revoked.
 
 Use the owner's method to acquire a MEM-AP whose cleanup it will track:
 
