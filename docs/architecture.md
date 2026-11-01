@@ -165,6 +165,25 @@ A metadata-only CMSIS-DAP composition closes its session directly. Cleanup
 errors remain meaningful and should be joined with the operation error rather
 than discarded.
 
+`probe.CleanupState` and `probe.RestorationState` are optional backend
+contracts. `Probe.CleanupPending` reports whether the owned backend still needs
+`Close`; `Probe.RestorationPossible` reports whether restoration communication
+remains possible. Both queries perform no I/O. Backends without the
+corresponding interface conservatively report true while owned; empty and
+released probes report false. Terminal communication loss can make restoration
+impossible while host resources still need cleanup. A timeout, target FAULT,
+authentication failure, or recoverable scan status alone does not establish
+terminal loss.
+
+`usb.Device.CleanupPending` and `usb.ClaimedInterface.CleanupPending`
+distinguish retained host resources from a final cached close error. The generic
+USB probe owner reports the encountered error but drops a resource once cleanup
+finished, so later probe closes return nil without traffic. A live failure
+retains its owner for retry. USB itself still returns its cached final close
+result. Releasing host resources does not restore a halted target; release
+borrowed protocol and target owners in their required order before closing the
+probe.
+
 `dap.DebugPort` caches register-selection and AP state. Direct transfers on its
 SWD connection or JTAG chain can make that cached state stale, so do not share
 either with another transaction owner while the debug port remains in use. No

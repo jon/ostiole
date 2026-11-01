@@ -60,6 +60,15 @@ wire; failed activation attempts cleanup and retains failed cleanup for
 `Probe.Close` to retry. The owner imports no concrete driver or transport. It
 does not own SWD transactions, DAP, or MEM-AP state.
 
+Optional backend `CleanupState` and `RestorationState` contracts distinguish
+pending cleanup from restoration availability. `Probe.CleanupPending` and
+`Probe.RestorationPossible` query those states without I/O; a backend lacking a
+contract remains conservative for that query. A final close error is reported
+once by the probe when no cleanup remains, while live failures retain ownership
+for retry. USB devices and claims expose their retained host ownership through
+`CleanupPending`; USB's cached final close result remains available. Host
+resource release does not restore a halted target.
+
 `Probe.JTAG` similarly lends packed JTAG clocks. Only one protocol can be
 activated per owner. Close invalidates either borrowed surface, including when
 cleanup must be retried. Unsupported protocols fail before activation. FTDI and

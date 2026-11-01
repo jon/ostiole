@@ -10,6 +10,14 @@ import (
 	"fmt"
 )
 
+// CleanupPending reports whether the device retains host resources requiring
+// Close. It performs no I/O. A final cached Close error can remain after this
+// reports false. A nil or empty device reports false.
+// Serialize this query with other calls on the device and its claim.
+func (d *Device) CleanupPending() bool {
+	return d != nil && d.cleanupPending()
+}
+
 // ErrStaleCandidate reports that an attachment changed after enumeration.
 var ErrStaleCandidate = errors.New("usb: stale candidate")
 

@@ -14,9 +14,27 @@ type Info struct {
 }
 
 // Backend owns the implementation and all of its resources. A failed Close
-// must retain outstanding cleanup so another Close can retry it.
+// must retain outstanding cleanup so another Close can retry it, or implement
+// CleanupState to distinguish a final error after releasing its resources.
 type Backend interface {
 	Close() error
+}
+
+// RestorationState optionally reports whether communication needed to restore
+// probe or target state remains possible. While restoration is outstanding,
+// false requires terminal loss, such as device disappearance or a poisoned
+// command stream. A timeout, target FAULT,
+// authentication failure, or recoverable scan-status error alone is insufficient.
+// The query performs no I/O and does not report whether restoration has occurred.
+type RestorationState interface {
+	RestorationPossible() bool
+}
+
+// CleanupState optionally reports whether an owner still has resources or
+// restoration work requiring Close. False after a failed Close means that its
+// error is final and another Close is unnecessary. The query performs no I/O.
+type CleanupState interface {
+	CleanupPending() bool
 }
 
 // Wire supplies SWD bits and the implementation's transfer limit.
@@ -66,8 +84,10 @@ func (p *Probe) Info() Info {
 }
 
 // Close invalidates borrowed surfaces and closes the implementation. A failed
-// close retains the implementation for retry. After a successful close, further
-// calls do nothing.
+// close retains the implementation for retry unless CleanupState confirms that
+// cleanup finished. The encountered error is still returned. Once released,
+// further calls do nothing. Releasing host resources does not restore a halted
+// target.
 func (p *Probe) Close() error {
 	if p == nil {
 		return nil
@@ -78,11 +98,38 @@ func (p *Probe) Close() error {
 	if p.backend == nil {
 		return nil
 	}
-	if err := p.backend.Close(); err != nil {
+	err := p.backend.Close()
+	if err != nil && p.CleanupPending() {
 		return err
 	}
 	p.backend = nil
-	return nil
+	return err
+}
+
+// RestorationPossible reports whether restoration communication remains
+// possible, without I/O. Backends without RestorationState conservatively
+// report true while owned. Empty and released owners report false.
+func (p *Probe) RestorationPossible() bool {
+	if p == nil || p.backend == nil {
+		return false
+	}
+	if state, ok := p.backend.(RestorationState); ok {
+		return state.RestorationPossible()
+	}
+	return true
+}
+
+// CleanupPending reports whether Close still has work to do, without I/O.
+// Backends without CleanupState conservatively report true while owned.
+// Empty and released owners report false.
+func (p *Probe) CleanupPending() bool {
+	if p == nil || p.backend == nil {
+		return false
+	}
+	if state, ok := p.backend.(CleanupState); ok {
+		return state.CleanupPending()
+	}
+	return true
 }
 
 // SWD configures and lends a wire. Failed activation attempts cleanup and

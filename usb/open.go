@@ -21,6 +21,7 @@ type Device struct {
 	bulk          sync.Mutex
 	closeOnce     sync.Once
 	closeErr      error
+	closed        bool
 }
 
 // Open opens the exact attachment selected during enumeration.
@@ -111,6 +112,11 @@ func (d *Device) Close() error {
 		if d.file != nil {
 			d.closeErr = d.file.Close()
 		}
+		d.closed = true
 	})
 	return errors.Join(releaseErr, d.closeErr)
+}
+
+func (d *Device) cleanupPending() bool {
+	return d.claim != nil || (d.file != nil && !d.closed)
 }

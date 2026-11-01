@@ -250,6 +250,29 @@ Use a named error result for this cleanup pattern. Release any SWD or DAP state
 before closing the probe. The caller must stop using the transferred backend
 directly; the borrowed wire has no independent close operation.
 
+After releasing borrowed protocol and target owners, retain a probe according to
+its cleanup state while preserving the error from the close attempt:
+
+```go
+func closeProbe(p *probe.Probe) (*probe.Probe, error) {
+    err := p.Close()
+    if p.CleanupPending() {
+        return p, err
+    }
+    return nil, err
+}
+```
+
+Backends can implement `probe.CleanupState` to distinguish retained resources
+from a final close error; those without it retain conservative retry behavior.
+For direct USB ownership, use `device.CleanupPending()` or
+`claim.CleanupPending()` after the corresponding close attempt. USB continues
+returning its cached final error even after releasing its host resources.
+`opened.RestorationPossible()` independently reports whether restoration
+communication remains possible, with conservative behavior for a backend which
+lacks `probe.RestorationState`. It performs no restoration and does not confirm
+that a halted target was restored.
+
 FTDI and J-Link owners can instead lend JTAG with
 `opened.JTAG(ctx, probe.JTAGConfig{MaxClockHz: 100_000})`. Pass the wire to
 `jtag.New`, supply an explicit layout, and release the chain before closing the

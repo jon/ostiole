@@ -99,12 +99,14 @@ func TestClaimedInterfaceRetainsOwnershipAfterFailedRelease(t *testing.T) {
 	if err := claim.Close(); !errors.Is(err, want) {
 		t.Fatalf("first Close() error = %v, want %v", err, want)
 	}
+	assertUSBCleanupPending(t, device, claim, true, true)
 	if _, err := device.ClaimInterface(2); err == nil {
 		t.Fatal("ClaimInterface() succeeded while release was pending")
 	}
 	if err := claim.Close(); err != nil {
 		t.Fatalf("second Close(): %v", err)
 	}
+	assertUSBCleanupPending(t, device, claim, true, false)
 	if _, err := device.ClaimInterface(2); err != nil {
 		t.Fatalf("ClaimInterface() after release: %v", err)
 	}
@@ -129,9 +131,11 @@ func TestDeviceCloseReleasesGoneClaimAndFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertUSBCleanupPending(t, device, claim, true, true)
 	if err := device.Close(); !errors.Is(err, syscall.ENODEV) {
 		t.Fatalf("Close() = %v, want device loss", err)
 	}
+	assertUSBCleanupPending(t, device, claim, false, false)
 	if claim.device != nil || device.claim != nil {
 		t.Fatal("device-gone release retained the claim")
 	}
@@ -173,6 +177,7 @@ func TestGoneReleasePreservesFileCloseError(t *testing.T) {
 	if !errors.Is(err, syscall.ENODEV) || !errors.Is(err, os.ErrClosed) {
 		t.Fatalf("Close() = %v, want release and file errors", err)
 	}
+	assertUSBCleanupPending(t, device, nil, false, false)
 	err = device.Close()
 	if !errors.Is(err, os.ErrClosed) || errors.Is(err, syscall.ENODEV) {
 		t.Fatalf("repeated Close() = %v, want cached file error only", err)
