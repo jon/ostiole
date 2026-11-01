@@ -110,11 +110,11 @@ Arm's [reference firmware][firmware] enables SWDIO output at each command's end;
 splitting a target-driven phase would therefore drive against the target.
 
 These restrictions mean that `Session` cannot serve as a general `swd.Wire`. Do
-not compose it with `swd.New`. `OpenProbe` acquires only the USB attachment; its
-`SWD` and `JTAG` calls return the corresponding unsupported-capability error
-before claiming or configuring an interface. Direct `Open` remains metadata-only
-unless configured explicitly. One safe `SWDIO` call may contain several ordered,
-unpipelined commands, up to 16,384 bits. Commands are never replayed.
+not compose it with `swd.New`. `OpenProbe` acquires only the USB attachment. Its
+`RegisterSWD` activation configures a completed-register backend; `SWD` and
+`JTAG` remain unsupported. Direct `Open` remains metadata-only unless configured
+explicitly. One safe `SWDIO` call may contain several ordered, unpipelined
+commands, up to 16,384 bits. Commands are never replayed.
 
 [firmware]:
   https://github.com/ARM-software/CMSIS-DAP/blob/main/Firmware/Source/DAP.c
@@ -186,6 +186,20 @@ complete firmware response reporting target parity or an invalid target ACK
 requires explicit protocol repair while leaving host restoration available.
 Malformed command responses and ambiguous USB completion poison the command
 stream instead.
+
+Through generic discovery, activate the optional register surface instead:
+
+```go
+registers, err := p.RegisterSWD(ctx, probe.SWDConfig{MaxClockHz: 1_000_000})
+// Handle err before constructing the DAP owner.
+dp := dap.NewDebugPort(dap.RegisterDP(registers))
+```
+
+Activation configures the command session but leaves protocol entry to
+`dp.Connect(ctx)`. On activation failure, the probe attempts host cleanup and
+retains pending resources for `p.Close()`. Release higher target and memory
+owners, then the DAP owner, before closing the probe. A failed activation does
+not fall back to raw sequences.
 
 ## Historical bench observations
 

@@ -426,9 +426,10 @@ during stepping.
 
 ## Hardware procedure
 
-The CMSIS-DAP target procedure below describes the earlier unrestricted sequence
-adapter. It is not supported by the current restricted sequence surface; the
-generic CMSIS-DAP owner rejects SWD before activation.
+The CMSIS-DAP target procedure below now uses completed register operations
+through the generic probe owner. Earlier bench observations used the prior
+sequence adapter; they do not validate the current register binding. The
+procedure remains opt-in and requires a separately authorized bench run.
 
 The opt-in integration test selects the CMSIS-DAP micro:bit with serial
 `9900360140124e4500279015000000360000000097969901`, AP0, and a requested 1 MHz
