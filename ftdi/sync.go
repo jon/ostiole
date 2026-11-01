@@ -5,8 +5,9 @@ import (
 	"fmt"
 )
 
+const invalidCommand = 0xab
+
 func (c *Channel) synchronize(ctx context.Context) error {
-	const invalidCommand = 0xab
 	payload, err := c.exchangePayload(ctx, []byte{invalidCommand, cmdSendImmediate}, 2)
 	if err != nil {
 		return err

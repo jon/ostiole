@@ -385,3 +385,18 @@ explicit `conn.Release(ctx)` uses the context supplied to that release.
 
 When DAP owns the SWD connection, set `dap.WithCleanupTimeout` on the debug
 port; DAP passes that budget to the nested SWD connection attempt.
+
+## FTDI execution completion
+
+A nonempty `ftdi.Channel.SWDIO` call waits for a trailing MPSSE bad-command echo
+after its clock and direction commands. This also applies to write-only streams,
+so a successful return confirms execution of the trailing host-driven bits.
+`JTAGIO` uses the same completion check. The echo is consumed by the adapter and
+is not part of the returned wire samples.
+
+The receive loop keeps IN requests rearmed while OUT is pending, with queued
+payload bounded by the planned samples and echo. Status-only packets do not
+consume that payload budget. Cancellation before traffic leaves the channel
+usable. After OUT acceptance, cancellation without complete response data and
+its marker poisons the stream; later calls reject traffic rather than consume a
+late reply. Closing host resources still does not restore a halted target.

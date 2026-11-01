@@ -12,7 +12,7 @@ import (
 
 func TestChannelExecutesDirectionSafeSWDRuns(t *testing.T) {
 	raw := &fakeUSBDevice{
-		readData: [][]byte{{0x01, 0x60, 0b10100000}},
+		readData: [][]byte{{0x01, 0x60, 0b10100000, 0xfa, 0xab}},
 	}
 	channel, err := newChannel(raw, Config{Port: PortA, MaxClockHz: 400_000})
 	if err != nil {
@@ -30,7 +30,7 @@ func TestChannelExecutesDirectionSafeSWDRuns(t *testing.T) {
 		0x80, 0, 0x01,
 		0x2a, 2,
 		0x80, 0, 0x01,
-		0x87,
+		0x87, 0xab, 0x87,
 	}
 	if len(raw.writes) != 1 ||
 		!reflect.DeepEqual(raw.writes[0], wantCommands) {
@@ -91,7 +91,7 @@ func TestChannelPoisonsAfterAmbiguousBulkRead(t *testing.T) {
 	}{
 		{name: "transfer error", raw: &fakeUSBDevice{readErr: readFailure}},
 		{name: "invalid count", raw: &fakeUSBDevice{readData: [][]byte{{0x01}}}},
-		{name: "surplus payload", raw: &fakeUSBDevice{readData: [][]byte{{0x01, 0x60, 0xaa, 0xbb}}}},
+		{name: "surplus payload", raw: &fakeUSBDevice{readData: [][]byte{{0x01, 0x60, 0xaa, 0xbb, 0xcc, 0xdd}}}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

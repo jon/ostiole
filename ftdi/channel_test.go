@@ -448,7 +448,7 @@ func TestChannelExchangesExactMPSSEPayloads(t *testing.T) {
 	}
 	claimFakeChannel(t, channel)
 
-	if err := channel.beginResponse(); err != nil {
+	if err := channel.beginResponse(3); err != nil {
 		t.Fatal(err)
 	}
 	defer channel.endResponse()
@@ -499,7 +499,7 @@ func TestChannelConsumesBulkINTransfersInSubmissionOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	claimFakeChannel(t, channel)
-	if err := channel.beginResponse(); err != nil {
+	if err := channel.beginResponse(2); err != nil {
 		t.Fatal(err)
 	}
 	defer channel.endResponse()
