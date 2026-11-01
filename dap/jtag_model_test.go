@@ -34,6 +34,8 @@ type jtagDPWire struct {
 	calls, limit int
 	fail         bool
 	failAfter    bool
+	failure      error
+	resets       int
 	expire       bool
 	deadline     time.Time
 }
@@ -176,6 +178,9 @@ func (w *jtagDPWire) JTAGIO(ctx context.Context, tms, tdi []byte, bits int) ([]b
 	}
 	if w.failAfter {
 		w.failAfter = false
+		if w.failure != nil {
+			return nil, w.failure
+		}
 		return nil, errors.New("injected JTAG failure after traffic")
 	}
 	return out, nil
@@ -196,6 +201,9 @@ func (w *jtagDPWire) tick(tms, tdi byte) byte {
 		w.shift[len(w.shift)-1] = tdi
 	case jtag.UpdateIR, jtag.UpdateDR:
 		w.update()
+	}
+	if w.state != jtag.Reset && tapNext[w.state][tms] == jtag.Reset {
+		w.resets++
 	}
 	w.state = tapNext[w.state][tms]
 	return out
