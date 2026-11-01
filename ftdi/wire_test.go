@@ -42,7 +42,7 @@ func TestJTAGSetsDirectionsBeforeFirstHighTMS(t *testing.T) {
 }
 
 func TestWireMethodsShareEndpoint(t *testing.T) {
-	raw := &fakeUSBDevice{}
+	raw := &fakeUSBDevice{readData: [][]byte{{1, 0x60, 0xfa, 0xab}}}
 	c, err := newChannel(raw, Config{Port: PortA, MaxClockHz: 100_000})
 	if err != nil {
 		t.Fatal(err)
@@ -54,12 +54,12 @@ func TestWireMethodsShareEndpoint(t *testing.T) {
 	raw.mu.Lock()
 	reads := raw.readsN
 	raw.mu.Unlock()
-	if reads != 0 {
-		t.Fatalf("write-only SWD completed %d USB reads", reads)
+	if reads != 1 {
+		t.Fatalf("write-only SWD completion used %d USB reads", reads)
 	}
 	// The fake releases queued replies on the next USB write.
 	raw.mu.Lock()
-	raw.readData = [][]byte{{0x01, 0x60, 0x80}}
+	raw.readData = [][]byte{{0x01, 0x60, 0x80, 0xfa, 0xab}}
 	raw.mu.Unlock()
 	got, err := c.JTAGIO(t.Context(), []byte{1}, []byte{0}, 1)
 	if err != nil {
@@ -68,6 +68,9 @@ func TestWireMethodsShareEndpoint(t *testing.T) {
 	if len(got) != 1 || got[0] != 1 {
 		t.Fatalf("JTAG sample = %x, want 01", got)
 	}
+	raw.mu.Lock()
+	raw.readData = [][]byte{{1, 0x60, 0xfa, 0xab}}
+	raw.mu.Unlock()
 	if _, err := c.SWDIO(t.Context(), []byte{1}, []byte{0}, 1); err != nil {
 		t.Fatal(err)
 	}

@@ -41,26 +41,29 @@ type swdRead struct {
 	bits   int
 }
 
-// SWDIO executes one direction-explicit SWD bit stream.
+// SWDIO executes one direction-explicit SWD bit stream. Nonempty calls wait for
+// an MPSSE echo after all clock and direction commands, including write-only
+// streams. An incomplete exchange after OUT acceptance poisons the channel;
+// cancellation before traffic leaves it usable.
 func (c *Channel) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
+	return c.clockStream(ctx, direction, output, bits, "SWD", swdCommands)
+}
+
+type wireEncoder func([]byte, []byte, int) ([]byte, []swdRead)
+
+func (c *Channel) clockStream(ctx context.Context, first, second []byte, bits int, protocol string, encode wireEncoder) ([]byte, error) {
 	if err := c.wireReady(ctx); err != nil {
 		return nil, err
 	}
-	if bits < 0 || bits > maxJTAGTransferBits || len(direction) < (bits+7)/8 || len(output) < (bits+7)/8 {
-		return nil, fmt.Errorf("ftdi: invalid %d-bit SWD stream", bits)
+	if bits < 0 || bits > maxJTAGTransferBits || len(first) < (bits+7)/8 || len(second) < (bits+7)/8 {
+		return nil, fmt.Errorf("ftdi: invalid %d-bit %s stream", bits, protocol)
 	}
 	if bits == 0 {
 		return []byte{}, nil
 	}
-	commands, reads := swdCommands(direction, output, bits)
-	var response []byte
-	if len(reads) != 0 {
-		var err error
-		response, err = c.exchangePayload(ctx, commands, len(reads))
-		if err != nil {
-			return nil, err
-		}
-	} else if err := c.writeExact(ctx, commands); err != nil {
+	commands, reads := encode(first, second, bits)
+	response, err := c.completeMPSSE(ctx, commands, len(reads))
+	if err != nil {
 		return nil, err
 	}
 	return decodeSWD(response, reads, bits), nil

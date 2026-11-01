@@ -2,7 +2,6 @@ package ftdi
 
 import (
 	"context"
-	"fmt"
 )
 
 const (
@@ -13,23 +12,11 @@ const (
 )
 
 // JTAGIO drives packed LSB-first TMS/TDI and samples TDO on rising TCK edges.
-// TMS and TDI change on falling edges. Zero bits sends no traffic.
+// TMS and TDI change on falling edges. Nonempty calls wait for an MPSSE echo
+// after the final command. An incomplete accepted exchange poisons the channel.
+// Zero bits sends no traffic.
 func (c *Channel) JTAGIO(ctx context.Context, tms, tdi []byte, bits int) ([]byte, error) {
-	if err := c.wireReady(ctx); err != nil {
-		return nil, err
-	}
-	if bits < 0 || bits > maxJTAGTransferBits || len(tms) < (bits+7)/8 || len(tdi) < (bits+7)/8 {
-		return nil, fmt.Errorf("ftdi: invalid %d-bit JTAG stream", bits)
-	}
-	if bits == 0 {
-		return []byte{}, nil
-	}
-	commands, reads := jtagCommands(tms, tdi, bits)
-	response, err := c.exchangePayload(ctx, commands, len(reads))
-	if err != nil {
-		return nil, err
-	}
-	return decodeSWD(response, reads, bits), nil
+	return c.clockStream(ctx, tms, tdi, bits, "JTAG", jtagCommands)
 }
 
 func jtagCommands(tms, tdi []byte, bits int) ([]byte, []swdRead) {

@@ -86,26 +86,27 @@ func (c ownedUSBClaim) SubmitBulk(ctx context.Context, endpoint uint8, buffer []
 
 // Channel addresses one explicit MPSSE-capable USB function.
 type Channel struct {
-	active      bool
-	device      usbDevice
-	iface       uint8
-	index       uint16
-	bulkIn      uint8
-	bulkOut     uint8
-	divisor     uint16
-	clockHz     uint32
-	packetSize  int
-	claim       usbClaim
-	receive     chan []byte
-	receiveErr  chan error
-	receiveStop chan struct{}
-	receiveDone chan struct{}
-	receiveMu   sync.Mutex
-	receiving   bool
-	settle      func(context.Context) error
-	poisonErr   error
-	gone        bool
-	restored    bool
+	active           bool
+	device           usbDevice
+	iface            uint8
+	index            uint16
+	bulkIn           uint8
+	bulkOut          uint8
+	divisor          uint16
+	clockHz          uint32
+	packetSize       int
+	claim            usbClaim
+	receive          chan []byte
+	receiveErr       chan error
+	receiveStop      chan struct{}
+	receiveDone      chan struct{}
+	receiveMu        sync.Mutex
+	receiving        bool
+	receiveRemaining int
+	settle           func(context.Context) error
+	poisonErr        error
+	gone             bool
+	restored         bool
 }
 
 func newChannel(device usbDevice, config Config) (*Channel, error) {
@@ -185,8 +186,8 @@ func (c *Channel) openUSBTransfers(ctx context.Context) error {
 		return fmt.Errorf("ftdi: invalid bulk IN endpoint %#02x", c.bulkIn)
 	}
 	c.packetSize = int(endpoint.MaxPacketSize)
-	depth := receiveDepth((maxSWDTransferBits+1)/2, c.packetSize)
-	c.receive = make(chan []byte, 1)
+	depth := receiveDepth(maxResponsePayload, c.packetSize)
+	c.receive = make(chan []byte, maxResponsePayload)
 	c.receiveErr = make(chan error, 1)
 	c.receiveStop = make(chan struct{})
 	c.receiveDone = make(chan struct{})
@@ -314,14 +315,22 @@ func (c *Channel) deliverUSBRead(raw []byte) (bool, error) {
 	if err != nil || len(payload) == 0 {
 		return false, err
 	}
-	if !c.responsePending() {
+	c.receiveMu.Lock()
+	defer c.receiveMu.Unlock()
+	if !c.receiving {
 		return false, errors.New("ftdi: received payload without a pending response")
 	}
+	if len(payload) > c.receiveRemaining {
+		return false, fmt.Errorf("ftdi: received %d surplus payload bytes", len(payload)-c.receiveRemaining)
+	}
+	c.receiveRemaining -= len(payload)
 	select {
 	case c.receive <- payload:
 		return false, nil
 	case <-c.receiveStop:
 		return true, nil
+	default:
+		return false, errors.New("ftdi: response delivery queue is full")
 	}
 }
 
@@ -351,13 +360,7 @@ func (c *Channel) reportReceiveError(err error) {
 	}
 }
 
-func (c *Channel) responsePending() bool {
-	c.receiveMu.Lock()
-	defer c.receiveMu.Unlock()
-	return c.receiving
-}
-
-func (c *Channel) beginResponse() error {
+func (c *Channel) beginResponse(size int) error {
 	c.receiveMu.Lock()
 	defer c.receiveMu.Unlock()
 	select {
@@ -367,6 +370,7 @@ func (c *Channel) beginResponse() error {
 		return fmt.Errorf("ftdi: received %d stale payload bytes", len(payload))
 	default:
 	}
+	c.receiveRemaining = size
 	c.receiving = true
 	return nil
 }

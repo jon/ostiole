@@ -6,7 +6,10 @@ import (
 	"io"
 )
 
-const packetStatusSize = 2
+const (
+	packetStatusSize   = 2
+	maxResponsePayload = maxJTAGTransferBits + 2
+)
 
 func (c *Channel) writeExact(ctx context.Context, data []byte) error {
 	if err := c.transportReady(); err != nil {
@@ -42,7 +45,7 @@ func (c *Channel) readPayload(ctx context.Context, size int) ([]byte, error) {
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, c.poison(err)
 	}
 	payload := make([]byte, 0, size)
 	for len(payload) < size {
@@ -63,10 +66,13 @@ func (c *Channel) readPayload(ctx context.Context, size int) ([]byte, error) {
 }
 
 func (c *Channel) exchangePayload(ctx context.Context, output []byte, size int) ([]byte, error) {
-	if size < 0 {
-		return nil, fmt.Errorf("ftdi: negative payload size %d", size)
+	if size < 0 || size > maxResponsePayload {
+		return nil, fmt.Errorf("ftdi: invalid payload size %d", size)
 	}
-	if err := c.beginResponse(); err != nil {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := c.beginResponse(size); err != nil {
 		return nil, c.poison(err)
 	}
 	defer c.endResponse()
@@ -98,4 +104,15 @@ func decodeCompletion(buffer []byte, packetSize int) ([]byte, error) {
 		position += packetLength
 	}
 	return payload, nil
+}
+
+func (c *Channel) completeMPSSE(ctx context.Context, commands []byte, size int) ([]byte, error) {
+	response, err := c.exchangePayload(ctx, append(commands, invalidCommand, cmdSendImmediate), size+2)
+	if err != nil {
+		return nil, err
+	}
+	if response[size] != 0xfa || response[size+1] != invalidCommand {
+		return nil, c.poison(fmt.Errorf("ftdi: invalid MPSSE completion marker %x", response[size:]))
+	}
+	return response[:size], nil
 }
