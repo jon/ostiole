@@ -397,7 +397,11 @@ func TestDebugPortRetriesOnlyTheWAITedTransfer(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			target := newWaitTarget()
 			addAP(t, target, 0, 0x24770011)
-			dp := newDebugPort(t, target)
+			var wireTarget swdsim.Target = target
+			if test.waitFor == rdbuffReq && test.logicalReq == apReadReq {
+				wireTarget = &simpleBlockTarget{waitTarget: target}
+			}
+			dp := newDebugPort(t, wireTarget)
 			if _, err := dp.Connect(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -1590,16 +1594,21 @@ func TestDebugPortInvalidatesAPStateWhenWAITRetryFails(t *testing.T) {
 	tests := []struct {
 		name string
 		req  swdsim.Request
+		skip int
 	}{
 		{name: "SELECT", req: dpWrite(0x08)},
 		{name: "AP request", req: apRead(0x0c)},
-		{name: "RDBUFF", req: dpRead(0x0c)},
+		{name: "RDBUFF", req: dpRead(0x0c), skip: 1},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			target := newWaitTarget()
 			addMEMAP(t, target, 0, 0x24770011, map[uint32]uint32{0xe000ed00: 0x410fc241})
-			dp := newDebugPort(t, target)
+			var wireTarget swdsim.Target = target
+			if test.name == "RDBUFF" {
+				wireTarget = &simpleBlockTarget{waitTarget: target}
+			}
+			dp := newDebugPort(t, wireTarget)
 			if _, err := dp.Connect(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -1610,9 +1619,7 @@ func TestDebugPortInvalidatesAPStateWhenWAITRetryFails(t *testing.T) {
 
 			retryErr := errors.New("injected retry I/O failure")
 			target.arm(test.req, -1)
-			if test.name == "RDBUFF" {
-				target.waitSkip = 1
-			}
+			target.waitSkip = test.skip
 			target.retryErr = retryErr
 			_, err = dp.ReadAPIDR(t.Context(), apSel(0))
 			if !errors.Is(err, swd.ErrWait) || !errors.Is(err, retryErr) {

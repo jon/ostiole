@@ -78,7 +78,10 @@ func validateBlockRange(addr uint64, length int, largeAddress bool) error {
 // debug port requires repair. A FAULT returns the contiguous byte prefix
 // definitely obtained before the fault. Cancellation and transport or protocol
 // failures can also interrupt the read; bytes beyond the returned prefix are
-// left unchanged. If the MEM-AP does not accept single address increment,
+// left unchanged. Fixed-frame WAIT cleanup which discards pending AP data
+// reports ErrIndeterminate and invalidates the MemAP, preserving only the
+// confirmed prefix. Release remains available; the accepted read is not replayed.
+// If the MEM-AP does not accept single address increment,
 // ReadBlock writes TAR before each word instead.
 func (m *MemAP) ReadBlock(ctx context.Context, addr uint64, buf []byte) (int, error) {
 	if len(buf) == 0 {

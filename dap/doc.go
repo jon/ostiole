@@ -7,7 +7,9 @@
 // OpenMemAP validates one access port and snapshots the register values it will
 // change. Release them in reverse order: the MemAP first, then the DebugPort.
 //
-// SWD retries a clean WAIT on the rejected physical request; JTAG polls the
+// SWD retries a clean WAIT while the required posted data remains valid.
+// Fixed-frame WAIT cleanup discards pending AP read data; that read reports
+// ErrIndeterminate instead of retrying into an unknown value. JTAG polls the
 // preceding accepted request without replay. Both stop at the configured WAIT
 // limit or when the context ends. NewDebugPort uses only the context unless
 // WithMaxWaits supplies a response-count limit. SetMaxWaits can change it

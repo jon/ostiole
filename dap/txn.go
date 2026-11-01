@@ -166,7 +166,9 @@ func (t *Txn) queue(op txnOp) *txnResult {
 // Failure while settling the earlier write leaves every queued operation
 // unexecuted. SWD retries a rejected request after WAIT; JTAG polls completion
 // without replaying an accepted request. The configured WAIT limit and context
-// bound both paths. Faults and ambiguous transfers are not replayed. If the
+// bound both paths. Fixed-frame WAIT cleanup which discards a pending AP
+// read result reports ErrIndeterminate, retaining earlier confirmed results.
+// Faults and ambiguous transfers are not replayed. If the
 // context ends, it supplies the operation error; independent cleanup failures
 // remain visible. Commit resolves every result before returning and can be
 // called only once. Physical SWD DP reads at offsets 0x00 and 0x04 execute in
@@ -638,6 +640,9 @@ func (t *swdTxn) retryBatchWAIT(ctx context.Context, steps []txnStep, results []
 	t.observeStep(step, 0, swd.ErrWait)
 	if err := t.dp.conn.validateWait(step.req, swd.ErrWait); err != nil {
 		return t.failStep(step, err)
+	}
+	if step.operationStarted && step.deliverValue && !step.settlesDPWrite && t.dp.state.response == responseOverrun {
+		return t.failStep(step, lostPostedRead(ctx))
 	}
 	(*waits)++
 	if err := t.dp.conn.stopAfterWAIT(ctx, *waits); err != nil {

@@ -69,6 +69,8 @@ func DecodeAPIDR(value uint32) APIDRInfo {
 }
 
 // ReadAPIDR reads and decodes the identification register of one access port.
+// In fixed-frame SWD mode, WAIT cleanup which discards the pending result
+// reports ErrIndeterminate without replaying the accepted read.
 // The debug port must be connected and have no cleanup pending.
 func (dp *DebugPort) ReadAPIDR(ctx context.Context, sel APSel) (APIDRInfo, error) {
 	if err := dp.requireConnected(ctx); err != nil {

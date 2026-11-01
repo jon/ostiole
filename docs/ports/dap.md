@@ -109,6 +109,14 @@ without naming a wire protocol; an SWD fault still matches `swd.ErrFault`. If
 cancellation stops WAIT retries, the result remains a context error.
 Independently joined cleanup failures remain visible.
 
+In fixed-frame SWD mode, clearing STICKYORUN after WAIT writes ABORT and
+discards any pending AP read result. If an accepted read still needs that
+result, the operation returns `ErrIndeterminate` alongside WAIT or the caller
+cancellation. It does not retry into an unknown value or replay the AP access.
+Block reads retain only the bytes confirmed before the loss. Simple-response SWD
+does not perform that cleanup write, so clean WAIT retries can still obtain the
+pending result.
+
 `dap.WithCleanupTimeout(3 * time.Second)` gives each independent recovery
 attempt three seconds. The defaults are one second for SWD and thirty seconds
 for JTAG. Full JTAG chain validation alone exceeds one second at 100 kHz; allow

@@ -91,11 +91,8 @@ func (e *swdExecutor) transferWithAPRecovery(ctx context.Context, req transferRe
 		if !errors.Is(err, swd.ErrWait) {
 			return e.finishRetryError(req, value, err, waits, apWork)
 		}
-		if err := e.validateWait(req, err); err != nil {
-			return 0, err
-		}
 		waits++
-		if err := e.stopAfterWAIT(ctx, waits); err != nil {
+		if err := e.prepareWaitRetry(ctx, req, err, waits); err != nil {
 			return 0, err
 		}
 	}
@@ -379,4 +376,26 @@ func stickyClearForState(state uint32, minimal bool) uint32 {
 		clear |= clearStickyCompare
 	}
 	return clear
+}
+
+func lostPostedRead(ctx context.Context) error {
+	cause := ctx.Err()
+	if cause == nil {
+		cause = swd.ErrWait
+	}
+	return errors.Join(cause, ErrIndeterminate, errors.New("dap: WAIT recovery discarded a posted AP read result"))
+}
+
+func (e *swdExecutor) prepareWaitRetry(ctx context.Context, req transferRequest, err error, waits int) error {
+	if err := e.validateWait(req, err); err != nil {
+		if e.pendingRead {
+			return errors.Join(err, ErrIndeterminate)
+		}
+		return err
+	}
+	if e.pendingRead && e.dp.state.response == responseOverrun {
+		e.dp.state.invalidateAP()
+		return lostPostedRead(ctx)
+	}
+	return e.stopAfterWAIT(ctx, waits)
 }
