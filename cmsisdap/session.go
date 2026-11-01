@@ -27,6 +27,7 @@ type usbClaim interface {
 
 type usbBulkTransfer interface {
 	Wait(context.Context) (int, error)
+	Aborted() bool
 }
 
 type ownedUSBDevice struct{ *usb.Device }
@@ -62,9 +63,11 @@ type Session struct {
 	completionTimeout time.Duration
 }
 
-// Open claims the CMSIS-DAP v2 command interface, reads probe metadata, applies
-// its options, and takes ownership of the device on success. With no options it
-// does not connect a target port. After an error, close a returned non-nil
+// Open claims the CMSIS-DAP v2 command interface, drains stale responses until
+// command IN is quiet for 100 ms within a one-second synchronization budget,
+// reads probe metadata, and applies its options. USB abort and cleanup retain
+// their own bounds. It takes ownership of the device on success. With no
+// options it does not connect a target port. After an error, close a returned non-nil
 // session; when Open returns no session, close device. Open has already
 // attempted cleanup.
 func Open(ctx context.Context, device *usb.Device, options ...Option) (*Session, error) {
@@ -114,6 +117,9 @@ func openSession(ctx context.Context, device usbDevice, options ...Option) (resu
 	session.packetSize = int(bulkIn.MaxPacketSize)
 	if session.packetSize < minimumPacketSize {
 		return nil, fmt.Errorf("cmsisdap: active bulk IN packet size = %d, want at least %d", session.packetSize, minimumPacketSize)
+	}
+	if err := session.synchronizeInput(ctx); err != nil {
+		return nil, err
 	}
 	if err := session.readInfo(ctx); err != nil {
 		return nil, err

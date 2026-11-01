@@ -14,6 +14,7 @@ type bulkTransferBackend interface {
 	failure() <-chan struct{}
 	failureResult() error
 	result() (int, error)
+	aborted() bool
 }
 
 type bulkTransferEngine interface {
@@ -210,4 +211,11 @@ func (c *ClaimedInterface) AbortBulk(endpoint uint8) error {
 		return nil
 	}
 	return c.transfers.abort(endpoint)
+}
+
+// Aborted reports a completed host-abort status with no transferred data and no
+// other completion or cleanup error. It sends no traffic. Pending, nil, and zero transfers report
+// false. Wait still returns the original completion error.
+func (t *BulkTransfer) Aborted() bool {
+	return t != nil && t.backend != nil && channelClosed(t.Done()) && t.backend.aborted()
 }

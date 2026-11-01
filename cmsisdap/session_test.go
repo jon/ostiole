@@ -86,7 +86,7 @@ func (c *peerUSBClaim) Endpoint(_ context.Context, address uint8) (usb.Endpoint,
 func (c *peerUSBClaim) SubmitBulk(_ context.Context, endpoint uint8, buffer []byte) (usbBulkTransfer, error) {
 	if endpoint&0x80 != 0 {
 		c.operations = append(c.operations, "submit IN")
-		transfer := &peerBulkTransfer{buffer: buffer, err: c.inputErr}
+		transfer := &peerBulkTransfer{buffer: buffer, err: c.inputErr, pending: true}
 		c.inputErr = nil
 		c.pendingIn = transfer
 		return transfer, nil
@@ -114,11 +114,18 @@ func (c *peerUSBClaim) SubmitBulk(_ context.Context, endpoint uint8, buffer []by
 	} else {
 		c.pendingIn.count = copy(c.pendingIn.buffer, response)
 	}
+	c.pendingIn.pending = false
 	c.pendingIn = nil
 	return &peerBulkTransfer{count: len(buffer)}, nil
 }
 
 func (c *peerUSBClaim) AbortBulk(endpoint uint8) error {
+	if c.pendingIn != nil && c.pendingIn.pending {
+		c.pendingIn.pending = false
+		c.pendingIn.err = context.Canceled
+		c.pendingIn.abortStatus = true
+	}
+	c.pendingIn = nil
 	c.operations = append(c.operations, fmt.Sprintf("abort %#02x", endpoint))
 	return nil
 }
@@ -134,12 +141,20 @@ func (c *peerUSBClaim) Close() error {
 }
 
 type peerBulkTransfer struct {
-	buffer []byte
-	count  int
-	err    error
+	abortStatus bool
+	pending     bool
+	buffer      []byte
+	count       int
+	err         error
 }
 
-func (t *peerBulkTransfer) Wait(context.Context) (int, error) { return t.count, t.err }
+func (t *peerBulkTransfer) Wait(ctx context.Context) (int, error) {
+	if t.pending && t.err == nil {
+		<-ctx.Done()
+		return 0, ctx.Err()
+	}
+	return t.count, t.err
+}
 
 func TestOpenReadsMetadataWithoutConnecting(t *testing.T) {
 	device := metadataPeer()
@@ -214,9 +229,14 @@ func assertSessionInfo(t *testing.T, info Info, identity usb.DeviceInfo) {
 
 func assertMetadataOperations(t *testing.T, operations []string) {
 	t.Helper()
-	for index, operation := range operations {
+	prefix := []string{"claim 3", "alternate 0", "endpoint 0x01", "endpoint 0x82", "submit IN", "abort 0x82"}
+	if len(operations) < len(prefix) || !reflect.DeepEqual(operations[:len(prefix)], prefix) {
+		t.Fatalf("missing pre-metadata synchronization: %v", operations)
+	}
+	for index, operation := range operations[len(prefix):] {
 		if operation == "submit IN" {
-			if index+1 >= len(operations) || !strings.HasPrefix(operations[index+1], "submit OUT") {
+			next := index + len(prefix) + 1
+			if next >= len(operations) || !strings.HasPrefix(operations[next], "submit OUT") {
 				t.Fatalf("operations = %v", operations)
 			}
 		}
@@ -397,3 +417,5 @@ func metadataPeer() *peerUSBDevice {
 		claim: claim,
 	}
 }
+
+func (t *peerBulkTransfer) Aborted() bool { return !t.pending && t.abortStatus }

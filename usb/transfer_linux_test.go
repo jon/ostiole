@@ -5,6 +5,7 @@ package usb
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"sync"
 	"syscall"
@@ -504,5 +505,41 @@ func TestLinuxUnplugDrainsTransfersAndReleasesHandle(t *testing.T) {
 	}
 	if releases != 1 {
 		t.Fatalf("release ioctls = %d, want one", releases)
+	}
+}
+
+func TestLinuxAbortedObservationUsesNativeCompletion(t *testing.T) {
+	for _, test := range []struct {
+		status  int32
+		count   int
+		aborted bool
+	}{{0, 1, false}, {-int32(syscall.ENOENT), 0, true}, {-int32(syscall.ECONNRESET), 0, true}, {-int32(syscall.ENOENT), 1, false}, {-int32(syscall.ECONNRESET), 1, false}, {-int32(syscall.EIO), 0, false}, {-int32(syscall.ENODEV), 0, false}} {
+		t.Run(fmt.Sprintf("%d/%d", test.status, test.count), func(t *testing.T) {
+			_, claim, fake := linuxTransferTest(t)
+			transfer, err := claim.SubmitBulk(t.Context(), 0x81, make([]byte, 8))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if transfer.Aborted() {
+				t.Fatal("pending request reports native abort")
+			}
+			fake.mu.Lock()
+			transfer.backend.(*linuxBulkTransfer).urb.Status = test.status
+			fake.mu.Unlock()
+			if !fake.completeTransfer(transfer, make([]byte, test.count), true) {
+				t.Fatal("missing submitted request")
+			}
+			count, err := transfer.Wait(t.Context())
+			if test.status == 0 {
+				if err != nil || count != test.count {
+					t.Fatalf("successful completion=%d,%v", count, err)
+				}
+			} else if count != 0 || !errors.Is(err, syscall.Errno(-test.status)) {
+				t.Fatalf("native error changed: %d,%v", count, err)
+			}
+			if transfer.Aborted() != test.aborted {
+				t.Fatalf("native status%d count%d aborted=%t want%t", test.status, test.count, transfer.Aborted(), test.aborted)
+			}
+		})
 	}
 }
