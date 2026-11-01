@@ -79,7 +79,11 @@
 // conditions reported there, verifies the clear, and returns a FaultError. A
 // SWD SELECT write remains provisional until later traffic establishes whether
 // its data took effect. Failed FAULT cleanup leaves the port in the same
-// cleanup-only state as a failed release.
+// cleanup-only state as a failed release. A captured and successfully cleared
+// ordinary SWD bus FAULT during managed memory access leaves existing MemAP
+// owners usable. Unconfirmed writes still report ErrIndeterminate without
+// replay. Raw AP access, abandoned write data, lost state, and incomplete
+// 64-bit data phases retain their invalidation and cleanup requirements.
 //
 // A Txn queues an ordered group of DP and AP operations. Commit validates the
 // complete queue, settles any earlier immediate DP write, then sends queued

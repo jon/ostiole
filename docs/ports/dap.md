@@ -414,6 +414,15 @@ traffic: ABORT has no acknowledgement after its data phase either. WDATAERR
 describes a write which the DP abandoned, while STICKYERR records an error
 reported by an AP. They are not interchangeable names for the same failure.
 
+An ordinary SWD bus FAULT during managed memory access leaves its MEM-AP and
+peer MEM-APs usable after the sticky state has been captured, cleared, and
+checked. Each later managed access sets up CSW and TAR again. This does not
+revalidate an already stale client. Reads retain only confirmed data; accepted
+writes with unconfirmed memory effects still report `ErrIndeterminate` and are
+never replayed. Raw AP access, WDATAERR, failed cleanup, lost protocol state,
+and unfinished 64-bit data phases retain their invalidation or cleanup rules. A
+borrowing target can resume or release after the cleared ordinary fault.
+
 A FAULT acknowledgement on an AP write means that write did not execute.
 WDATAERR at the following completion barrier likewise records abandoned write
 data. An accepted SWD write whose RDBUFF completion cannot be confirmed reports

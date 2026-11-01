@@ -259,6 +259,9 @@ func (t *Txn) checkAccess(ctx context.Context) error {
 }
 
 func (t *swdTxn) executionError(step txnStep, err error) error {
+	if t.clearedReadFault(step, err) {
+		return err
+	}
 	writeBarrier := step.settlesDPWrite || step.completesWrite
 	if writeBarrier && confirmedSWDCompletionParity(err) {
 		return err
@@ -273,6 +276,10 @@ func (t *swdTxn) executionError(step txnStep, err error) error {
 		return errors.Join(err, ErrIndeterminate)
 	}
 	return err
+}
+
+func (t *swdTxn) clearedReadFault(step txnStep, err error) bool {
+	return step.apRead && t.ops[step.op].preserveAP && ordinaryFaultCleared(err)
 }
 
 func faultReportsWriteDataError(err error) bool {
@@ -593,7 +600,8 @@ func (t *swdTxn) handleBatchFailure(ctx context.Context, steps []txnStep, result
 		if !batchSuffixAbandoned(results) {
 			return t.failUnexpectedBatchSuffix(steps[:clockedTransferCount(results)], err)
 		}
-		return t.failStep(steps[0], t.dp.conn.handleFault(steps[0].req, stepMayAffectAP(steps[0])))
+		step := steps[0]
+		return t.failStep(step, t.dp.conn.handleFault(step.req, stepMayAffectAP(step), t.ops[step.op].preserveAP))
 	}
 	if errors.Is(err, swd.ErrParity) {
 		clocked := clockedTransferCount(results)
@@ -786,7 +794,10 @@ func (t *swdTxn) failStep(step txnStep, err error) error {
 }
 
 func (t *swdTxn) applyFailedStepEffect(step txnStep, err error) {
-	if (!step.invalidatesAP && !step.apRead && !step.apWrite) || t.dp.state.response == responseLost {
+	if t.ops[step.op].preserveAP && ordinaryFaultCleared(err) {
+		return
+	}
+	if t.dp.state.response == responseLost {
 		return
 	}
 	indeterminateEffect := errors.Is(err, ErrIndeterminate) && (step.invalidatesAP || step.apRead || step.apWrite)

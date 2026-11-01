@@ -140,6 +140,9 @@ func (m *MemAP) WriteWord(ctx context.Context, addr, value uint32) error {
 
 // ReadScalar performs one aligned, sized target-memory read. The returned
 // value is right-justified regardless of target byte order or address lane.
+// An ordinary SWD bus FAULT, captured and successfully cleared, leaves this
+// MemAP and its peers usable. An unfinished 64-bit transfer still requires
+// cleanup; the failed access is never replayed.
 func (m *MemAP) ReadScalar(ctx context.Context, addr uint64, size TransferSize) (uint64, error) {
 	return m.readScalar(ctx, addr, size)
 }
@@ -185,6 +188,9 @@ func (m *MemAP) readScalar(ctx context.Context, addr uint64, size TransferSize) 
 // only after the AP completion barrier succeeds.
 // An uncertain JTAG write reports ErrIndeterminate and invalidates the MemAP;
 // Release remains available to restore its saved state.
+// A captured and successfully cleared ordinary SWD bus FAULT leaves this
+// MemAP and its peers usable, although unconfirmed memory effects still report
+// ErrIndeterminate. An unfinished 64-bit transfer still requires cleanup.
 func (m *MemAP) WriteScalar(ctx context.Context, addr uint64, size TransferSize, value uint64) error {
 	if err := m.checkScalar(ctx, addr, size, "write"); err != nil {
 		return err

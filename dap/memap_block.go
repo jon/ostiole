@@ -76,8 +76,10 @@ func validateBlockRange(addr uint64, length int, largeAddress bool) error {
 // configured limit is reached or the operation context ends. If
 // selection, framing, or cleanup becomes uncertain, it returns an error and the
 // debug port requires repair. A FAULT returns the contiguous byte prefix
-// definitely obtained before the fault. Cancellation and transport or protocol
-// failures can also interrupt the read; bytes beyond the returned prefix are
+// definitely obtained before the fault. A captured and successfully cleared
+// ordinary SWD bus FAULT leaves this MemAP and its peers usable.
+// Cancellation and transport or protocol failures can also interrupt the read;
+// bytes beyond the returned prefix are
 // left unchanged. Fixed-frame WAIT cleanup which discards pending AP data
 // reports ErrIndeterminate and invalidates the MemAP, preserving only the
 // confirmed prefix. Release remains available; the accepted read is not replayed.
@@ -221,8 +223,11 @@ func (m *MemAP) putBlockValue(dst []byte, size TransferSize, value uint64) {
 // contiguous byte prefix whose writes have confirmed completion. If
 // the current chunk might have reached memory, the error wraps ErrIndeterminate
 // and WriteBlock does not retry that chunk. An indeterminate chunk invalidates
-// the MemAP; Release remains available to restore its saved state. WriteBlock
-// follows the binding's WAIT policy until the operation context ends or the
+// the MemAP, except after a captured and successfully cleared ordinary SWD
+// bus FAULT: unconfirmed memory effects still report ErrIndeterminate, but
+// this MemAP and its peers remain usable. Release remains available to restore
+// saved state. WriteBlock follows the binding's WAIT policy until the
+// operation context ends or the
 // debug port's configured limit is reached. It never replays an accepted
 // write while waiting for completion. If the MEM-AP does not accept single
 // address increment, WriteBlock writes TAR before each word.
@@ -343,7 +348,7 @@ func (m *MemAP) writeBlockRegister(ctx context.Context, addr uint8, value uint32
 }
 
 func (m *MemAP) markBlockWriteIndeterminate(err error, generation uint64) error {
-	if m.dp.state.apGeneration == generation {
+	if !ordinaryFaultCleared(err) && m.dp.state.apGeneration == generation {
 		m.dp.state.invalidateAP()
 	}
 	if errors.Is(err, ErrIndeterminate) {
