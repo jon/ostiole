@@ -265,6 +265,11 @@ go run ./examples/simple/cortexm-control \
   -provider jlink -serial SERIAL -ap 0 -clock 1000000 -allow-control -step
 ```
 
+For FTDI, add `-function A` or the intended MPSSE function. `-location` filters
+the exact discovery location and may replace `-serial` when the attachment has
+no serial. The provider and at least one exact serial or location are required;
+selection must still be unique before the probe is opened.
+
 The public [debug simulator](cortexm-simulation.md) composes M0 and Secure M33
 control through real shared Arm/SWD/DAP owners with explicit virtual events.
 Focused hardware-independent tests also model DHCSR control and execution state,

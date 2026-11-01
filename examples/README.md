@@ -61,3 +61,8 @@ cleanup then proceeds while preserving that error. Known terminal adapter loss
 skips further protocol traffic and reports the loss while releasing host
 resources. These small programs report remaining cleanup failures; exiting
 cannot restore target state.
+
+`cortexm-control` also accepts exact `-function` and `-location` filters. Select
+the intended FTDI MPSSE function explicitly; a location may replace a missing
+serial. The provider and an exact serial or location are required before the
+effectful example opens a probe.

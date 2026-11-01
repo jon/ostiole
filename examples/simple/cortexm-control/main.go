@@ -26,7 +26,9 @@ func main() {
 
 func run() error {
 	provider := flag.String("provider", "", "required probe provider")
-	serial := flag.String("serial", "", "required probe serial")
+	serial := flag.String("serial", "", "exact probe serial")
+	function := flag.String("function", "", "exact probe function")
+	location := flag.String("location", "", "exact probe location")
 	ap := flag.Int("ap", -1, "required MEM-AP index (0..255)")
 	allow := flag.Bool("allow-control", false, "allow enabling debug, halting, stepping, and resuming the processor")
 	step := flag.Bool("step", false, "perform one architectural step while halted")
@@ -35,11 +37,21 @@ func run() error {
 	if *clock < 1000 || *clock > 1<<32-1 {
 		return errors.New("require -clock 1000..4294967295 Hz")
 	}
-	if !*allow || *provider == "" || *serial == "" || *ap < 0 || *ap > 255 || flag.NArg() != 0 {
-		return errors.New("require -allow-control, -provider, -serial, and -ap 0..255")
+	if !*allow || *ap < 0 || *ap > 255 || flag.NArg() != 0 {
+		return errors.New("require -allow-control and -ap 0..255")
 	}
-	selection := discover.Selection{Provider: discover.ProviderID(*provider), Serial: *serial}
+	selection, err := selectProbe(*provider, *serial, *function, *location)
+	if err != nil {
+		return err
+	}
 	return runControl(selection, dap.NewAPSel(uint8(*ap)), uint32(*clock), *step)
+}
+
+func selectProbe(provider, serial, function, location string) (discover.Selection, error) {
+	if provider == "" || serial == "" && location == "" {
+		return discover.Selection{}, errors.New("require -provider and an exact -serial or -location")
+	}
+	return discover.Selection{Provider: discover.ProviderID(provider), Serial: serial, Function: function, Location: location}, nil
 }
 
 func runControl(selection discover.Selection, ap dap.APSel, clock uint32, step bool) (err error) {
