@@ -78,15 +78,15 @@ known framing. For managed ownership of this sequence, use `armdebug.Open` or
 `armdebug.Connect` with `armdebug.JTAGDP`; see the
 [composition guide](../composition.md#managed-jtag-dp).
 
-## Completed DP register operations
+## Completed register operations
 
 A caller-supplied `dap.RegisterTransport` can provide completed SW-DP register
 operations instead of SWD bits. Bind it with `dap.RegisterDP(transport)`; the
 constructor sends no traffic. This binding supplies DP identity, banked
-registers, power ownership, ordered DP transactions, and restoration. AP and
-MEM-AP operations, including mixed transactions with a DP prefix, are rejected
-before traffic. The existing SWD-wire and JTAG bindings retain AP and memory
-access.
+registers, power ownership, ordered DP/AP transactions, and the existing MEM-AP
+owners. AP reads return their completed value; successful writes include their
+completion barrier. DAP does not interpret an AP value as a posted wire result
+or issue another RDBUFF read.
 
 For example, this helper borrows an already-owned transport and returns the DP
 owner when restoration still needs a retry. The caller keeps the transport open
@@ -115,7 +115,12 @@ sticky state, and returns DPIDR. It owns framing and its ORUNDETECT change;
 re-entry retains the original restoration snapshot. `Release` restores that
 snapshot without closing host resources. DAP retains logical register selection,
 WAIT policy, power, and transaction ordering. Completed DP writes include their
-completion barrier, so DAP does not issue another RDBUFF read for them.
+completion barrier, so DAP does not issue another RDBUFF read for them. The
+transport also implements `ReadAP(ctx, offset)` and
+`WriteAP(ctx, offset, value)` with the same outcome contract. After successful
+connection, acquire memory with `dap.OpenMemAP(ctx, dp, selector)` and use
+`ReadScalar`, `WriteScalar`, `ReadBlock`, or `WriteBlock`. Release the MEM-AP
+before releasing its DP; acquisition snapshots remain owned by that handle.
 
 `RegisterStatus` distinguishes completed, rejected, unsent, and indeterminate
 operations; zero is invalid. A transport completes response-mode cleanup before
@@ -124,11 +129,17 @@ indeterminate outcome. Only rejected requests with an unambiguous WAIT cause are
 retried; additional failures remain visible and stop execution. Accepted or
 uncertain operations are never replayed. Cancellation after completion retains
 confirmed results while stopping the transaction suffix. A malformed status
-makes the port cleanup-only. After failed entry, DAP attempts cleanup under an
-independent bounded context only when the transport reports pending restoration.
-A final release error remains visible on that attempt even if restoration
-finished; later releases are idle. These paths have behavioral coverage with a
-supplied transport; they do not establish support on a physical adapter.
+makes the port cleanup-only. A completed selection prerequisite cannot confirm
+an AP access that was never sent. A captured and successfully cleared ordinary
+bus FAULT during managed memory access leaves the selected and peer MEM-AP
+clients usable. Accepted writes with failed completion report `ErrIndeterminate`
+without replay. A completed or uncertain DAPABORT invalidates existing clients
+even when it returns FAULT; they are never revalidated. After failed entry, DAP
+attempts cleanup under an independent bounded context only when the transport
+reports pending restoration. A final release error remains visible on that
+attempt even if restoration finished; later releases are idle. These paths have
+behavioral coverage with a supplied transport; they do not establish support on
+a physical adapter.
 
 ## Connection identity
 

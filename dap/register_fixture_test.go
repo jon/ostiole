@@ -125,7 +125,11 @@ func (m *registerModel) write(ctx context.Context, req swdsim.Request, value uin
 
 func newRegisterModel(t *testing.T) *registerModel {
 	t.Helper()
-	return &registerModel{target: dapsim.New(0x2ba01477)}
+	target := dapsim.New(0x2ba01477)
+	if err := target.AddMEMAP(dap.NewAPSel(1), 0x24770011, map[uint32]uint32{0x100: 42, 0x104: 43}); err != nil {
+		t.Fatal(err)
+	}
+	return &registerModel{target: target}
 }
 
 type registerLifecycle struct {
@@ -145,4 +149,34 @@ func (m *registerLifecycle) Release(ctx context.Context) error {
 		return m.leave(ctx)
 	}
 	return m.registerModel.Release(ctx)
+}
+
+func (m *registerModel) ReadAP(ctx context.Context, addr uint8) (uint32, dap.RegisterStatus, error) {
+	value, status, err := m.read(ctx, apRead(addr))
+	if err != nil {
+		return value, status, err
+	}
+	if ackErr := m.target.Acknowledge(ctx, dpRead(12)); ackErr != nil {
+		return 0, dap.RegisterCompleted, dap.ErrFault
+	}
+	value, err = m.target.Read(ctx, dpRead(12))
+	if err == nil && m.afterRead && m.failFor == apRead(addr) && m.failCause != nil {
+		err = m.failCause
+		m.failCause = nil
+		status = m.failStatus
+		if m.onCompletion != nil {
+			m.onCompletion()
+		}
+	}
+	return value, status, err
+}
+
+func (m *registerModel) WriteAP(ctx context.Context, addr uint8, value uint32) (dap.RegisterStatus, error) {
+	status, err := m.write(ctx, apWrite(addr), value)
+	if err == nil {
+		if ackErr := m.target.Acknowledge(ctx, dpRead(12)); ackErr != nil {
+			return dap.RegisterIndeterminate, dap.ErrFault
+		}
+	}
+	return status, err
 }

@@ -23,8 +23,7 @@ const (
 
 // RegisterTransport supplies completed SW-DP register operations. Addresses
 // are physical register offsets 0, 4, 8 or 12; DebugPort owns logical selection.
-// Successful writes include completion. This binding supplies DP operations;
-// AP and MEM-AP operations are rejected before traffic.
+// AP reads return completed values, and successful writes include completion.
 // Rejected WAIT includes response-mode cleanup and matches ErrWait.
 // Additional failures stop retry; failed completion is indeterminate.
 // FAULT errors match ErrFault.
@@ -51,9 +50,11 @@ type RegisterTransport interface {
 	CleanupPending() bool
 	ReadDP(context.Context, uint8) (uint32, RegisterStatus, error)
 	WriteDP(context.Context, uint8, uint32) (RegisterStatus, error)
+	ReadAP(context.Context, uint8) (uint32, RegisterStatus, error)
+	WriteAP(context.Context, uint8, uint32) (RegisterStatus, error)
 }
 
-// RegisterDP binds a non-nil completed DP transport without traffic.
+// RegisterDP binds a non-nil completed-register SW-DP transport without traffic.
 // Typed nil transports are invalid.
 // Give DebugPort exclusive use until Release succeeds. Existing wire
 // compositions continue to use SWDP(swd.New(wire)); completed transports use

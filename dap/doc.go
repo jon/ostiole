@@ -1,8 +1,8 @@
 // Package dap manages an Arm Debug Access Port over SWD or baseline ADIv5 JTAG-DP.
 //
 // Construct a Port with SWDP, JTAGDP, or RegisterDP and pass it to NewDebugPort.
-// RegisterDP accepts completed DP operations from a caller-supplied transport.
-// That binding rejects AP and MEM-AP operations before traffic. These
+// RegisterDP accepts completed DP and AP operations from a supplied transport.
+// All three bindings support the same MEM-AP owners. These
 // constructors send no traffic; Connect validates the binding, enters the
 // protocol, and acquires volatile debug-port state. JTAG requires a complete
 // explicit chain and zero-based, TDO-first TAP index with a four- or eight-bit IR.
@@ -95,7 +95,8 @@
 // A Txn queues an ordered group of DP and AP operations. Commit validates the
 // complete queue, settles any earlier immediate DP write, then sends queued
 // traffic through a private SWD or JTAG executor. ADIv5 SWD retains packed
-// frames; ADIv6 and JTAG complete each logical AP operation in order. JTAG
+// frames; ADIv6, JTAG, and completed-register transports execute each logical
+// AP operation in order. JTAG
 // checks CTRL/STAT after each
 // AP operation, because its acknowledgement combines OK and FAULT.
 // ReadResult.Value reports data from a queued read; WriteResult.Err reports

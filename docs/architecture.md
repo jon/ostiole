@@ -281,8 +281,9 @@ individual transaction results while retaining their original causes.
 transport. The transport owns entry, response framing, its ORUNDETECT change,
 and protocol release. DAP owns logical DP register selection, WAIT retries,
 power, ordered transactions, and restoration. A completed write includes its
-completion barrier. This binding supplies DP operations; AP and MEM-AP calls are
-rejected during preflight, including mixed transactions before their DP prefix.
+completion barrier, and AP reads return their completed values. The binding uses
+the same AP and MEM-AP owners and restores their saved CSW, TAR, and TARHI
+values. DAP does not post the read again or issue another completion barrier.
 Rejected requests remain distinct from accepted or uncertain operations. No host
 resource is closed by this binding.
 

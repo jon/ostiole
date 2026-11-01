@@ -99,7 +99,7 @@ func (dp *DebugPort) ReadRawAP(ctx context.Context, addr APAddress) (uint32, err
 		return 0, err
 	}
 	generation := dp.state.apGeneration
-	possible, result, err := dp.readAPEffect(ctx, addr.sel, value)
+	possible, result, err := dp.readAPEffect(ctx, addr.sel, value, false)
 	if possible && dp.state.apGeneration == generation {
 		dp.state.invalidateAP()
 	}
@@ -107,22 +107,22 @@ func (dp *DebugPort) ReadRawAP(ctx context.Context, addr APAddress) (uint32, err
 }
 
 func (dp *DebugPort) readAP(ctx context.Context, sel APSel, addr uint8) (uint32, error) {
-	_, value, err := dp.readAPEffect(ctx, sel, sel.register(addr))
+	_, value, err := dp.readAPEffect(ctx, sel, sel.register(addr), false)
 	return value, err
 }
 
-func (dp *DebugPort) readAPEffect(ctx context.Context, sel APSel, addr uint16) (bool, uint32, error) {
+func (dp *DebugPort) readAPEffect(ctx context.Context, sel APSel, addr uint16, preserveAP bool) (bool, uint32, error) {
 	if _, err := validateAPAddress(APAddress{sel: sel, value: addr}, false); err != nil {
 		return false, 0, err
 	}
 	if err := dp.selectAP(ctx, sel, addr); err != nil {
-		return false, 0, err
+		return false, 0, &requestNotSentError{cause: errors.Join(ErrNotExecuted, err)}
 	}
 	if dp.jtag != nil {
 		result := dp.jtag.accessAP(ctx, apTransferRequest(uint8(addr&0x0c), true), 0)
 		return result.outcome != transferUnsent && result.outcome != transferRejected, result.data, jtagResultError(result)
 	}
-	return dp.conn.readAP(ctx, sel, addr)
+	return dp.conn.readAP(ctx, sel, addr, preserveAP)
 }
 
 // WriteRawAP writes the register at one complete access-port address and waits
@@ -142,7 +142,7 @@ func (dp *DebugPort) WriteRawAP(ctx context.Context, addr APAddress, value uint3
 		return err
 	}
 	generation := dp.state.apGeneration
-	possible, err := dp.writeAPEffect(ctx, addr.sel, address, value)
+	possible, err := dp.writeAPEffect(ctx, addr.sel, address, value, false)
 	if possible && dp.state.apGeneration == generation {
 		dp.state.invalidateAP()
 	}
@@ -150,22 +150,22 @@ func (dp *DebugPort) WriteRawAP(ctx context.Context, addr APAddress, value uint3
 }
 
 func (dp *DebugPort) writeAP(ctx context.Context, sel APSel, addr uint8, value uint32) error {
-	_, err := dp.writeAPEffect(ctx, sel, sel.register(addr), value)
+	_, err := dp.writeAPEffect(ctx, sel, sel.register(addr), value, false)
 	return err
 }
 
-func (dp *DebugPort) writeAPEffect(ctx context.Context, sel APSel, addr uint16, value uint32) (bool, error) {
+func (dp *DebugPort) writeAPEffect(ctx context.Context, sel APSel, addr uint16, value uint32, preserveAP bool) (bool, error) {
 	if _, err := validateAPAddress(APAddress{sel: sel, value: addr}, true); err != nil {
 		return false, err
 	}
 	if err := dp.selectAP(ctx, sel, addr); err != nil {
-		return false, err
+		return false, &requestNotSentError{cause: errors.Join(ErrNotExecuted, err)}
 	}
 	if dp.jtag != nil {
 		result := dp.jtag.accessAP(ctx, apTransferRequest(uint8(addr&0x0c), false), value)
 		return result.outcome != transferUnsent && result.outcome != transferRejected, jtagResultError(result)
 	}
-	return dp.conn.writeAP(ctx, sel, addr, value)
+	return dp.conn.writeAP(ctx, sel, addr, value, preserveAP)
 }
 
 func (dp *DebugPort) selectAP(ctx context.Context, sel APSel, addr uint16) error {
