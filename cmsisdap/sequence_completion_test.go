@@ -372,3 +372,5 @@ func TestSWDIOCancellationBeforeOUTRetainsUsableSession(t *testing.T) {
 		t.Fatalf("unsent operation damaged session: %v", err)
 	}
 }
+
+func (t *completionTransfer) Aborted() bool { return t.inner.Aborted() }

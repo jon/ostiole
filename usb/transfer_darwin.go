@@ -47,14 +47,15 @@ type iokitBulkAbort struct {
 }
 
 type iokitBulkTransfer struct {
-	engine   *iokitBulkEngine
-	endpoint uint8
-	buffer   []byte
-	native   darwinBulkRequest
-	done     chan struct{}
-	mu       sync.Mutex
-	count    int
-	err      error
+	wasAborted bool
+	engine     *iokitBulkEngine
+	endpoint   uint8
+	buffer     []byte
+	native     darwinBulkRequest
+	done       chan struct{}
+	mu         sync.Mutex
+	count      int
+	err        error
 }
 
 func darwinBulkCompletion(count uint32, err error) (uint32, error) {
@@ -173,11 +174,12 @@ func (e *iokitBulkEngine) takeCompletions(transfers map[*iokitBulkTransfer]struc
 		count, err := darwinBulkCompletion(event.count, event.err)
 		if uint64(count) > uint64(len(transfer.buffer)) {
 			count, err = 0, errors.New("usb: native bulk completion exceeds buffer length")
+			event.aborted = false
 		}
 		transfer.native.free()
 		transfer.native = nil
 		delete(transfers, transfer)
-		transfer.complete(int(count), err)
+		transfer.complete(int(count), err, event.aborted)
 		taken = true
 	}
 	return taken
@@ -312,8 +314,15 @@ func (t *iokitBulkTransfer) result() (int, error) {
 	return t.count, t.err
 }
 
-func (t *iokitBulkTransfer) complete(count int, err error) {
+func (t *iokitBulkTransfer) aborted() bool {
 	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.wasAborted
+}
+
+func (t *iokitBulkTransfer) complete(count int, err error, aborted bool) {
+	t.mu.Lock()
+	t.wasAborted = aborted && err != nil
 	if err == nil {
 		t.count = count
 	} else {

@@ -54,7 +54,7 @@ func (n *testIOKitNative) abort(pipe uint8) error {
 		for _, r := range n.requests {
 			if r.pipe == pipe && r.freed == 0 {
 				r.ready = true
-				r.event = darwinBulkEvent{available: true, err: context.Canceled}
+				r.event = darwinBulkEvent{available: true, aborted: true, err: context.Canceled}
 			}
 		}
 	}
@@ -281,5 +281,54 @@ func TestIOKitSuccessIsNotError(t *testing.T) {
 	}
 	if err := iokitErrorCode(1); err == nil {
 		t.Fatal("failed native operation returned nil")
+	}
+}
+
+func TestIOKitAbortCompletionClassification(t *testing.T) {
+	for _, test := range []struct {
+		result, cleanup, count uint32
+		want                   bool
+	}{{0xe00002eb, 0, 0, true}, {0xe00002eb, 0, 1, false}, {0xe00002eb, 1, 0, false}, {0, 0, 0, false}, {0xe00002ed, 0, 0, false}} {
+		if got := iokitAbortCompletion(test.result, test.cleanup, test.count); got != test.want {
+			t.Fatalf("abort result=%#x cleanup=%#x count=%d: %t want%t", test.result, test.cleanup, test.count, got, test.want)
+		}
+	}
+}
+
+func TestIOKitAbortedObservationPreservesNativeFailure(t *testing.T) {
+	native := &testIOKitNative{}
+	engine := startIOKitEngine(t, native)
+	engine.cleanupTimeout = time.Second
+	transfer := submitIOKit(t, engine, 0x81)
+	if transfer.Aborted() {
+		t.Fatal("pending native request reports aborted")
+	}
+	if err := engine.abort(0x81); err != nil {
+		t.Fatal(err)
+	}
+	if !transfer.Aborted() {
+		t.Fatal("drained native abort not reported")
+	}
+	if count, err := transfer.Wait(t.Context()); count != 0 || !errors.Is(err, context.Canceled) {
+		t.Fatalf("native abort completion=%d,%v", count, err)
+	}
+}
+
+func TestIOKitAbortWithCleanupFailurePreservesBothCauses(t *testing.T) {
+	native := &testIOKitNative{}
+	engine := startIOKitEngine(t, native)
+	transfer := submitIOKit(t, engine, 0x81)
+	abortCause := errors.New("native aborted completion")
+	cleanupCause := errors.New("native pipe cleanup failure")
+	native.mu.Lock()
+	request := native.requests[0]
+	request.event = darwinBulkEvent{available: true, err: errors.Join(abortCause, cleanupCause)}
+	request.ready = true
+	native.mu.Unlock()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	count, err := transfer.Wait(ctx)
+	if count != 0 || !errors.Is(err, abortCause) || !errors.Is(err, cleanupCause) || transfer.Aborted() {
+		t.Fatalf("mixed native completion=%d,%v aborted=%t", count, err, transfer.Aborted())
 	}
 }

@@ -26,7 +26,6 @@ func (c *lifecycleClaim) SubmitBulk(ctx context.Context, endpoint uint8, buffer 
 	return c.peerUSBClaim.SubmitBulk(ctx, endpoint, buffer)
 }
 func (c *lifecycleClaim) AbortBulk(endpoint uint8) error {
-	c.pendingIn = nil
 	return c.peerUSBClaim.AbortBulk(endpoint)
 }
 func (c *lifecycleClaim) Close() error {

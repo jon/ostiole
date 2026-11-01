@@ -581,6 +581,24 @@ current alternate setting; a new claim does not imply alternate zero. If
 alternate selection fails, the next endpoint lookup reads the host state again
 instead of retaining descriptors for the previous alternate.
 
+A successful `AbortBulk` does not prove that an IN request received no packet:
+completion can race with the abort. Inspect the stable result with a fresh
+bounded observation context after the drain:
+
+```go
+observeCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+received, completionErr := input.Wait(observeCtx)
+cancel()
+aborted := input.Aborted()
+```
+
+`Aborted` reports a completed native abort with no transferred data and no other
+transfer or native cleanup failure. It sends no traffic; nil, zero, and pending
+transfers report false. `Wait` retains the original native error. A successful
+completion can contain a packet even when the earlier wait timed out. The
+adapter decides whether an abort was expected and what the received data means;
+the query does not release the claim or establish protocol restoration.
+
 ## Managed JTAG-DP
 
 Select JTAG-DP through the same `Open` or `Connect` calls. The configuration

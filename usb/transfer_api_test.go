@@ -35,11 +35,12 @@ func (d *scriptedTransferDevice) ControlTransfer(_ context.Context, requestType,
 }
 
 type fakeBulkTransferBackend struct {
-	done       chan struct{}
-	failed     chan struct{}
-	count      int
-	err        error
-	failureErr error
+	abortStatus bool
+	done        chan struct{}
+	failed      chan struct{}
+	count       int
+	err         error
+	failureErr  error
 }
 
 func (b *fakeBulkTransferBackend) completion() <-chan struct{} { return b.done }
@@ -116,5 +117,34 @@ func TestClaimedInterfaceEndpointsFollowCurrentAlternate(t *testing.T) {
 	}
 	if _, ok := endpoints[0x81]; ok {
 		t.Fatalf("alternate zero endpoint remained active: %#v", endpoints[0x81])
+	}
+}
+
+func (b *fakeBulkTransferBackend) aborted() bool { return b.abortStatus }
+
+func TestBulkTransferAbortedWaitsForStableCompletion(t *testing.T) {
+	var absent *BulkTransfer
+	for _, transfer := range []*BulkTransfer{absent, {}} {
+		if transfer.Aborted() {
+			t.Fatal("inactive transfer reports abort")
+		}
+	}
+	cause := errors.New("native abort completion")
+	backend := &fakeBulkTransferBackend{done: make(chan struct{}), abortStatus: true, err: cause}
+	transfer := &BulkTransfer{backend: backend}
+	if transfer.Aborted() {
+		t.Fatal("pending transfer reports completed abort")
+	}
+	close(backend.done)
+	if !transfer.Aborted() {
+		t.Fatal("completed native abort not observable")
+	}
+	if count, err := transfer.Wait(t.Context()); count != 0 || !errors.Is(err, cause) {
+		t.Fatalf("abort observation lost native error: %d,%v", count, err)
+	}
+	backend = &fakeBulkTransferBackend{done: make(chan struct{}), err: errors.New("ordinary failure")}
+	close(backend.done)
+	if (&BulkTransfer{backend: backend}).Aborted() {
+		t.Fatal("ordinary completion failure classified as abort")
 	}
 }

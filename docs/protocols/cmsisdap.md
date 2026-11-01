@@ -50,6 +50,19 @@ firmware version. A missing product or serial uses the corresponding USB string.
 The USB package does not currently expose a manufacturer string, so a missing
 CMSIS-DAP vendor remains empty.
 
+Before the first metadata command, `Open` discards stale command-IN data until
+one read waits for 100 ms without receiving a packet. Each discarded packet
+starts a fresh quiet interval, within one second for the whole synchronization
+attempt. Caller cancellation or expiration ends the attempt, and continuous
+input produces an explicit resynchronization error before metadata is sent. The
+timed-out IN request is aborted and drained before a new command is posted; USB
+abort and failed-open cleanup retain their own bounds and errors.
+
+This adds at least 100 ms to an otherwise idle open. It permits explicit reopen
+after a poisoned exchange whose old replies arrive within the drain window. It
+cannot exclude arbitrarily delayed firmware replies after that window, and it
+does not retry an ambiguous command or revalidate a poisoned session.
+
 The packet-size query begins with the active bulk IN maximum packet size as a
 bootstrap response capacity. Once the probe reports its command packet size,
 every later command and response uses that negotiated limit. Packet count is

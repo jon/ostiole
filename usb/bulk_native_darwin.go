@@ -10,6 +10,7 @@ import "C"
 import "runtime"
 
 type darwinBulkEvent struct {
+	aborted   bool
 	available bool
 	count     uint32
 	err       error
@@ -64,8 +65,13 @@ func (r *nativeIOKitRequest) take(buffer []byte) darwinBulkEvent {
 	runtime.KeepAlive(buffer)
 	return darwinBulkEvent{
 		available: event.available != 0,
+		aborted:   iokitAbortCompletion(uint32(event.transfer.result), uint32(event.transfer.cleanup), uint32(event.transfer.done)),
 		count:     uint32(event.transfer.done),
 		err:       iokitTransferError(uint32(event.transfer.result), uint32(event.transfer.cleanup)),
 	}
 }
 func (r *nativeIOKitRequest) free() { C.ostiole_usb_bulk_transfer_free(r.native) }
+
+func iokitAbortCompletion(result, cleanup, count uint32) bool {
+	return C.kern_return_t(result) == C.kIOReturnAborted && cleanup == uint32(C.kIOReturnSuccess) && count == 0
+}

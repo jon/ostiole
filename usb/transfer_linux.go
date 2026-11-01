@@ -76,17 +76,18 @@ type linuxBulkAbort struct {
 }
 
 type linuxBulkTransfer struct {
-	engine   *linuxBulkEngine
-	endpoint uint8
-	buffer   []byte
-	data     []byte
-	urb      usbURB
-	pinner   runtime.Pinner
-	done     chan struct{}
-	mu       sync.Mutex
-	count    int
-	err      error
-	pending  bool
+	wasAborted bool
+	engine     *linuxBulkEngine
+	endpoint   uint8
+	buffer     []byte
+	data       []byte
+	urb        usbURB
+	pinner     runtime.Pinner
+	done       chan struct{}
+	mu         sync.Mutex
+	count      int
+	err        error
+	pending    bool
 }
 
 func (d *Device) openBulkTransfers(claim *ClaimedInterface) (bulkTransferEngine, error) {
@@ -394,8 +395,15 @@ func (t *linuxBulkTransfer) result() (int, error) {
 	return t.count, t.err
 }
 
+func (t *linuxBulkTransfer) aborted() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.wasAborted
+}
+
 func (t *linuxBulkTransfer) complete(err error) {
 	t.mu.Lock()
+	t.wasAborted = err != nil && t.urb.ActualLength == 0 && (t.urb.Status == -int32(syscall.ENOENT) || t.urb.Status == -int32(syscall.ECONNRESET))
 	if err == nil {
 		t.count = int(t.urb.ActualLength)
 		if t.endpoint&0x80 != 0 {
