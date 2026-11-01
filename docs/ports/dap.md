@@ -739,12 +739,21 @@ DRW lanes, posted reads, 64-bit transfer phases and TAR incrementing. Narrow
 writes do not synthesize a device read/modify/write. A device can reject widths
 it does not support.
 
-An access crossing a mapping boundary faults before any device or ordinary
-memory effect. Empty, overflowing, overlapping and nil-device mappings are
-rejected, and mappings cannot change once target traffic starts. `SetMEMAPBytes`
-and `MEMAPBytes` reject any nonempty range overlapping a device; they neither
-invoke callbacks nor silently access the hidden fixture bytes. Serialize target
-traffic, fixture changes, and all views of shared devices.
+Inactive DRW byte lanes contain `0xa5` in this simulator, so a subword reader
+must mask its result. Filling those lanes does not read neighboring bytes from a
+mapped device. CFG, BASE and IDR ignore raw writes; fixture setters still
+configure their modeled values. MEM-AP banked data registers BD0–BD3 are not
+modeled and return an explicit model error.
+
+Raw unaligned DRW accesses retain ordinary byte-memory behavior outside device
+mappings. Unmapped halfwords crossing a DRW word boundary wrap their active
+lanes modulo four; that layout is a simulator choice. Mapped accesses require
+natural alignment. An access crossing a mapping boundary faults before any
+device or ordinary memory effect. Empty, overflowing, overlapping and nil-device
+mappings are rejected, and mappings cannot change once target traffic starts.
+`SetMEMAPBytes` and `MEMAPBytes` reject any nonempty range overlapping a device;
+they neither invoke callbacks nor silently access the hidden fixture bytes.
+Serialize target traffic, fixture changes, and all views of shared devices.
 
 A device returns `dapsim.ErrBusFault` to model a completed bus error. The
 accepted AP data phase sets DP STICKYERR, and a later request observes SWD
