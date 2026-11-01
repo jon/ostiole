@@ -64,7 +64,15 @@ func (d *Device) runIOCTL(request uintptr, argument any) (uintptr, error) {
 	if ioctl == nil {
 		ioctl = usbfsIOCTL
 	}
-	return ioctl(d.file.Fd(), request, argument)
+	result, err := ioctl(d.file.Fd(), request, argument)
+	return result, linuxUSBError(err)
+}
+
+func linuxUSBError(err error) error {
+	if errors.Is(err, syscall.ENODEV) {
+		return errors.Join(ErrDeviceGone, err)
+	}
+	return err
 }
 
 func usbfsIOCTL(fd, request uintptr, argument any) (uintptr, error) {
