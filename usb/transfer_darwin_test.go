@@ -148,38 +148,25 @@ func TestDarwinReclaimedInterfaceUsesItsSelectedAlternate(t *testing.T) {
 	}
 }
 
-func TestDarwinSelectedAlternateUsesEnumeratedPipeDescriptors(t *testing.T) {
-	nativeInterface := &fakeDarwinInterface{pipesValue: []darwinPipe{
-		{endpoint: 0x02, ref: 4, transferType: darwinBulkPipe, maxPacketSize: 64},
-		{endpoint: 0x81, ref: 7, transferType: darwinBulkPipe, maxPacketSize: 512},
-	}}
-	native := &fakeDarwinEndpointDevice{
-		fakeDarwinInterfaceDevice: fakeDarwinInterfaceDevice{iface: nativeInterface},
-		t:                         t,
-	}
-	device := &Device{handle: native}
-	claim, err := device.ClaimInterface(0)
-	if err != nil {
+func TestDarwinSelectedAlternateUsesConfigurationDescriptors(t *testing.T) {
+	raw := rawConfiguration(7, 1, interfaceDescriptor(0, 0, 0), interfaceDescriptor(0, 1, 2),
+		endpointDescriptor(0x02), []byte{7, 5, 0x81, 2, 0, 2, 0})
+	claim, host, _ := newDarwinRoutingClaim(t, raw, []darwinPipe{
+		{endpoint: 0x02, ref: 4, transferType: darwinBulkPipe, maxPacketSize: 1024},
+		{endpoint: 0x81, ref: 7, transferType: darwinBulkPipe, maxPacketSize: 1024},
+	})
+	host.alternate = 1
+	if err := claim.SetAltSetting(1); err != nil {
 		t.Fatal(err)
 	}
-	if err := claim.SetAltSetting(2); err != nil {
-		t.Fatal(err)
-	}
-
 	for _, want := range []Endpoint{
 		{Address: 0x02, TransferType: TransferBulk, MaxPacketSize: 64},
 		{Address: 0x81, TransferType: TransferBulk, MaxPacketSize: 512},
 	} {
-		endpoint, err := claim.Endpoint(context.Background(), want.Address)
-		if err != nil {
-			t.Fatal(err)
+		endpoint, err := claim.Endpoint(t.Context(), want.Address)
+		if err != nil || endpoint != want {
+			t.Fatalf("Endpoint(%#02x) = %#v, %v; want %#v", want.Address, endpoint, err, want)
 		}
-		if endpoint != want {
-			t.Fatalf("Endpoint(%#02x) = %#v, want %#v", want.Address, endpoint, want)
-		}
-	}
-	if native.calls != 0 {
-		t.Fatalf("control transfers after alternate selection = %d, want 0", native.calls)
 	}
 }
 
