@@ -333,6 +333,16 @@ when the WAIT arrived, the ABORT used to clear STICKYORUN can abandon that
 write. Settle SELECT through RDBUFF before sending an AP or banked-DP request,
 rather than guessing which selection survived after cleanup.
 
+Packed SWD transactions isolate DP reads at physical offsets `0x00` and `0x04`,
+including logical banked reads such as `DLCR` or `DPIDR1`. If their preceding
+SELECT is rejected, the wire request may still reach bank-zero DPIDR or
+CTRL/STAT, which can complete despite sticky state. Keeping that read out of the
+failed selection's batch avoids treating its valid response as an impossible
+suffix. A clean SELECT WAIT retries only the rejected physical request. A SELECT
+FAULT is cleared and returned without replay; after successful recovery the port
+remains usable, earlier logical results remain confirmed, and later queued
+operations stay unsent.
+
 Changing ORUNDETECT has the same write-data boundary as SELECT. Keep using the
 old response grammar through a following RDBUFF read. An OK acknowledgement
 proves the CTRL/STAT write took effect even if the unused RDBUFF data has bad
