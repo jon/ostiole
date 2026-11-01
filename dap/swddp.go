@@ -60,6 +60,7 @@ type DebugPort struct {
 	reentryID      Identity
 	reentryKnown   bool
 	state          debugPortState
+	memAPs         map[APSel]struct{}
 }
 
 // NewDebugPort returns a client for port without traffic. Use SWDP or JTAGDP

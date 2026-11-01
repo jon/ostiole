@@ -155,6 +155,10 @@ func TestReadMEMAPDebugBaseFailureAndRetry(t *testing.T) {
 					t.Fatalf("restored register %#x=%#x, %v", reg, got, readErr)
 				}
 			}
+			releaseDebugBaseTest(t, dp.Release)
+			if _, err := dp.Connect(t.Context()); err != nil {
+				t.Fatal(err)
+			}
 			mem, err = dap.OpenMemAP(t.Context(), dp, apSel(17))
 			if err != nil {
 				t.Fatal(err)

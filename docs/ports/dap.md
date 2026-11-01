@@ -125,6 +125,19 @@ context. The option does not change the deadline for ordinary operations, and
 `Connect` rejects nonpositive durations before sending traffic. On SWD, DAP
 passes this budget to restoration inside a failed transport `Connect`.
 
+Each MEM-AP selector has one handle for a connected debug-port session.
+`dap.OpenMemAP(ctx, dp, ap)` rejects duplicate acquisition before traffic, even
+after that handle's `Release`. A still-valid handle can be reused within the
+same session; each release restores its original acquisition snapshot. Raw AP
+access or recovery invalidation still leaves that handle stale. Release does not
+revalidate it. Failed acquisition does not reserve a selector.
+
+Release MEM-APs before the debug port. After `dp.Release(ctx)` and a new
+`dp.Connect(ctx)`, call `dap.OpenMemAP` for a fresh handle. Earlier-session
+handles reject scalar and block accesses and cannot restore pending old
+snapshots into the new session. Protocol re-entry during cleanup stays within
+the current session.
+
 Explicit `MemAP.Release(ctx)` and `DebugPort.Release(ctx)` use the supplied
 context for re-entry and restoration. A canceled or expired context before
 traffic preserves pending restoration for a fresh-context retry. Recovery inside
