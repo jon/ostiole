@@ -114,12 +114,12 @@ func TestDormantAbsentTargetHasBoundedAttempts(t *testing.T) {
 	if _, err := conn.Connect(t.Context()); !errors.Is(err, swd.ErrProtocol) {
 		t.Fatalf("Connect(): %v", err)
 	}
-	if wire.entries != 2 || wire.activations != 2 || wire.requests != 4 {
-		t.Fatalf("connection plus cleanup counts = %+v", wire)
+	if wire.entries != 1 || wire.activations != 1 || wire.requests != 2 {
+		t.Fatalf("unowned entry counts = %+v", wire)
 	}
 }
 
-func TestDormantActivationCancellationUsesIndependentCleanup(t *testing.T) {
+func TestDormantActivationCancellationLeavesNoRestoration(t *testing.T) {
 	target := &connectionTarget{dpidr: 0x4c013477}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -128,7 +128,7 @@ func TestDormantActivationCancellationUsesIndependentCleanup(t *testing.T) {
 	if _, err := conn.Connect(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Connect(): %v", err)
 	}
-	if wire.entries != 2 || wire.activations != 1 {
+	if wire.entries != 1 || wire.activations != 0 {
 		t.Fatalf("entry/activation counts = %d/%d", wire.entries, wire.activations)
 	}
 	if err := conn.Release(t.Context()); err != nil {

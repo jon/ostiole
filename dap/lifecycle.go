@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/jon/ostiole/swd"
 )
 
 const (
@@ -22,7 +24,8 @@ const (
 // mode and restores its ORUNDETECT change during Release. If connection setup
 // fails, Connect attempts bounded cleanup before returning the original error.
 // A cleanup failure is joined to that error; Release may then be retried,
-// while other DP, AP, transaction, and MEM-AP operations remain blocked.
+// while other DP, AP, transaction, and MEM-AP operations remain blocked. Failed
+// JTAG validation before any DP state is acquired leaves Release idle.
 func (dp *DebugPort) Connect(ctx context.Context) (Identity, error) {
 	if err := dp.validateConnect(ctx); err != nil {
 		return Identity{}, err
@@ -73,6 +76,10 @@ func (dp *DebugPort) validateConnect(ctx context.Context) error {
 func (dp *DebugPort) connectLink(ctx context.Context) (Identity, uint32, error) {
 	if dp.jtag != nil {
 		if err := dp.jtag.enter(ctx); err != nil {
+			if !dp.reentryKnown && dp.state.ownedPower == 0 && !dp.jtag.ownedOverrun && !dp.jtag.abortRequired && !dp.jtag.faultPending {
+				dp.completeRelease()
+				return Identity{}, 0, err
+			}
 			return Identity{}, 0, dp.failConnect(err)
 		}
 		state, err := dp.jtag.configure(ctx)
@@ -165,6 +172,8 @@ func (dp *DebugPort) failConnect(cause error) error {
 // Once an attempt starts, other DP and AP operations remain blocked until
 // Release succeeds. Supply a fresh bounded context for cleanup retries.
 // Recovery inside a failed transport operation retains its independent budget.
+// A failed SWD link release makes the next attempt re-enter before DP traffic;
+// a release rejected before wire traffic does not lose known framing.
 func (dp *DebugPort) Release(ctx context.Context) error {
 	if !dp.bound() {
 		return nil
@@ -202,6 +211,9 @@ func (dp *DebugPort) releaseLink(ctx context.Context) error {
 		return dp.jtag.release(ctx)
 	}
 	if err := dp.conn.Release(ctx); err != nil {
+		if !errors.Is(err, swd.ErrNotExecuted) {
+			dp.state.loseFraming()
+		}
 		return fmt.Errorf("dap: release SWD transport: %w", err)
 	}
 	return nil

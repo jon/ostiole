@@ -14,7 +14,7 @@ var (
 	// ErrBatchCommitted reports reuse of a single-use batch.
 	ErrBatchCommitted = errors.New("swd: batch is already committed")
 	// ErrNotExecuted reports an operation not sent because validation or
-	// earlier execution stopped the batch.
+	// earlier execution stopped the operation or batch.
 	ErrNotExecuted = errors.New("swd: operation was not executed")
 	// ErrIndeterminate reports an operation whose frame might have taken effect.
 	ErrIndeterminate = errors.New("swd: operation outcome is indeterminate")

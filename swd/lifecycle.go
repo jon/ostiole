@@ -29,7 +29,9 @@ const (
 // and uses overrun framing only if the bit reads back as set. Release later
 // restores the setting found during bootstrap but does not restore SELECT
 // or cleared sticky state. Connect cleans up a failed attempt when
-// possible; a joined cleanup error leaves Release available for retry.
+// possible; a joined cleanup error leaves Release available for retry. A first
+// failure before the inherited ORUNDETECT setting is captured owns no
+// restoration, so Release is then idle. Earlier acquired state is retained.
 // A bootstrap WAIT triggers one fresh entry and DAPABORT before retrying.
 // This can abandon an inherited AP transaction. Calling Connect again repairs
 // framing and rejects a changed DPIDR.
@@ -82,6 +84,10 @@ func (c *Conn) cleanupFailedConnect(connectErr *error) {
 	if *connectErr == nil {
 		return
 	}
+	if !c.originalKnown {
+		c.finishRelease()
+		return
+	}
 	if c.state == connectionIdle {
 		return
 	}
@@ -96,13 +102,14 @@ func (c *Conn) cleanupFailedConnect(connectErr *error) {
 // release retains enough state for another call to retry. Framing repair
 // uses the same dormant fallback as Connect. Release leaves SWD selected;
 // it does not restore the prior interface mode. Release is harmless on an
-// idle or nil connection.
+// idle or nil connection. Cancellation before a release attempt returns an
+// error matching ErrNotExecuted as well as the context error.
 func (c *Conn) Release(ctx context.Context) error {
 	if c == nil || c.wire == nil || c.state == connectionIdle {
 		return nil
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return notExecuted(err)
 	}
 	if err := c.prepareRelease(ctx); err != nil {
 		return err

@@ -122,11 +122,21 @@ func TestBootstrapRetryRejectsChangedIdentityBeforeAbort(t *testing.T) {
 	if target.aborts != 0 || target.ctrlWrites != 0 {
 		t.Fatalf("changed device received aborts=%d control writes=%d", target.aborts, target.ctrlWrites)
 	}
+	before := target.aborts
 	target.dpidr = 0x2ba01477
 	if err := conn.Release(t.Context()); err != nil {
 		t.Fatal(err)
 	}
+	if !target.stalled || target.aborts != before {
+		t.Fatal("unowned release changed inherited stalled work")
+	}
+	if _, err := conn.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Release(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	if target.stalled {
-		t.Fatal("original device could not complete cleanup")
+		t.Fatal("fresh entry did not recover original target")
 	}
 }

@@ -82,15 +82,15 @@ func TestNewDebugPortIgnoresZeroOption(t *testing.T) {
 	}
 }
 
-func TestConnectRepairsFailedInitialProtocolEntry(t *testing.T) {
+func TestFailedInitialProtocolEntryLeavesNoRestoration(t *testing.T) {
 	entryErr := errors.New("injected protocol-entry failure")
 	wire := &entryFailureWire{inner: swdsim.New(sim.New(0x2ba01477)), entryErrors: []error{entryErr}}
 	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
 	if _, err := dp.Connect(t.Context()); !errors.Is(err, entryErr) {
 		t.Fatalf("Connect() error = %v, want %v", err, entryErr)
 	}
-	if wire.entries != 2 {
-		t.Fatalf("SWD entries after automatic repair = %d, want 2", wire.entries)
+	if wire.entries != 1 {
+		t.Fatalf("unowned SWD entry count = %d, want 1", wire.entries)
 	}
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatalf("Connect() after automatic repair: %v", err)
@@ -113,23 +113,24 @@ func TestCanceledConnectSendsNoTraffic(t *testing.T) {
 	}
 }
 
-func TestFailedInitialEntryRepairLeavesCleanupPending(t *testing.T) {
-	entryErr := errors.New("injected protocol-entry failure")
-	repairErr := errors.New("injected protocol-entry repair failure")
-	wire := &entryFailureWire{inner: swdsim.New(sim.New(0x2ba01477)), entryErrors: []error{entryErr, repairErr}}
+func TestRepeatedInitialEntryFailuresLeaveNoCleanup(t *testing.T) {
+	entryErr, nextErr := errors.New("first entry failed"), errors.New("next entry failed")
+	wire := &entryFailureWire{inner: swdsim.New(sim.New(0x2ba01477)), entryErrors: []error{entryErr, nextErr}}
 	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
-	if _, err := dp.Connect(t.Context()); !errors.Is(err, entryErr) || !errors.Is(err, repairErr) {
-		t.Fatalf("Connect() error = %v, want entry and repair failures", err)
+	for _, want := range []error{entryErr, nextErr} {
+		if _, err := dp.Connect(t.Context()); !errors.Is(err, want) {
+			t.Fatalf("entry: %v", err)
+		}
+		before := wire.calls
+		if _, err := dp.ReadDP(t.Context(), dap.DPIDR); err == nil {
+			t.Fatal("failed entry allowed register access")
+		}
+		if err := dp.Release(t.Context()); err != nil || wire.calls != before {
+			t.Fatalf("unowned release: %v", err)
+		}
 	}
-	before := wire.calls
-	if _, err := dp.ReadDP(t.Context(), dap.DPIDR); err == nil {
-		t.Fatal("ReadDP() succeeded while entry cleanup was pending")
-	}
-	if wire.calls != before {
-		t.Fatalf("blocked ReadDP() sent %d calls", wire.calls-before)
-	}
-	if err := dp.Release(t.Context()); err != nil {
-		t.Fatalf("Release() after entry repair failure: %v", err)
+	if wire.entries != 2 {
+		t.Fatal("failed entry was replayed")
 	}
 }
 

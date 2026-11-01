@@ -145,15 +145,24 @@ has not consumed. Checking ORUNDETECT only after retrying is too late. Re-enter
 SWD before trying again; ordinary replay would assume the grammar which the
 bootstrap is meant to establish. `Conn` makes one fresh entry after a bootstrap
 WAIT, aborts the inherited AP transaction through DAPABORT, and retries the
-bootstrap. If that recovery fails, Release retains the same bounded retry path.
-DAPABORT cannot restore the interrupted AP access or its register state. The
-first validated DPIDR is retained through retries and failed-entry cleanup; a
-changed identity stops recovery before DAPABORT.
+bootstrap. DAPABORT cannot restore the interrupted AP access or its register
+state. The first validated DPIDR is retained during entry retries; a changed
+identity stops recovery before DAPABORT. If a first entry fails before saving
+the inherited ORUNDETECT setting, it owns no restoration and `Release` becomes
+idle without more traffic. This does not undo sticky clears, selection, or an
+interrupted inherited AP access. Once acquired, the original setting and
+identity remain available for restoration retries after later entry failures.
 
 The specification says to retry read data after a parity error. That advice is
 less mechanical for an AP read because AP reads are posted: by the time parity
 fails, the AP pipeline may already have advanced. Recovery has to account for
 the Debug Access Port state, not just replay the eight-bit SWD request.
+
+Register methods return an error matching `swd.ErrNotExecuted` when validation,
+an unready connection, or cancellation rejects the operation before wire
+traffic. `errors.Is` still identifies the original cause. Cancellation before
+`Release` starts is classified the same way; a failure after traffic starts does
+not gain that classification.
 
 ## Getting into SWD
 
@@ -203,8 +212,9 @@ The three activation exchanges use 40, 136, and 76 clocks, so the fallback needs
 no larger wire transfer than existing JTAG-to-SWD entry. A parity, WAIT, FAULT,
 or transport error does not trigger this fallback. Neither does an invalid ACK
 whose trailing clocks failed. Each bootstrap has at most two DPIDR attempts;
-failed Connect may also run a separate bootstrap during bounded cleanup.
-Ordinary register calls still make one attempt.
+failed Connect may also run a separate bootstrap during bounded cleanup when an
+earlier acquisition still needs restoration. Ordinary register calls still make
+one attempt.
 
 Release uses the same activation fallback when framing repair is needed and
 checks the established identity before restoring owned state. It restores

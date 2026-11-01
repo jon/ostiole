@@ -64,7 +64,8 @@ func (r request) address() uint8 { return r.addr }
 // Conn owns one serialized SWD transaction stream over a wire. Connect must
 // succeed before register access. Release restores connection-owned
 // ORUNDETECT state and may be retried after failure. Conn methods are not safe
-// for concurrent use.
+// for concurrent use. Register-method errors rejected before wire traffic
+// match ErrNotExecuted; errors.Is also identifies the original cause.
 type Conn struct {
 	wire            Wire
 	turnaround      int

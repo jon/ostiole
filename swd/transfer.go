@@ -39,7 +39,7 @@ func (c *Conn) WriteAP(ctx context.Context, addr uint8, value uint32) error {
 func (c *Conn) read(ctx context.Context, ap bool, addr uint8) (uint32, error) {
 	req, err := newRequest(ap, true, addr)
 	if err != nil {
-		return 0, err
+		return 0, notExecuted(err)
 	}
 	return c.transfer(ctx, req, 0)
 }
@@ -47,7 +47,7 @@ func (c *Conn) read(ctx context.Context, ap bool, addr uint8) (uint32, error) {
 func (c *Conn) write(ctx context.Context, ap bool, addr uint8, value uint32) error {
 	req, err := newRequest(ap, false, addr)
 	if err != nil {
-		return err
+		return notExecuted(err)
 	}
 	_, err = c.transfer(ctx, req, value)
 	return err
@@ -55,20 +55,24 @@ func (c *Conn) write(ctx context.Context, ap bool, addr uint8, value uint32) err
 
 func (c *Conn) transfer(ctx context.Context, req request, value uint32) (uint32, error) {
 	if c == nil {
-		return 0, errors.New("swd: nil connection")
+		return 0, notExecuted(errors.New("swd: nil connection"))
 	}
 	if c.state != connectionReady {
-		return 0, errors.New("swd: connection is not ready; call Connect")
+		return 0, notExecuted(errors.New("swd: connection is not ready; call Connect"))
 	}
 	if err := ctx.Err(); err != nil {
-		return 0, err
+		return 0, notExecuted(err)
 	}
 	if err := c.validateTransfer(req, value); err != nil {
-		return 0, err
+		return 0, notExecuted(err)
 	}
 	result, err := c.execute(ctx, req, value)
 	c.observeTransfer(req, result, value, err)
 	return result, err
+}
+
+func notExecuted(cause error) error {
+	return fmt.Errorf("%w: %w", ErrNotExecuted, cause)
 }
 
 func (c *Conn) execute(ctx context.Context, req request, value uint32) (uint32, error) {
