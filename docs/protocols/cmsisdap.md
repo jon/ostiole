@@ -105,7 +105,20 @@ makes another bounded disconnect attempt; if synchronized cleanup remains
 pending, the caller receives the non-nil session with the setup error and
 retries `Session.Close`. After a poisoned exchange, `Close` reports the
 abandoned active port and continues USB cleanup without sending another command.
-Device close still runs once and its result is cached.
+Known USB connection loss matches `usb.ErrDeviceGone` and also makes port
+restoration impossible. An unsent timeout, cancellation, or other live
+submission failure retains the session for retry. Once a command may have
+completed, an ambiguous exchange still poisons the stream; commands are never
+replayed.
+
+`Session.RestorationPossible()` and `Session.CleanupPending()` implement the
+optional probe state contracts without I/O. Restoration can be impossible while
+host cleanup remains pending. A live claim or device cleanup failure retains
+ownership for another `Close`, including after failed open. Final claim and
+device errors remain visible on the attempt which releases them. Once all
+resources are released, further session closes return nil without traffic.
+Release borrowed target and DAP owners before closing the session; freeing host
+resources does not restore a halted target.
 
 ## Bench observation
 

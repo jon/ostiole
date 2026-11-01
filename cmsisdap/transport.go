@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/jon/ostiole/usb"
 	"io"
 )
 
@@ -24,20 +25,28 @@ func (s *Session) exchange(ctx context.Context, request []byte) ([]byte, error) 
 	response := make([]byte, s.packetSize)
 	input, err := s.claim.SubmitBulk(ctx, s.command.bulkIn.Address, response)
 	if err != nil {
-		return nil, fmt.Errorf("cmsisdap: submit response IN: %w", err)
+		return nil, s.submissionError(fmt.Errorf("cmsisdap: submit response IN: %w", err))
 	}
 	output, err := s.claim.SubmitBulk(ctx, s.command.bulkOut.Address, request)
 	if err != nil {
+		err = s.submissionError(fmt.Errorf("cmsisdap: submit command OUT: %w", err))
 		cleanupErr := s.claim.AbortBulk(s.command.bulkIn.Address)
 		if cleanupErr != nil {
-			return nil, s.poison(errors.Join(fmt.Errorf("cmsisdap: submit command OUT: %w", err), cleanupErr))
+			return nil, s.poison(errors.Join(err, cleanupErr))
 		}
-		return nil, fmt.Errorf("cmsisdap: submit command OUT: %w", err)
+		return nil, err
 	}
 	if err := s.completeCommand(ctx, output, len(request)); err != nil {
 		return nil, err
 	}
 	return s.completeResponse(ctx, input, response)
+}
+
+func (s *Session) submissionError(err error) error {
+	if errors.Is(err, usb.ErrDeviceGone) {
+		s.gone = true
+	}
+	return err
 }
 
 func (s *Session) completeCommand(ctx context.Context, transfer usbBulkTransfer, size int) error {
@@ -77,6 +86,9 @@ func (s *Session) transportReady(ctx context.Context) error {
 	}
 	if s.poisoned {
 		return ErrSessionPoisoned
+	}
+	if s.gone {
+		return usb.ErrDeviceGone
 	}
 	if ctx == nil {
 		return errors.New("cmsisdap: nil transfer context")

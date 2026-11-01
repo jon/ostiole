@@ -67,7 +67,11 @@ contract remains conservative for that query. A final close error is reported
 once by the probe when no cleanup remains, while live failures retain ownership
 for retry. USB devices and claims expose their retained host ownership through
 `CleanupPending`; USB's cached final close result remains available. Host
-resource release does not restore a halted target.
+resource release does not restore a halted target. `cmsisdap.Session` supplies
+both optional state contracts. Known USB loss matches `usb.ErrDeviceGone`;
+unsent live failures remain retryable, and poisoned exchanges prohibit further
+commands. Session close reports final errors once, while USB keeps its own
+cached final result.
 
 `Probe.JTAG` similarly lends packed JTAG clocks. Only one protocol can be
 activated per owner. Close invalidates either borrowed surface, including when

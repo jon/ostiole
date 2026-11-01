@@ -212,7 +212,7 @@ func (e *iokitBulkEngine) abortEndpoint(native darwinBulkNative, transfers map[*
 
 func abortAndDrainDarwin(abort func() error, drain func() error) error {
 	err := abort()
-	if err != nil && !errors.Is(err, errDarwinDeviceGone) {
+	if err != nil && !errors.Is(err, ErrDeviceGone) {
 		return err
 	}
 	return errors.Join(err, drain())

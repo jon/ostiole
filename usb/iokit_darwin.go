@@ -221,7 +221,7 @@ func iokitErrorCode(code uint32) error {
 	}
 	err := fmt.Errorf("IOKit result %#x", code)
 	if C.ostiole_usb_device_gone(C.kern_return_t(code)) != 0 {
-		return errors.Join(errDarwinDeviceGone, err)
+		return errors.Join(ErrDeviceGone, err)
 	}
 	return err
 }

@@ -24,6 +24,11 @@ var ErrStaleCandidate = errors.New("usb: stale candidate")
 // ErrNotConfigured reports that a USB device has no active configuration.
 var ErrNotConfigured = errors.New("usb: device is not configured")
 
+// ErrDeviceGone reports that the host connection to the selected attachment is
+// gone. Further communication requires a new open. Native error details are
+// retained; a timeout alone does not match ErrDeviceGone.
+var ErrDeviceGone = errors.New("usb: device disappeared")
+
 // DeviceFilter selects every USB attachment, one exact vendor/product ID pair,
 // or every product ID from one vendor. Its zero value is invalid.
 type DeviceFilter struct {

@@ -441,5 +441,5 @@ func usbURBStatusError(urb *usbURB) error {
 	if urb.Endpoint&0x80 != 0 {
 		direction = "IN"
 	}
-	return fmt.Errorf("usb: bulk %s transfer on endpoint %#02x: %w", direction, urb.Endpoint, syscall.Errno(-urb.Status))
+	return fmt.Errorf("usb: bulk %s transfer on endpoint %#02x: %w", direction, urb.Endpoint, linuxUSBError(syscall.Errno(-urb.Status)))
 }

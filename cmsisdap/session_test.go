@@ -38,6 +38,8 @@ func (d *peerUSBDevice) claimInterface(number uint8) (usbClaim, error) {
 	return d.claim, nil
 }
 
+func (d *peerUSBDevice) CleanupPending() bool { return d.closes == 0 }
+
 func (d *peerUSBDevice) Close() error {
 	d.closes++
 	if len(d.closeErrs) != 0 {
@@ -337,7 +339,7 @@ func TestInfoReturnsDetachedCapabilities(t *testing.T) {
 	}
 }
 
-func TestCloseRetriesClaimReleaseAndCachesDeviceClose(t *testing.T) {
+func TestCloseRetriesClaimReleaseAndReportsFinalDeviceErrorOnce(t *testing.T) {
 	releaseFailure := errors.New("release failed")
 	closeFailure := errors.New("close failed")
 	claim := &peerUSBClaim{closeErrs: []error{releaseFailure}}
@@ -356,7 +358,7 @@ func TestCloseRetriesClaimReleaseAndCachesDeviceClose(t *testing.T) {
 	if claim.closes != 2 || device.closes != 1 {
 		t.Fatalf("second close counts = claim %d device %d", claim.closes, device.closes)
 	}
-	if err := session.Close(); !errors.Is(err, closeFailure) {
+	if err := session.Close(); err != nil {
 		t.Fatalf("third Close() error = %v", err)
 	}
 	if claim.closes != 2 || device.closes != 1 {

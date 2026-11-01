@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jon/ostiole/probe"
 	"github.com/jon/ostiole/usb"
 )
 
@@ -53,12 +54,11 @@ type Session struct {
 	packetSize  int
 	info        Info
 	poisoned    bool
+	gone        bool
 	connected   bool
 	configured  bool
 	maxClockHz  uint32
 	closePrefix error
-	closeDone   bool
-	closeErr    error
 }
 
 // Open claims the CMSIS-DAP v2 command interface, reads probe metadata, applies
@@ -180,10 +180,10 @@ func (s *Session) Info() Info {
 }
 
 // Close disconnects an active target port, releases the command interface, and
-// closes the USB device. A complete disconnect failure or an interface-release
-// failure retains ownership for another attempt. A poisoned stream cannot
-// disconnect; Close reports the abandoned port and continues USB cleanup.
-// Device close runs once, and later calls return its cached result.
+// closes the USB device. Live failures retain ownership for another attempt.
+// Device loss or a poisoned stream prevents disconnect; Close reports the
+// abandoned port and continues USB cleanup. Final errors remain visible on that
+// attempt; after resources are released, later calls return nil without traffic.
 func (s *Session) Close() error {
 	if s == nil {
 		return nil
@@ -191,30 +191,61 @@ func (s *Session) Close() error {
 	if err := s.closeTargetPort(); err != nil {
 		return err
 	}
+	result := s.closePrefix
 	if s.claim != nil {
-		if err := s.claim.Close(); err != nil {
-			return errors.Join(s.closePrefix, err)
+		err := s.claim.Close()
+		result = errors.Join(result, err)
+		if err != nil && cleanupPending(s.claim) {
+			return result
 		}
 		s.claim = nil
 	}
-	if s.closeDone {
-		return s.closeErr
+	if s.device != nil {
+		err := s.device.Close()
+		result = errors.Join(result, err)
+		if err != nil && cleanupPending(s.device) {
+			return result
+		}
+		s.device = nil
 	}
-	if s.device == nil {
-		return nil
+	s.closePrefix = nil
+	return result
+}
+
+// RestorationPossible reports whether this session can still communicate for
+// restoration. Device loss, a poisoned command stream, and a closed session
+// report false. The query performs no I/O and does not confirm restored state.
+func (s *Session) RestorationPossible() bool {
+	return s != nil && s.device != nil && !s.gone && !s.poisoned
+}
+
+// CleanupPending reports whether the session still owns port restoration or
+// host cleanup, without I/O. Unknown USB implementations remain conservative.
+func (s *Session) CleanupPending() bool {
+	return s != nil && (s.connected || (s.claim != nil && cleanupPending(s.claim)) ||
+		(s.device != nil && cleanupPending(s.device)))
+}
+
+func cleanupPending(owner interface{ Close() error }) bool {
+	if state, ok := owner.(probe.CleanupState); ok {
+		return state.CleanupPending()
 	}
-	s.closeErr = errors.Join(s.closePrefix, s.device.Close())
-	s.closeDone = true
-	s.device = nil
-	return s.closeErr
+	return true
 }
 
 func (s *Session) closeTargetPort() error {
 	if !s.connected {
 		return nil
 	}
+	var reason error
+	if s.gone {
+		reason = usb.ErrDeviceGone
+	}
 	if s.poisoned {
-		s.abandonTargetPort(fmt.Errorf("cmsisdap: cannot disconnect active SWD port: %w", ErrSessionPoisoned))
+		reason = errors.Join(reason, ErrSessionPoisoned)
+	}
+	if reason != nil {
+		s.abandonTargetPort(fmt.Errorf("cmsisdap: cannot disconnect active SWD port: %w", reason))
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -223,7 +254,7 @@ func (s *Session) closeTargetPort() error {
 	if err == nil {
 		return nil
 	}
-	if !s.poisoned {
+	if s.RestorationPossible() {
 		return err
 	}
 	s.abandonTargetPort(err)
@@ -239,16 +270,18 @@ func (s *Session) closeAfterOpenFailure() (bool, error) {
 	if s == nil {
 		return false, nil
 	}
-	if s.connected && !s.poisoned {
+	if s.connected && s.RestorationPossible() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		err := s.disconnect(ctx)
 		cancel()
 		if err != nil {
-			if !s.poisoned {
+			if s.RestorationPossible() {
 				return true, fmt.Errorf("cmsisdap: retain SWD port after failed open: %w", err)
 			}
-			return false, errors.Join(err, s.Close())
+			cleanupErr := errors.Join(err, s.Close())
+			return s.CleanupPending(), cleanupErr
 		}
 	}
-	return false, s.Close()
+	err := s.Close()
+	return s.CleanupPending(), err
 }
