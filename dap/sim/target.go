@@ -32,7 +32,9 @@ const (
 )
 
 // Target models SW-DP, AP and target-memory state. All calls, fixture changes,
-// and uses of devices shared with other targets must be serialized.
+// and uses of devices shared with other targets must be serialized. Its zero
+// value accepts fixture configuration and has identity zero; New supplies an
+// explicit identity. UNKNOWN posted data is represented by zero.
 type Target struct {
 	started     bool
 	debugWords  map[uint64]uint32
@@ -45,6 +47,7 @@ type Target struct {
 	dpBankSet   [16]bool
 	selectDP    uint32
 	rdbuff      uint32
+	resend      uint32
 	aps         map[dap.APSel]*accessPort
 }
 
@@ -192,6 +195,9 @@ func (t *Target) AddAP(sel dap.APSel, idr uint32) error {
 	if _, ok := t.aps[sel]; ok {
 		return fmt.Errorf("dap/sim: AP %d is already configured", selection)
 	}
+	if t.aps == nil {
+		t.aps = make(map[dap.APSel]*accessPort)
+	}
 	t.aps[sel] = &accessPort{regs: map[uint8]uint32{0xfc: idr}}
 	return nil
 }
@@ -222,6 +228,9 @@ func (t *Target) AddMEMAP(sel dap.APSel, idr uint32, words map[uint32]uint32) er
 		for offset := range 4 {
 			memory[uint64(addr)+uint64(offset)] = byte(value >> uint(offset*8))
 		}
+	}
+	if t.aps == nil {
+		t.aps = make(map[dap.APSel]*accessPort)
 	}
 	t.aps[sel] = &accessPort{
 		regs:   map[uint8]uint32{0xf4: 0, 0xf8: 2, 0xfc: idr},
@@ -371,7 +380,11 @@ func (t *Target) Read(ctx context.Context, req swdsim.Request) (uint32, error) {
 	}
 	t.started = true
 	if req.AP {
-		return t.readAP(ctx, req)
+		value, err := t.readAP(ctx, req)
+		if err == nil {
+			t.resend = value
+		}
+		return value, err
 	}
 	switch req.Addr {
 	case 0x00:
@@ -383,9 +396,11 @@ func (t *Target) Read(ctx context.Context, req swdsim.Request) (uint32, error) {
 		}
 		return t.dpBanks[bank], nil
 	case 0x08:
-		return t.rdbuff, nil
+		return t.resend, nil
 	case 0x0c:
-		return t.rdbuff, nil
+		t.resend = t.rdbuff
+		t.rdbuff = 0
+		return t.resend, nil
 	default:
 		return 0, fmt.Errorf("dap/sim: unsupported DP read %#02x", req.Addr)
 	}
@@ -404,14 +419,18 @@ func (t *Target) Write(ctx context.Context, req swdsim.Request, value uint32) er
 	}
 	t.started = true
 	if req.AP {
+		t.rdbuff = 0
 		return t.writeAP(ctx, req, value)
 	}
 	switch req.Addr {
 	case 0x00:
+		t.rdbuff = 0
 		t.clearSticky(value)
 	case 0x04:
+		t.rdbuff = 0
 		return t.writeBankedRegister(value)
 	case 0x08:
+		t.rdbuff = 0
 		t.selectDP = value
 	default:
 		return fmt.Errorf("dap/sim: unsupported DP write %#02x", req.Addr)

@@ -341,7 +341,7 @@ func TestMappedDeviceFaultFollowsAcceptedWrite(t *testing.T) {
 }
 
 func TestMappedDeviceModelErrorIsNotBusFault(t *testing.T) {
-	for _, failure := range []error{context.Canceled, errors.New("device model failed")} {
+	for _, failure := range []error{context.Canceled, context.DeadlineExceeded, errors.New("device model failed")} {
 		device := &memoryDevice{err: failure}
 		target := mappedTarget(t, 0x100, 4, device)
 		conn := enteredConn(t, target)
@@ -352,8 +352,9 @@ func TestMappedDeviceModelErrorIsNotBusFault(t *testing.T) {
 		if err := conn.WriteAP(t.Context(), 4, 0x100); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := conn.ReadAP(t.Context(), 0x0c); !errors.Is(err, dapsim.ErrDeviceFailure) || errors.Is(err, swd.ErrFault) {
-			t.Fatalf("model failure = %v, want device failure", err)
+		if _, err := conn.ReadAP(t.Context(), 0x0c); !errors.Is(err, dapsim.ErrDeviceFailure) || errors.Is(err, swd.ErrFault) ||
+			(failure == context.Canceled || failure == context.DeadlineExceeded) && !errors.Is(err, failure) {
+			t.Fatalf("model failure = %v, want device failure preserving %v", err, failure)
 		}
 		ctrl, err := target.Read(t.Context(), swdsim.Request{Read: true, Addr: 4})
 		if err != nil || ctrl&(1<<5) != 0 {
@@ -532,6 +533,26 @@ func TestDeviceCallbackFailureCannotBecomeReadAcknowledgement(t *testing.T) {
 		_, err := dp.ReadRawAP(t.Context(), apSel(0).Address(0x0c))
 		if !errors.Is(err, dapsim.ErrDeviceFailure) || errors.Is(err, failure) || len(device.accesses) != 1 {
 			t.Fatalf("callback read = %v, %v; want one host/model failure", err, device.accesses)
+		}
+	}
+}
+
+func TestMappedDeviceMidChunkFaultRetainsDeliveredWord(t *testing.T) {
+	device := &memoryDevice{data: map[uint64]byte{0x100: 0x11, 0x104: 0x22}, err: dapsim.ErrBusFault, errAt: 0x108}
+	target := mappedTarget(t, 0x100, 16, device)
+	memory := openedMemory(t, target, apSel(0))
+	got := []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+	n, err := memory.ReadBlock(t.Context(), 0x100, got)
+	want := []byte{0x11, 0, 0, 0, 0x22, 0, 0, 0, 0xff, 0xff, 0xff, 0xff}
+	if n != 8 || !errors.Is(err, dap.ErrFault) || !slices.Equal(got, want) {
+		t.Fatalf("ReadBlock=%d,%v,%v; want exact two-word prefix", n, err, got)
+	}
+	if len(device.accesses) != 3 {
+		t.Fatalf("accesses after fault or replay: %v", device.accesses)
+	}
+	for i, access := range device.accesses {
+		if access.addr != 0x100+uint64(i*4) || access.write {
+			t.Fatalf("access%d=%v", i, access)
 		}
 	}
 }

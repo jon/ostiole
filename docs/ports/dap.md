@@ -309,8 +309,16 @@ DP RDBUFF read  -> result of B
 
 A DP read other than RDBUFF can occur after the AP request without destroying
 the pending result. An AP write or DP write does destroy it; a later AP read or
-RDBUFF then returns an unknown value. This is one of the cases where “the next
-transfer” is too vague to be useful.
+RDBUFF then returns an unknown value. ABORT writes also discard that result,
+even when they only clear sticky state. Reading RDBUFF consumes its pending
+value; another RDBUFF read returns an unknown value. RESEND retains the last
+delivered value for recovery from a corrupted read. This is one of the cases
+where “the next transfer” is too vague to be useful.
+
+`dap/sim.Target` represents unknown posted data as zero. It tracks the buffered
+result separately from the last AP or RDBUFF value delivered to the host, which
+RESEND returns. A bus fault during a posted AP read still delivers the preceding
+result before setting STICKYERR; a later request reports the fault.
 
 Writes can also be buffered. An OK acknowledgement means that the DP accepted
 the write, not that every earlier write has completed. An AP read, or a DP

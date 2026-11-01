@@ -283,12 +283,13 @@ func TestTargetRejectsInvalidDPRegisterFixture(t *testing.T) {
 func TestTargetModelsRESEND(t *testing.T) {
 	target := New(0x2ba01477)
 	target.rdbuff = 0x12345678
+	checkTargetRead(t, target, readDPRequest(0x0c), 0x12345678)
 	value, err := target.Read(t.Context(), readDPRequest(0x08))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if value != target.rdbuff {
-		t.Fatalf("RESEND = %#08x, want %#08x", value, target.rdbuff)
+	if value != 0x12345678 {
+		t.Fatalf("RESEND = %#08x, want %#08x", value, uint32(0x12345678))
 	}
 }
 
