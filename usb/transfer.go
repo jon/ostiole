@@ -196,9 +196,10 @@ func bulkTransferResult(backend bulkTransferBackend) (int, error) {
 	return count, nil
 }
 
-// AbortBulk aborts and drains all pending transfers on endpoint. If native
-// cancellation or the bounded drain fails, the pending requests remain owned
-// and AbortBulk can be retried. A drain timeout matches context.DeadlineExceeded.
+// AbortBulk aborts and drains all pending transfers on endpoint. Requests which
+// have not completed or drained remain owned and AbortBulk can be retried.
+// On macOS, device loss can be reported after a successful drain. A drain
+// timeout matches context.DeadlineExceeded.
 // Abort is endpoint-wide because the supported host APIs do not both cancel an
 // individual request.
 func (c *ClaimedInterface) AbortBulk(endpoint uint8) error {

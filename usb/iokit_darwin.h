@@ -89,5 +89,6 @@ kern_return_t ostiole_usb_bulk_engine_abort(ostiole_usb_bulk_engine* engine,
 void ostiole_usb_bulk_transfer_free(ostiole_usb_bulk_transfer* transfer);
 void ostiole_usb_bulk_engine_close(ostiole_usb_bulk_engine* engine);
 kern_return_t ostiole_usb_interface_close(ostiole_usb_interface* interface);
+int ostiole_usb_device_gone(kern_return_t result);
 
 #endif

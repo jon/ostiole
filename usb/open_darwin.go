@@ -109,15 +109,18 @@ func validateDarwinIdentity(expected, actual DeviceInfo) error {
 	return nil
 }
 
-// Close releases the open macOS USB attachment. If interface release fails,
-// the device remains open and Close can be retried.
+// Close releases the open macOS USB attachment. A live interface release
+// failure retains the device for retry. Device loss is reported while host
+// cleanup continues. A bulk cleanup error can still require another Close.
 func (d *Device) Close() error {
 	if d == nil {
 		return nil
 	}
+	var releaseErr error
 	if d.claim != nil {
-		if err := d.claim.Close(); err != nil {
-			return err
+		releaseErr = d.claim.Close()
+		if d.claim != nil {
+			return releaseErr
 		}
 	}
 	d.closeOnce.Do(func() {
@@ -127,5 +130,5 @@ func (d *Device) Close() error {
 			d.closeErr = handle.close()
 		}
 	})
-	return d.closeErr
+	return errors.Join(releaseErr, d.closeErr)
 }
