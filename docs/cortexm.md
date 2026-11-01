@@ -29,7 +29,15 @@ either, an operation may wait indefinitely for the processor. Failed acquisition
 attempts cleanup with a fresh five-second context; a non-nil target returned
 with an error must be retained for release retries. Once release starts, or a
 control write fails, ordinary target calls stop. Failed cleanup retains the
-restoration state for another `Release`.
+restoration state for another `Release`. A canceled or expired preflight DHCSR
+or DFSR read leaves ordinary calls available when no register transfer, halt,
+resume, or step is pending and the error contains only context errors. A read
+failure with another cause still requires release.
+
+A failed M33 DHCSR read relinquishes an existing halt claim because it may have
+consumed restart status without returning a usable observation. A fresh status
+read cannot recover that claim. Cleanup preserves the unowned halt; restoring
+initially disabled debug waits for a running observation.
 
 Cleanup needs a usable memory connection. A poisoned transport or invalidated
 MEM-AP can prevent restoration; retaining the target does not repair either.
@@ -49,7 +57,9 @@ those instructions or recover elapsed time.
 
 A successful memory write does not prove that the halt request cleared. If
 readback never shows it clear, cleanup stays pending without repeating resume:
-an ignored write cannot be distinguished from an immediate new halt.
+an ignored write cannot be distinguished from an immediate new halt. A debug
+event sets C_HALT, so observing a halted core with that bit set does not confirm
+the earlier resume, even when debug was already enabled.
 
 A completed resume can immediately encounter a new debug event. The target
 reports that halt and never repeats the completed resume during cleanup. If
@@ -194,12 +204,12 @@ behavioral test coverage, not physical failure-injection evidence.
 
 ## Register writes
 
-`WriteRegister` writes the same register set except XPSR, which is read-only.
-SP, MSP, and PSP require word-aligned values; PC requires bit zero clear. PC
-writes change the debug return address without changing Thumb state. Writing SP
-changes whichever stack bank is active. The API rejects invalid identifiers and
-values before traffic; it does not check whether an address is mapped or
-suitable for the program.
+`WriteRegister` writes the same register set except XPSR. This library does not
+support XPSR writes. SP, MSP, and PSP require word-aligned values; PC requires
+bit zero clear. PC writes change the debug return address without changing Thumb
+state. Writing SP changes whichever stack bank is active. The API rejects
+invalid identifiers and values before traffic; it does not check whether an
+address is mapped or suitable for the program.
 
 ```go
 err := core.WriteRegister(ctx, cortexm.R4, 42)
@@ -239,7 +249,9 @@ The Cortex-M0 [control example](../examples/simple/cortexm-control/main.go)
 selects one probe and AP, halts, prints PC, SP, R0, and R4, resumes, then
 releases the target before closing the connection. With `-step`, it also steps
 once and prints the resulting PC. It requires explicit consent to control
-execution:
+execution. If the core is already halted, it reports the inherited halt, reads
+the registers, and skips stepping and resuming. A competing halt observed during
+control remains subject to the target ownership checks.
 
 ```sh
 go run ./examples/simple/cortexm-control \
@@ -512,8 +524,8 @@ owners without requesting resume.
 These sessions exercised register transfers while halted, not execution using
 the temporary PC or stack values. Writes to the other general registers and LR,
 process-stack selection, inherited halts, and failure cleanup have behavioral
-test coverage only. XPSR writes, stepping, reset, and state after Arm owner
-close were not tested.
+test coverage only. This library does not support XPSR writes. These sessions
+did not exercise stepping, reset, or state after Arm owner close.
 
 ### Step bench
 

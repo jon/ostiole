@@ -44,6 +44,8 @@ func (t *Target) Resume(ctx context.Context) error {
 // instruction-retirement indicators and Cortex-M33 restart status. It does not
 // establish halt ownership. The target relinquishes its halt claim when it
 // observes Cortex-M33 restart status, even if the processor is halted again.
+// A failed Cortex-M33 DHCSR read also relinquishes that claim: the read may
+// have consumed restart status without returning a usable observation.
 func (t *Target) Halted(ctx context.Context) (bool, error) {
 	if err := t.active(ctx); err != nil {
 		return false, err
@@ -68,11 +70,10 @@ func (t *Target) readControl(ctx context.Context) (uint32, error) {
 		err = t.validateArchitectureControl(value)
 	}
 	if err != nil {
-		t.closing = true
-	} else {
-		t.observeHaltRequest(value)
+		return value, t.readError(err)
 	}
-	return value, err
+	t.observeHaltRequest(value)
+	return value, nil
 }
 
 func (t *Target) observeHaltRequest(value uint32) {

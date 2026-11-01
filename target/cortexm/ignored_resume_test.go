@@ -70,7 +70,7 @@ func checkIgnoredResume(t *testing.T, initial uint32, cleanup bool, failure stri
 	}
 }
 
-func TestLaterResumeConfirmationPreservesIndependentHalt(t *testing.T) {
+func TestUnobservedResumePreservesIndependentHalt(t *testing.T) {
 	for _, initial := range []uint32{0, debugEnable} {
 		m := newControlMemory()
 		m.control = initial
@@ -85,19 +85,17 @@ func TestLaterResumeConfirmationPreservesIndependentHalt(t *testing.T) {
 		if err := core.Resume(t.Context()); !errors.Is(err, errMemory) {
 			t.Fatal(err)
 		}
+		m.control |= haltRequest
 		m.halted = true
 		writes := m.writes
 		err = core.Release(t.Context())
 		if m.writes != writes || !m.halted {
 			t.Fatal("cleanup resumed an independent halt")
 		}
-		if initial == debugEnable && err != nil {
-			t.Fatal(err)
+		if err == nil {
+			t.Fatal("released unresolved resume despite an independent halt")
 		}
-		if initial == 0 && err == nil {
-			t.Fatal("disabled debug despite an independent halt")
-		}
-		m.halted = false
+		m.control, m.halted = debugEnable, false
 		if err := core.Release(t.Context()); err != nil || m.control != initial {
 			t.Fatalf("release retry=%v control=%#x", err, m.control)
 		}

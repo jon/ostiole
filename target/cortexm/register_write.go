@@ -6,8 +6,9 @@ import (
 )
 
 // WriteRegister changes a Cortex-M0 or Cortex-M33 register while halted,
-// without acquiring halt ownership. XPSR is read-only. SP, MSP, and PSP require word alignment; PC
-// requires bit zero clear and does not change Thumb state. Invalid identifiers
+// without acquiring halt ownership. This API does not support XPSR writes.
+// SP, MSP, and PSP require word alignment; PC requires bit zero clear and does
+// not change Thumb state. Invalid identifiers
 // and values are rejected before traffic. Release does not undo register writes.
 //
 // The transfer and cleanup rules are those of ReadRegister. An error after
@@ -43,7 +44,7 @@ func validateRegisterWrite(reg Register, value uint32) error {
 		return errors.New("cortexm: invalid register")
 	}
 	if reg == XPSR {
-		return errors.New("cortexm: XPSR is read-only")
+		return errors.New("cortexm: XPSR writes are unsupported")
 	}
 	if (reg == SP || reg == MSP || reg == PSP) && value&3 != 0 {
 		return errors.New("cortexm: stack pointer must be word-aligned")

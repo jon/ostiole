@@ -50,8 +50,7 @@ func (t *Target) Step(ctx context.Context) error {
 	}
 	reason, err := t.memory.ReadWord(ctx, dfsrAddress)
 	if err != nil {
-		t.closing = true
-		return err
+		return t.readError(err)
 	}
 	if reason&0x1e != 0 {
 		return errors.New("cortexm: competing debug event flags prevent stepping")
