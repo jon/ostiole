@@ -121,7 +121,9 @@ func TestGroupAcquireFailureRetainsCleanup(t *testing.T) {
 		t.Fatalf("group=%v error=%v", g, err)
 	}
 	results := g.Results()
-	if !results[0].CleanupPending || results[1].CleanupPending || results[2].Attempted {
+	if !results[0].CleanupPending || results[1].CleanupPending || results[2].Attempted ||
+		!results[0].Attempted || !results[1].Attempted ||
+		!errors.Is(results[0].Err, errMemory) || !errors.Is(results[1].Err, errMemory) {
 		t.Fatalf("results=%+v", results)
 	}
 	if c.reads != 0 || c.writes != 0 {

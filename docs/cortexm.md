@@ -340,22 +340,28 @@ and architecture restrictions of `Acquire`. Invalid static membership fails
 before traffic. On failure, acquisition stops and attempts cleanup with a fresh
 five-second context, in addition to any failed target acquisition's own cleanup.
 A non-nil group returned with an error retains obligations and permits only
-release and cached results. Memory is borrowed on every return.
+release and cached results. The returned error retains acquisition and cleanup
+failures, including historical cleanup failures resolved by a later retry during
+acquisition. Memory is borrowed on every return.
 
 `Release` restores pending targets in reverse membership order, attempting
-independent members after a failure while its context permits. Use a fresh
-bounded context after cancellation. Successful target releases are never
-repeated. Keep the memory and Arm owners live until every member's
-`CleanupPending` is false. Starting release blocks ordinary group operations;
-nil and inactive groups require no cleanup.
+independent members after a failure while its context permits. Each pending
+member gets an equal share of the remaining caller deadline, recomputed before
+its attempt. Without a caller deadline, each attempt has a five-second budget. A
+started lower protocol operation may require its own bounded completion interval
+after cancellation. Members not reached before caller cancellation retain an
+attributed context error. Use a fresh bounded context after cancellation.
+Successful target releases are never repeated. Keep the memory and Arm owners
+live until every member's `CleanupPending` is false. Starting release blocks
+ordinary group operations; nil and inactive groups require no cleanup.
 
 `Results` returns copied member outcomes in membership order without traffic.
 `Attempted` distinguishes members reached from those not reached, and `Err`
 retains their causes. Acquisition failure also records cleanup errors. Identity
-remains available after release. Later operations update the selected members,
-so cached results may describe different calls. The group never lends its owned
-targets. Calls and all other access over the shared connection must be
-serialized by the caller.
+remains available after release; `HaltOwned` is false for a released member.
+Later operations update the selected members, so cached results may describe
+different calls. The group never lends its owned targets. Calls and all other
+access over the shared connection must be serialized by the caller.
 
 ### Selected control
 
