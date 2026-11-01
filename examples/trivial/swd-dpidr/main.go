@@ -56,15 +56,8 @@ func readDPIDR(ctx context.Context) (value uint32, err error) {
 		}
 		return 0, errors.Join(err, closeOwner())
 	}
-	defer func() {
-		err = errors.Join(err, ch.Close())
-	}()
 	conn := swd.New(ch)
-	defer func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		err = errors.Join(err, conn.Release(cleanupCtx))
-	}()
+	defer func() { err = errors.Join(err, releaseConnection(conn, ch)) }()
 	value, err = conn.Connect(ctx)
 	if err != nil {
 		return 0, err
@@ -73,4 +66,27 @@ func readDPIDR(ctx context.Context) (value uint32, err error) {
 		return 0, fmt.Errorf("ostiole: invalid DPIDR %#08x", value)
 	}
 	return value, nil
+}
+
+type protocolRelease interface {
+	Release(context.Context) error
+	CleanupPending() bool
+}
+
+type channelRelease interface {
+	Close() error
+	RestorationPossible() bool
+}
+
+func releaseConnection(connection protocolRelease, channel channelRelease) error {
+	if !channel.RestorationPossible() {
+		return errors.Join(errors.New("protocol restoration unavailable after terminal adapter loss"), channel.Close())
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	err := connection.Release(ctx)
+	cancel()
+	if err != nil && connection.CleanupPending() && channel.RestorationPossible() {
+		return err
+	}
+	return errors.Join(err, channel.Close())
 }

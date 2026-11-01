@@ -54,12 +54,7 @@ func readIdentity(ctx context.Context) (_ identity, err error) {
 	conn := swd.New(ch)
 	dp := dap.NewDebugPort(dap.SWDP(conn))
 	var mem *dap.MemAP
-	defer func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
-		defer cancel()
-		err = errors.Join(err, mem.Release(cleanupCtx))
-		err = errors.Join(err, dp.Release(cleanupCtx), ch.Close())
-	}()
+	defer func() { err = errors.Join(err, releaseIdentity(mem, dp, ch)) }()
 
 	portID, err := dp.Connect(ctx)
 	if err != nil {
@@ -109,4 +104,36 @@ func printIdentity(w io.Writer, info identity) error {
 	_, err := fmt.Fprintf(w, "DPIDR=%#08x AP0_IDR=%#08x CPUID=%#08x\n",
 		info.dpidr.Raw, info.apidr.Raw, info.processor.Raw)
 	return err
+}
+
+type protocolRelease interface {
+	Release(context.Context) error
+}
+
+type channelRelease interface {
+	Close() error
+	RestorationPossible() bool
+}
+
+type debugPortRelease interface {
+	protocolRelease
+	CleanupPending() bool
+}
+
+func releaseIdentity(memory protocolRelease, port debugPortRelease, channel channelRelease) error {
+	for i, owner := range []protocolRelease{memory, port} {
+		if !channel.RestorationPossible() {
+			return errors.Join(errors.New("protocol restoration unavailable after terminal adapter loss"), channel.Close())
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+		err := owner.Release(ctx)
+		cancel()
+		if err != nil {
+			if channel.RestorationPossible() && (i == 0 || port.CleanupPending()) {
+				return err
+			}
+			return errors.Join(err, channel.Close())
+		}
+	}
+	return channel.Close()
 }
