@@ -127,15 +127,12 @@ func TestArmJTAGFailedSetupAndCloseRetries(t *testing.T) {
 	_, b, cfg := armJTAGFixture(t, 4, 0)
 	want := errors.New("wire unavailable")
 	b.beforeTransfer = func(context.Context) error { return want }
+	b.closeErr = errors.New("host close")
 	c, err := armdebug.Connect(t.Context(), probe.New(probe.Info{}, b), cfg)
-	if c == nil || !errors.Is(err, want) || b.closes != 0 || c.Port() != nil {
+	if c == nil || !errors.Is(err, want) || !errors.Is(err, b.closeErr) || b.closes != 1 || c.Port() != nil {
 		t.Fatalf("lost setup owner: %v", err)
 	}
 	b.beforeTransfer = nil
-	b.closeErr = errors.New("host close")
-	if err := c.Close(); !errors.Is(err, b.closeErr) {
-		t.Fatal(err)
-	}
 	before := b.calls
 	b.closeErr = nil
 	if err := c.Close(); err != nil || b.calls != before {

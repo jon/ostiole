@@ -749,11 +749,12 @@ func TestConnectRepairsRejectedBootstrapByReenteringSWD(t *testing.T) {
 			if !errors.Is(err, test.want) {
 				t.Fatalf("Connect() error = %v, want %v", err, test.want)
 			}
-			if target.attempts != test.wantAttempts || target.executed[req] != 1 {
-				t.Fatalf("bank-zero SELECT attempted %d times and executed %d times during repair", target.attempts, target.executed[req])
+			executed, entries := 0, 0
+			if test.want == nil {
+				executed, entries = 1, 1
 			}
-			if wire.reentryAttempts != 1 {
-				t.Fatalf("SWD re-entry attempts = %d, want 1", wire.reentryAttempts)
+			if target.attempts != test.wantAttempts || target.executed[req] != executed || wire.reentryAttempts != entries {
+				t.Fatalf("bootstrap attempts %d, accepted SELECTs %d, reentries %d", target.attempts, target.executed[req], wire.reentryAttempts)
 			}
 			if test.want == nil {
 				assertDAPABORT(t, target)
@@ -814,36 +815,31 @@ func TestConnectCanRetryAfterBootstrapRepair(t *testing.T) {
 	}
 }
 
-func TestFailedConnectRepairBlocksOperations(t *testing.T) {
-	target := newWaitTarget()
-	addAP(t, target, 0, 0x24770011)
-	repairErr := errors.New("injected protocol re-entry failure")
-	wire := &reentryFailWire{inner: swdsim.New(target), reentryErr: repairErr}
-	conn := swd.New(wire)
-	dp := dap.NewDebugPort(dap.SWDP(conn))
+func TestFailedNewConnectKeepsCachedIdentityWithoutCleanup(t *testing.T) {
+	failure := errors.New("new entry failed")
+	wire := &entryFailureWire{inner: swdsim.New(newWaitTarget()), entryErrors: []error{nil, failure}}
+	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if err := dp.Release(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-
-	target.armFault(dpWrite(0x08))
-	wire.failEntries = 1
-	_, err := dp.Connect(t.Context())
-	if !errors.Is(err, swd.ErrFault) || !errors.Is(err, repairErr) {
-		t.Fatalf("Connect() error = %v, want FAULT and repair failure", err)
+	if _, err := dp.Connect(t.Context()); !errors.Is(err, failure) {
+		t.Fatal(err)
 	}
-	before := len(target.requests)
-	assertRepairBlocksTraffic(t, dp, target, before)
+	before := wire.calls
+	if err := dp.Release(t.Context()); err != nil || wire.calls != before {
+		t.Fatalf("unowned release: %v", err)
+	}
 	if info, ok := dp.Identity(); !ok || swdIdentity(t, info).Raw != 0x2ba01477 {
-		t.Fatalf("Identity() = %+v, %t after repair failure", info, ok)
-	}
-	if err := dp.Release(t.Context()); err != nil {
-		t.Fatalf("Release() after failed connection repair: %v", err)
+		t.Fatal("failed entry discarded cached identity")
 	}
 	if _, err := dp.Connect(t.Context()); err != nil {
-		t.Fatalf("Connect() after explicit repair: %v", err)
+		t.Fatal(err)
+	}
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -1257,8 +1253,12 @@ func TestConnectRepairsFailedRDBUFFConfirmation(t *testing.T) {
 			if _, err := dp.Connect(t.Context()); !errors.Is(err, test.want) {
 				t.Fatalf("Connect() error = %v, want %v", err, test.want)
 			}
-			if wire.reentryAttempts != 1 {
-				t.Fatalf("SWD re-entry attempts = %d, want 1", wire.reentryAttempts)
+			wantEntries := 0
+			if test.want == nil {
+				wantEntries = 1
+			}
+			if wire.reentryAttempts != wantEntries {
+				t.Fatalf("SWD reentries %d want %d", wire.reentryAttempts, wantEntries)
 			}
 			if test.want == nil {
 				assertDAPABORT(t, target)
@@ -1737,7 +1737,7 @@ func TestConnectRollsBackAgainstCurrentSetupIdentity(t *testing.T) {
 	}
 }
 
-func TestConnectRepairsBeforeIdentifyingReplacementTarget(t *testing.T) {
+func TestFailedEntryBeforeIdentifyingReplacementTargetHasNoCleanup(t *testing.T) {
 	target := newWaitTarget()
 	readErr := errors.New("injected DPIDR transfer failure")
 	wire := &cleanupFailWire{inner: swdsim.New(target), err: readErr, failBits: 42}
@@ -1759,8 +1759,8 @@ func TestConnectRepairsBeforeIdentifyingReplacementTarget(t *testing.T) {
 	if strings.Contains(err.Error(), "identity changed") {
 		t.Fatalf("Connect() repair used the released identity: %v", err)
 	}
-	if wire.reentries != 1 {
-		t.Fatalf("SWD re-entries = %d, want 1", wire.reentries)
+	if wire.reentries != 0 {
+		t.Fatalf("SWD re-entries = %d, want 0", wire.reentries)
 	}
 	if info, ok := dp.Identity(); !ok || swdIdentity(t, info).Raw != 0x2ba01477 {
 		t.Fatalf("Identity() = %+v, %t after failed setup", info, ok)
@@ -1797,6 +1797,7 @@ func TestConnectRetainsAmbiguousPowerAfterFailedRollback(t *testing.T) {
 	if !errors.Is(err, swd.ErrWait) || !errors.Is(err, writeErr) || !errors.Is(err, repairErr) {
 		t.Fatalf("Connect() error = %v, want WAIT, write failure, and repair failure", err)
 	}
+	assertRepairBlocksTraffic(t, dp, target, len(target.requests))
 	state, readErr := target.Read(t.Context(), dpRead(0x04))
 	if readErr != nil {
 		t.Fatal(readErr)

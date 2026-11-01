@@ -85,6 +85,9 @@ func (e *swdExecutor) transferWithAPRecovery(ctx context.Context, req transferRe
 		if err == nil {
 			return value, nil
 		}
+		if waits == 0 && errors.Is(err, swd.ErrNotExecuted) {
+			return 0, &requestNotSentError{cause: err}
+		}
 		if !errors.Is(err, swd.ErrWait) {
 			return e.finishRetryError(req, value, err, waits, apWork)
 		}

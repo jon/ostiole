@@ -20,17 +20,13 @@ func TestUnsupportedSWDCleansOwner(t *testing.T) {
 	}
 }
 
-func TestProtocolSetupFailureRetainsLiveDependencies(t *testing.T) {
+func TestProtocolEntryFailureClosesUnownedDependencies(t *testing.T) {
 	b := newBench()
 	want := errors.New("wire unavailable")
 	b.wireErr = want
 	c, err := armdebug.Connect(t.Context(), probe.New(probe.Info{}, b), config())
-	if c == nil || c.Port() != nil || !errors.Is(err, want) || b.closes != 0 {
-		t.Fatalf("setup cleanup: %v", err)
-	}
-	b.wireErr = nil
-	if err := c.Close(); err != nil || b.closes != 1 {
-		t.Fatalf("retry setup cleanup: %v", err)
+	if c != nil || !errors.Is(err, want) || b.closes != 1 || b.transfers != 1 {
+		t.Fatalf("unowned setup cleanup: %v closes %d transfers %d", err, b.closes, b.transfers)
 	}
 }
 

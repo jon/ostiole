@@ -45,7 +45,10 @@ These constructors send no traffic. The zero `dap.Port` is invalid, and
 `Connect` rejects nil connections, bad indices, and unsupported instruction
 widths before touching hardware. JTAG-DP supports architectural four- and
 eight-bit instructions. The binding validates the exact complete layout; it does
-not discover IR boundaries or activate board-specific chain routing.
+not discover IR boundaries or activate board-specific chain routing. Failed
+chain validation before DP state is acquired leaves the debug port idle; it does
+not require another successful validation merely to close its probe. This does
+not restore inherited TAP instructions or undo ordinary scan effects.
 
 Give `dp` exclusive use of the supplied SWD connection or JTAG chain until
 `Release` succeeds. `Connect` enters the protocol and acquires missing power
@@ -68,8 +71,11 @@ After use or an error, release the MEM-AP if one was returned, then release
 `dp`, then close the probe. Stop at the first cleanup failure and keep that
 owner and its dependencies for retry. Each cleanup attempt needs a fresh,
 independent, bounded context. A failed restoration can be retried without
-repeating successful restoration steps. For managed ownership of this sequence,
-use `armdebug.Open` or `armdebug.Connect` with `armdebug.JTAGDP`; see the
+repeating successful restoration steps. If SWD link release fails after wire
+traffic starts, the next attempt re-enters before sending DP traffic. A
+pretraffic rejection keeps its original cause and does not by itself invalidate
+known framing. For managed ownership of this sequence, use `armdebug.Open` or
+`armdebug.Connect` with `armdebug.JTAGDP`; see the
 [composition guide](../composition.md#managed-jtag-dp).
 
 ## Connection identity
