@@ -138,9 +138,6 @@ func openControlBench(t *testing.T, ctx context.Context) *armdebug.Conn {
 
 func (bench controlBench) open(t *testing.T, ctx context.Context) *armdebug.Conn {
 	t.Helper()
-	if bench.provider == "cmsisdap" {
-		t.Skip("CMSIS-DAP explicit sequences do not provide a general SWD wire")
-	}
 	inventory, err := discover.Probes(ctx)
 	if err != nil {
 		t.Fatal(err)

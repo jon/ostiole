@@ -392,8 +392,10 @@ registers := cmsisdap.NewRegisterSWD(session) // session configured with WithSWD
 dp := dap.NewDebugPort(dap.RegisterDP(registers))
 ```
 
-Connect the debug port explicitly and release it before closing the session. See
-the
+Connect the debug port explicitly and release it before closing the session.
+`cmsisdap.OpenProbe` advertises `RegisterSWD`, which `armdebug` prefers before
+activation; the examples use this path without assembling a raw SWD wire.
+Activation errors do not fall back to sequences. See the
 [register ownership contract](protocols/cmsisdap.md#completed-register-ownership)
 and [sequence contract](protocols/cmsisdap.md#swd-connection-and-sequences).
 

@@ -169,11 +169,12 @@ and released in reverse order.
 | `*dap.MemAP`        | `OpenMemAP` validates the selected AP and saves its CSW, TAR, and optional TARHI. `Release` retries failed restoration; if DAPABORT interrupts cleanup, the next `Release` retries every saved value. Calls sharing the MEM-AP or its debug port must be serialized.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 An application that reaches the MEM-AP layer releases the MEM-AP before the
-debug port, then closes its FTDI channel or J-Link session. A metadata-only
-CMSIS-DAP composition closes its session directly. A configured direct
-composition releases its DAP register owner before closing that session. Cleanup
-errors remain meaningful and should be joined with the operation error rather
-than discarded.
+debug port, then closes its FTDI channel or adapter session. A metadata-only
+CMSIS-DAP composition closes its Session directly. A configured direct
+composition releases its DAP register owner before closing that Session. A
+generic Probe composition uses the same completed-register boundary through
+`RegisterSWD`; `armdebug` owns its cleanup. Cleanup errors remain meaningful and
+should be joined with the operation error rather than discarded.
 
 `probe.CleanupState` and `probe.RestorationState` are optional backend
 contracts. `Probe.CleanupPending` reports whether the owned backend still needs
@@ -226,13 +227,15 @@ commands.
 The FTDI channel and configured J-Link session provide general
 direction-explicit bit streams. CMSIS-DAP offers restricted explicit sequences,
 not a general SWD wire: firmware enables output at command end. Its generic
-probe owner therefore advertises no wire backend. The general wire backends do
-not interpret SWD requests. FTDI owns MPSSE framing; J-Link owns its scan
-framing and status; CMSIS-DAP owns its sequence commands and response status.
-Each adapter owns its clock and transfer limits. `swd.Conn` owns request
-framing, turnaround, acknowledgements, data parity, line reset, the JTAG-to-SWD
-selection sequence, and the CTRL/STAT.ORUNDETECT setting which selects the
-response grammar.
+probe owner advertises completed `DAP_Transfer` operations through
+`RegisterSWD`, independently of those sequences. Firmware completes posted AP
+reads and checks writes, while DAP owns logical selection and WAIT handling. The
+general wire backends do not interpret SWD requests. FTDI owns MPSSE framing;
+J-Link owns its scan framing and status; CMSIS-DAP owns its sequence commands
+and response status. Each adapter owns its clock and transfer limits. `swd.Conn`
+owns request framing, turnaround, acknowledgements, data parity, line reset, the
+JTAG-to-SWD selection sequence, and the CTRL/STAT.ORUNDETECT setting which
+selects the response grammar.
 
 `swd.Conn.Connect` tries JTAG-to-SWD first. If the initial DPIDR read has an
 invalid ACK and its trailing clocks complete, it tries JTAG-to-dormant and
