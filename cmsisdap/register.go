@@ -17,6 +17,8 @@ type RegisterSWD struct {
 	active, known   bool
 	originalOverrun bool
 	identity        uint32
+	bank            uint8
+	bankKnown       bool
 }
 
 // NewRegisterSWD constructs an idle register transport without traffic. The
@@ -50,6 +52,7 @@ func (r *RegisterSWD) Connect(ctx context.Context) (uint32, error) {
 		return 0, err
 	}
 	r.active = true
+	r.bank, r.bankKnown = 0, true
 	return r.identity, nil
 }
 
@@ -57,7 +60,7 @@ func (r *RegisterSWD) prepare(ctx context.Context) (uint32, error) {
 	if err := r.ready(ctx); err != nil {
 		return 0, err
 	}
-	r.active = false
+	r.active, r.bankKnown = false, false
 	if err := r.statusCommand(ctx, []byte{4, 8, 0, 0, 0, 0}); err != nil {
 		return 0, err
 	}
@@ -158,7 +161,11 @@ func (r *RegisterSWD) transfer(ctx context.Context, addr, flags byte, value uint
 	if r == nil || !r.active || addr&^byte(12) != 0 {
 		return 0, dap.RegisterUnsent, errors.New("cmsisdap: inactive register transport or invalid address")
 	}
+	if err := r.validateFramingWrite(addr, flags, value); err != nil {
+		return 0, dap.RegisterUnsent, err
+	}
 	result, status, err := r.session.transferRegister(ctx, addr|flags, value)
+	r.observeBank(addr, flags, value, status)
 	if status == dap.RegisterIndeterminate && !errors.Is(err, dap.ErrFault) {
 		r.active = false
 	}
@@ -171,6 +178,8 @@ func (r *RegisterSWD) ReadDP(ctx context.Context, addr uint8) (uint32, dap.Regis
 }
 
 // WriteDP completes one physical DP write, including its completion check.
+// It rejects changes to owned ORUNDETECT and turnaround framing. Writes at
+// offset 4 require a known DP bank; an uncertain SELECT needs explicit repair.
 func (r *RegisterSWD) WriteDP(ctx context.Context, addr uint8, value uint32) (dap.RegisterStatus, error) {
 	_, status, err := r.transfer(ctx, addr, 0, value)
 	return status, err
