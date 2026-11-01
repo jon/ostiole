@@ -176,7 +176,8 @@ func (m *MemAP) WriteWord(ctx context.Context, addr, value uint32) error {
 // value is right-justified regardless of target byte order or address lane.
 // An ordinary SWD bus FAULT, captured and successfully cleared, leaves this
 // MemAP and its peers usable. An unfinished 64-bit transfer still requires
-// cleanup; the failed access is never replayed.
+// cleanup once DRW may have started; an address-setup failure alone does not
+// create that obligation. The failed access is never replayed.
 func (m *MemAP) ReadScalar(ctx context.Context, addr uint64, size TransferSize) (uint64, error) {
 	return m.readScalar(ctx, addr, size)
 }
@@ -188,16 +189,20 @@ func (m *MemAP) readScalar(ctx context.Context, addr uint64, size TransferSize) 
 	if err := m.selectSize(ctx, size); err != nil {
 		return 0, err
 	}
-	txn := m.scalarTxn(addr)
+	txn, err := m.scalarAccessTxn(ctx, addr, size)
+	if err != nil {
+		return 0, err
+	}
 	low := txn.readAP(m.sel, memAPDRW)
 	var high *ReadResult
 	if size == Size64 {
 		high = txn.readAP(m.sel, memAPDRW)
-		m.largePending = true
 	}
 	generation := m.dp.state.apGeneration
 	if err := txn.Commit(ctx); err != nil {
-		if size == Size64 {
+		_, firstErr := low.Value()
+		if size == Size64 && !errors.Is(firstErr, ErrNotExecuted) {
+			m.largePending = true
 			m.requireLargeDataCleanup(generation)
 		}
 		return 0, err
@@ -224,7 +229,8 @@ func (m *MemAP) readScalar(ctx context.Context, addr uint64, size TransferSize) 
 // Release remains available to restore its saved state.
 // A captured and successfully cleared ordinary SWD bus FAULT leaves this
 // MemAP and its peers usable, although unconfirmed memory effects still report
-// ErrIndeterminate. An unfinished 64-bit transfer still requires cleanup.
+// ErrIndeterminate. An unfinished 64-bit transfer still requires cleanup
+// once DRW may have started; an address-setup failure alone does not.
 func (m *MemAP) WriteScalar(ctx context.Context, addr uint64, size TransferSize, value uint64) error {
 	if err := m.checkScalar(ctx, addr, size, "write"); err != nil {
 		return err
@@ -236,20 +242,24 @@ func (m *MemAP) WriteScalar(ctx context.Context, addr uint64, size TransferSize,
 	if err := m.selectSize(ctx, size); err != nil {
 		return err
 	}
-	txn := m.scalarTxn(addr)
+	txn, err := m.scalarAccessTxn(ctx, addr, size)
+	if err != nil {
+		return err
+	}
+	var first *WriteResult
 	if size == Size64 {
-		txn.writeAP(m.sel, memAPDRW, uint32(value))
+		first = txn.writeAP(m.sel, memAPDRW, uint32(value))
 		txn.writeAP(m.sel, memAPDRW, uint32(value>>32))
-		m.largePending = true
 	} else {
 		data := uint32(value) << m.laneShift(addr, size)
 		txn.writeAP(m.sel, memAPDRW, data)
 	}
 	generation := m.dp.state.apGeneration
-	err := txn.Commit(ctx)
+	err = txn.Commit(ctx)
 	if err == nil {
 		m.largePending = false
-	} else if size == Size64 {
+	} else if size == Size64 && !errors.Is(first.Err(), ErrNotExecuted) {
+		m.largePending = true
 		m.requireLargeDataCleanup(generation)
 	}
 	return err
@@ -336,6 +346,17 @@ func transferSizeEncoding(size TransferSize) (uint32, error) {
 	default:
 		return 0, fmt.Errorf("invalid transfer size %d", size)
 	}
+}
+
+func (m *MemAP) scalarAccessTxn(ctx context.Context, addr uint64, size TransferSize) (*Txn, error) {
+	txn := m.scalarTxn(addr)
+	if size != Size64 {
+		return txn, nil
+	}
+	if err := txn.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return m.dp.NewTxn(), nil
 }
 
 func (m *MemAP) scalarTxn(addr uint64) *Txn {

@@ -482,6 +482,12 @@ when present), then read or write DRW. A DRW read is still an AP read, so its
 value comes back through the posted pipeline. A DRW write must still complete
 through RDBUFF before its effect can be attributed.
 
+For Size64, address setup completes in its own transaction before either DRW
+request. A failure confined to TARHI or TAR does not create an unfinished data
+phase. Once DRW might have started, failed completion retains the Size64 cleanup
+obligation; release terminates that phase through CSW before restoring the saved
+address. Cleanup never replays the memory access.
+
 Automatic address increment is guaranteed only across TAR bits `[9:0]`. Whether
 it crosses a 1 KiB boundary is implementation-defined in ADIv5. A portable block
 implementation therefore ends each incrementing run and reprograms TAR at the
