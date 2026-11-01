@@ -41,7 +41,7 @@ func newSWDExecutor(conn *swd.Conn, dp *DebugPort) *swdExecutor {
 }
 
 func (e *swdExecutor) Connect(ctx context.Context) (uint32, error) {
-	value, err := e.Conn.Connect(ctx)
+	value, err := e.Conn.Connect(ctx, swd.WithCleanupTimeout(e.dp.cleanupTimeout))
 	return value, classifyPortError(err)
 }
 

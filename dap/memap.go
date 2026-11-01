@@ -332,7 +332,8 @@ func sizeMask(size TransferSize) uint64 {
 //
 // Release remains available while debug-port cleanup is pending. Failed
 // restoration remains pending so the method can be retried. Call it before
-// DebugPort.Release.
+// DebugPort.Release. Re-entry and restoration use ctx; cancellation before
+// traffic retains the saved state for a fresh-context retry.
 func (m *MemAP) Release(ctx context.Context) error {
 	if m == nil || m.dp == nil {
 		return nil
@@ -340,11 +341,9 @@ func (m *MemAP) Release(ctx context.Context) error {
 	if !m.restoreCSW && !m.restoreTAR && !m.restoreTARHI {
 		return nil
 	}
-	releaseCtx, cancel, err := m.prepareRelease(ctx)
-	if err != nil {
+	if err := m.prepareRelease(ctx); err != nil {
 		return err
 	}
-	defer cancel()
 	if m.restoreEpoch != m.dp.state.apGeneration {
 		m.restoreTAR = true
 		m.restoreTARHI = m.largeAddress
@@ -352,14 +351,14 @@ func (m *MemAP) Release(ctx context.Context) error {
 		m.restoreEpoch = m.dp.state.apGeneration
 	}
 	if m.largePending {
-		if err := m.restoreRegister(releaseCtx, &m.restoreCSW, memAPCSW, m.savedCSW, "CSW"); err != nil {
+		if err := m.restoreRegister(ctx, &m.restoreCSW, memAPCSW, m.savedCSW, "CSW"); err != nil {
 			return err
 		}
 		m.largePending = false
 	}
-	tarhiErr := m.restoreRegister(releaseCtx, &m.restoreTARHI, memAPTARHI, m.savedTARHI, "TARHI")
-	tarErr := m.restoreRegister(releaseCtx, &m.restoreTAR, memAPTAR, m.savedTAR, "TAR")
-	cswErr := m.restoreRegister(releaseCtx, &m.restoreCSW, memAPCSW, m.savedCSW, "CSW")
+	tarhiErr := m.restoreRegister(ctx, &m.restoreTARHI, memAPTARHI, m.savedTARHI, "TARHI")
+	tarErr := m.restoreRegister(ctx, &m.restoreTAR, memAPTAR, m.savedTAR, "TAR")
+	cswErr := m.restoreRegister(ctx, &m.restoreCSW, memAPCSW, m.savedCSW, "CSW")
 	return errors.Join(tarhiErr, tarErr, cswErr)
 }
 
@@ -406,22 +405,22 @@ func sizeBytes(size TransferSize) (int, error) {
 	}
 }
 
-func (m *MemAP) prepareRelease(ctx context.Context) (context.Context, context.CancelFunc, error) {
+func (m *MemAP) prepareRelease(ctx context.Context) error {
 	if ctx == nil {
-		return nil, nil, errors.New("dap: nil context")
+		return errors.New("dap: nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if m.dp.state.session == sessionIdle {
-		return nil, nil, errors.New("dap: debug port is not connected")
+		return errors.New("dap: debug port is not connected")
 	}
-	if m.dp.state.responseKnown() {
-		return ctx, func() {}, nil
+	if !m.dp.state.responseKnown() {
+		if err := m.dp.reenter(ctx); err != nil {
+			return fmt.Errorf("dap: restore protocol state for MEM-AP release: %w", err)
+		}
 	}
-	releaseCtx, cancel := m.dp.cleanupContext()
-	if err := m.dp.reenter(releaseCtx); err != nil {
-		cancel()
-		return nil, nil, fmt.Errorf("dap: restore protocol state for MEM-AP release: %w", err)
-	}
-	return releaseCtx, cancel, nil
+	return nil
 }
 
 func validateMemAPErrorMode(sel APSel, cfg, csw uint32) error {
