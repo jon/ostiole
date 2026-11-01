@@ -2,12 +2,6 @@
 
 package usb
 
-/*
-#cgo LDFLAGS: -framework CoreFoundation -framework IOKit
-#include "iokit_darwin.h"
-*/
-import "C"
-
 import (
 	"context"
 	"errors"
@@ -23,14 +17,16 @@ type darwinBulkTransferOpener interface {
 }
 
 type iokitBulkEngine struct {
-	iface        *iokitInterface
-	routes       map[uint8]darwinPipe
-	submissions  chan iokitBulkSubmission
-	aborts       chan iokitBulkAbort
-	closes       chan chan error
-	closed       chan struct{}
-	mu           sync.Mutex
-	pendingCount int
+	iface          *iokitInterface
+	openNative     func() (darwinBulkNative, error)
+	cleanupTimeout time.Duration
+	routes         map[uint8]darwinPipe
+	submissions    chan iokitBulkSubmission
+	aborts         chan iokitBulkAbort
+	closes         chan chan error
+	closed         chan struct{}
+	mu             sync.Mutex
+	pendingCount   int
 }
 
 type iokitBulkSubmission struct {
@@ -54,7 +50,7 @@ type iokitBulkTransfer struct {
 	engine   *iokitBulkEngine
 	endpoint uint8
 	buffer   []byte
-	native   *C.ostiole_usb_bulk_transfer
+	native   darwinBulkRequest
 	done     chan struct{}
 	mu       sync.Mutex
 	count    int
@@ -80,11 +76,7 @@ func (d *Device) openBulkTransfers(claim *ClaimedInterface) (bulkTransferEngine,
 }
 
 func (i *iokitInterface) openBulkTransfers(routes map[uint8]darwinPipe) (bulkTransferEngine, error) {
-	engine := &iokitBulkEngine{
-		iface: i, routes: routes, submissions: make(chan iokitBulkSubmission),
-		aborts: make(chan iokitBulkAbort), closes: make(chan chan error),
-		closed: make(chan struct{}),
-	}
+	engine := newIOKitBulkEngine(i, routes)
 	ready := make(chan error, 1)
 	go engine.run(ready)
 	if err := <-ready; err != nil {
@@ -93,15 +85,23 @@ func (i *iokitInterface) openBulkTransfers(routes map[uint8]darwinPipe) (bulkTra
 	return engine, nil
 }
 
+func newIOKitBulkEngine(i *iokitInterface, routes map[uint8]darwinPipe) *iokitBulkEngine {
+	return &iokitBulkEngine{
+		iface: i, routes: routes, openNative: i.openBulkNative,
+		cleanupTimeout: bulkCleanupTimeout, submissions: make(chan iokitBulkSubmission),
+		aborts: make(chan iokitBulkAbort), closes: make(chan chan error),
+		closed: make(chan struct{}),
+	}
+}
+
 func (e *iokitBulkEngine) run(ready chan<- error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	e.iface.transfer.Lock()
 	defer e.iface.transfer.Unlock()
-	var result C.kern_return_t
-	native := C.ostiole_usb_bulk_engine_open(e.iface.native, &result)
-	if native == nil {
-		ready <- iokitError(result)
+	native, err := e.openNative()
+	if err != nil {
+		ready <- err
 		close(e.closed)
 		return
 	}
@@ -125,12 +125,12 @@ func (e *iokitBulkEngine) run(ready chan<- error) {
 			close(e.closed)
 			return
 		default:
-			C.ostiole_usb_bulk_engine_poll(native, 1)
+			native.poll()
 		}
 	}
 }
 
-func (e *iokitBulkEngine) submitTransfer(native *C.ostiole_usb_bulk_engine, transfers map[*iokitBulkTransfer]struct{}, submission iokitBulkSubmission) {
+func (e *iokitBulkEngine) submitTransfer(native darwinBulkNative, transfers map[*iokitBulkTransfer]struct{}, submission iokitBulkSubmission) {
 	if err := submission.ctx.Err(); err != nil {
 		submission.reply <- iokitBulkSubmissionResult{err: err}
 		return
@@ -144,17 +144,11 @@ func (e *iokitBulkEngine) submitTransfer(native *C.ostiole_usb_bulk_engine, tran
 		submission.reply <- iokitBulkSubmissionResult{err: fmt.Errorf("usb: endpoint %#02x is not active", submission.endpoint)}
 		return
 	}
-	var result C.kern_return_t
-	input := C.uint8_t(0)
-	if submission.endpoint&0x80 != 0 {
-		input = 1
-	}
 	transfer := &iokitBulkTransfer{engine: e, endpoint: submission.endpoint, buffer: submission.buffer, done: make(chan struct{})}
-	transfer.native = C.ostiole_usb_bulk_transfer_submit(native, C.uint8_t(pipe.ref), input,
-		bytePointer(submission.buffer), C.uint32_t(len(submission.buffer)), &result)
-	runtime.KeepAlive(submission.buffer)
-	if transfer.native == nil {
-		submission.reply <- iokitBulkSubmissionResult{err: fmt.Errorf("usb: submit bulk transfer: %w", iokitError(result))}
+	var err error
+	transfer.native, err = native.submit(pipe.ref, submission.endpoint&0x80 != 0, submission.buffer)
+	if err != nil {
+		submission.reply <- iokitBulkSubmissionResult{err: fmt.Errorf("usb: submit bulk transfer: %w", err)}
 		return
 	}
 	transfers[transfer] = struct{}{}
@@ -165,13 +159,15 @@ func (e *iokitBulkEngine) submitTransfer(native *C.ostiole_usb_bulk_engine, tran
 func (e *iokitBulkEngine) takeCompletions(transfers map[*iokitBulkTransfer]struct{}) bool {
 	taken := false
 	for transfer := range transfers {
-		event := C.ostiole_usb_bulk_transfer_take(transfer.native, bytePointer(transfer.buffer), C.uint32_t(len(transfer.buffer)))
-		runtime.KeepAlive(transfer.buffer)
-		if event.available == 0 {
+		event := transfer.native.take(transfer.buffer)
+		if !event.available {
 			continue
 		}
-		count, err := darwinBulkCompletion(uint32(event.transfer.done), iokitTransferError(uint32(event.transfer.result), uint32(event.transfer.cleanup)))
-		C.ostiole_usb_bulk_transfer_free(transfer.native)
+		count, err := darwinBulkCompletion(event.count, event.err)
+		if uint64(count) > uint64(len(transfer.buffer)) {
+			count, err = 0, errors.New("usb: native bulk completion exceeds buffer length")
+		}
+		transfer.native.free()
 		transfer.native = nil
 		delete(transfers, transfer)
 		transfer.complete(int(count), err)
@@ -180,7 +176,7 @@ func (e *iokitBulkEngine) takeCompletions(transfers map[*iokitBulkTransfer]struc
 	return taken
 }
 
-func (e *iokitBulkEngine) abortEndpoint(native *C.ostiole_usb_bulk_engine, transfers map[*iokitBulkTransfer]struct{}, endpoint uint8) error {
+func (e *iokitBulkEngine) abortEndpoint(native darwinBulkNative, transfers map[*iokitBulkTransfer]struct{}, endpoint uint8) error {
 	if endpointPendingDarwin(transfers, endpoint) == 0 {
 		return nil
 	}
@@ -189,18 +185,17 @@ func (e *iokitBulkEngine) abortEndpoint(native *C.ostiole_usb_bulk_engine, trans
 		return fmt.Errorf("usb: endpoint %#02x is not active", endpoint)
 	}
 	return abortAndDrainDarwin(func() error {
-		result := C.ostiole_usb_bulk_engine_abort(native, C.uint8_t(pipe.ref))
-		if result != C.kIOReturnSuccess {
-			return fmt.Errorf("usb: abort endpoint %#02x: %w", endpoint, iokitError(result))
+		if err := native.abort(pipe.ref); err != nil {
+			return fmt.Errorf("usb: abort endpoint %#02x: %w", endpoint, err)
 		}
 		return nil
 	}, func() error {
 		err := waitForDarwinDrain(func() bool {
 			return endpointPendingDarwin(transfers, endpoint) != 0
 		}, func() {
-			C.ostiole_usb_bulk_engine_poll(native, 1)
+			native.poll()
 			e.takeCompletions(transfers)
-		}, time.Now().Add(bulkCleanupTimeout))
+		}, time.Now().Add(e.cleanupTimeout))
 		if err != nil {
 			return fmt.Errorf("usb: drain endpoint %#02x: %w", endpoint, err)
 		}
@@ -235,7 +230,7 @@ func endpointPendingDarwin(transfers map[*iokitBulkTransfer]struct{}, endpoint u
 	return count
 }
 
-func (e *iokitBulkEngine) closeTransfers(native *C.ostiole_usb_bulk_engine, transfers map[*iokitBulkTransfer]struct{}) error {
+func (e *iokitBulkEngine) closeTransfers(native darwinBulkNative, transfers map[*iokitBulkTransfer]struct{}) error {
 	endpoints := make(map[uint8]bool)
 	for transfer := range transfers {
 		endpoints[transfer.endpoint] = true
@@ -247,7 +242,7 @@ func (e *iokitBulkEngine) closeTransfers(native *C.ostiole_usb_bulk_engine, tran
 	if result != nil {
 		return result
 	}
-	C.ostiole_usb_bulk_engine_close(native)
+	native.close()
 	return nil
 }
 

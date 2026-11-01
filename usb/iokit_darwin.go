@@ -217,5 +217,8 @@ func joinIOKitCleanupCodes(codes ...uint32) error {
 }
 
 func iokitErrorCode(code uint32) error {
+	if code == uint32(C.kIOReturnSuccess) {
+		return nil
+	}
 	return fmt.Errorf("IOKit result %#x", code)
 }

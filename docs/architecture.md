@@ -361,7 +361,10 @@ The `usb` API is the same on both supported hosts:
   an interface temporarily seizes that interface from its current driver and
   closing it releases ownership. A claim-owned worker confines asynchronous pipe
   operations and the interface event source to one locked OS thread and run
-  loop.
+  loop. Unit tests exercise that Go worker with native calls replaced, including
+  completion accounting, abort drains, and cleanup retries. Those tests do not
+  execute IOKit. Successful completion counts cannot exceed the requested buffer
+  length.
 
 The API keeps USB endpoint addresses, directions, maximum packet sizes, transfer
 lengths, completion boundaries, short transfers, and zero-length transfers
