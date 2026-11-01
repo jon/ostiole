@@ -451,6 +451,11 @@ A complete FAULT response after one or more WAITs still ends at a request
 boundary. Return FAULT; the preceding WAITs do not justify DAPABORT or framing
 invalidation.
 
+SWD and JTAG reject inherited CTRL/STAT.TRNMODE and TRNCNT modes before
+acquiring power. Immediate and queued CTRL/STAT writes reject those modes before
+traffic. DPv3 also rejects inherited ERRMODE, including when both power requests
+were already asserted; the rejection does not change those inherited requests.
+
 ## MEM-AP
 
 IHI 0031H chapter C2 is the MEM-AP programmer's model. An ADIv5 MEM-AP reports

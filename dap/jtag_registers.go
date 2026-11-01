@@ -6,7 +6,6 @@ import (
 	"fmt"
 )
 
-const jtagTransactionModes = uint32(3<<2 | 0xfff<<12)
 const jtagSticky = stickyOverrun | stickyCompare | stickyError
 
 func (e *jtagExecutor) register(reg DPRegister, write bool) (dpRegisterInfo, error) {
@@ -30,7 +29,7 @@ func (e *jtagExecutor) validateWrite(reg DPRegister, value uint32) error {
 	if reg == ABORT && value != dapAbort {
 		return errors.New("dap: baseline JTAG ABORT permits only DAPABORT")
 	}
-	if reg == CTRLSTAT && value&(jtagTransactionModes|overrunDetect) != 0 {
+	if reg == CTRLSTAT && value&(transactionModes|overrunDetect) != 0 {
 		return errors.New("dap: CTRL/STAT cannot enable ORUNDETECT, pushed operations, or transaction counting")
 	}
 	if reg == SELECT && value&0x00ffff0f != 0 {

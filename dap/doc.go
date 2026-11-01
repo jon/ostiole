@@ -64,7 +64,8 @@
 // Connect. The underlying SWD connection establishes the simple or fixed
 // response grammar, tries to enable ORUNDETECT, and restores that change during
 // Release. JTAG temporarily disables inherited ORUNDETECT and restores it on
-// release. It rejects active pushed-operation and transaction-counter modes.
+// release. Both bindings reject active pushed-operation and transaction-counter
+// modes during entry and in CTRL/STAT writes.
 // DAP writes must preserve the binding-owned mode.
 //
 // A failed Connect attempts bounded cleanup before returning. If that cleanup

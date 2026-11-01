@@ -9,7 +9,8 @@ import (
 )
 
 const (
-	overrunDetect = uint32(1 << 0)
+	overrunDetect    = uint32(1 << 0)
+	transactionModes = uint32(3<<2 | 0xfff<<12)
 
 	debugPowerRequest  = uint32(1 << 28)
 	debugPowerAck      = uint32(1 << 29)
@@ -20,9 +21,11 @@ const (
 )
 
 // Connect enters the bound protocol, validates the debug port, and acquires
-// only power requests not already asserted. The binding owns the response
-// mode and restores its ORUNDETECT change during Release. If connection setup
-// fails, Connect attempts bounded cleanup before returning the original error.
+// only power requests not already asserted. Inherited pushed-operation or
+// transaction-counter modes are rejected before acquiring power. The binding
+// owns the response mode and restores its ORUNDETECT change during Release.
+// If connection setup fails, Connect attempts bounded cleanup before returning
+// the original error.
 // A cleanup failure is joined to that error; Release may then be retried,
 // while other DP, AP, transaction, and MEM-AP operations remain blocked. Failed
 // JTAG validation before any DP state is acquired leaves Release idle.
@@ -129,6 +132,9 @@ func (dp *DebugPort) initialize(ctx context.Context, raw uint32) (Identity, uint
 	state, err := dp.readResponseState(ctx)
 	if err != nil {
 		return Identity{}, 0, err
+	}
+	if state&transactionModes != 0 {
+		return Identity{}, 0, errors.New("dap: inherited transaction modes are not supported")
 	}
 	if dpidr.Version == 3 {
 		if state&(1<<24) != 0 {

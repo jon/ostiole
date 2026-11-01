@@ -160,8 +160,8 @@ func (dp *DebugPort) readDPRegister(ctx context.Context, reg DPRegister, info dp
 
 // WriteDP writes one logical debug-port register. The binding owns
 // CTRL/STAT.ORUNDETECT: preserve its SWD value and keep it clear for JTAG.
-// JTAG pushed-operation and transaction-counter modes are rejected, as are
-// unsupported SWD turnaround settings. Release does
+// Pushed-operation and transaction-counter modes are rejected on both
+// bindings, as are unsupported SWD turnaround settings. Release does
 // not restore power-request bits changed through this method. A successful
 // DAPABORT write invalidates existing MemAP values. The debug port must be
 // connected.
@@ -237,19 +237,31 @@ func (dp *DebugPort) validateDPWrite(reg DPRegister, value uint32) (dpRegisterIn
 	if dp.jtag != nil {
 		return info, dp.jtag.validateWrite(reg, value)
 	}
-	if reg == CTRLSTAT && !dp.state.responseKnown() {
-		return dpRegisterInfo{}, errors.New("dap: write CTRL/STAT requires a known SWD response grammar")
-	}
-	if reg == CTRLSTAT && (value&overrunDetect != 0) != (dp.state.response == responseOverrun) {
-		return dpRegisterInfo{}, errors.New("dap: write CTRL/STAT: ORUNDETECT is owned by the SWD connection")
-	}
-	if reg == CTRLSTAT && dp.reentryID.dpidr.Version == 3 && value&(1<<24) != 0 {
-		return dpRegisterInfo{}, errors.New("dap: DP ERRMODE is not supported")
+	if reg == CTRLSTAT {
+		if err := dp.validateSWDControl(value); err != nil {
+			return dpRegisterInfo{}, err
+		}
 	}
 	if reg == DLCR && value&dlcrTurnaroundMask != 0 {
 		return dpRegisterInfo{}, errors.New("dap: write DLCR: variable turnaround requires unsupported SWD framing")
 	}
 	return info, dp.validateSelectionAddress(reg, value)
+}
+
+func (dp *DebugPort) validateSWDControl(value uint32) error {
+	if value&transactionModes != 0 {
+		return errors.New("dap: CTRL/STAT transaction modes are not supported")
+	}
+	if !dp.state.responseKnown() {
+		return errors.New("dap: write CTRL/STAT requires a known SWD response grammar")
+	}
+	if (value&overrunDetect != 0) != (dp.state.response == responseOverrun) {
+		return errors.New("dap: write CTRL/STAT: ORUNDETECT is owned by the SWD connection")
+	}
+	if dp.reentryID.dpidr.Version == 3 && value&(1<<24) != 0 {
+		return errors.New("dap: DP ERRMODE is not supported")
+	}
+	return nil
 }
 
 func (dp *DebugPort) validateBankedDPRegister(info dpRegisterInfo) error {

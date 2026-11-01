@@ -1,7 +1,9 @@
 package dap_test
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/jon/ostiole/dap"
 )
@@ -21,6 +23,16 @@ func TestLogicalDPRegistersDistinguishSharedWireOffsets(t *testing.T) {
 func TestLogicalDPAccessRejectsWrongDirectionBeforeTraffic(t *testing.T) {
 	target := newWaitTarget()
 	dp := newDebugPort(t, target)
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := dp.Release(ctx); err != nil {
+			t.Error(err)
+		}
+	})
 
 	for _, reg := range []dap.DPRegister{dap.DPIDR, dap.TARGETID, dap.DLPIDR, dap.EVENTSTAT, dap.RESEND, dap.RDBUFF} {
 		before := len(target.requests)
