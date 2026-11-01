@@ -114,8 +114,9 @@ underlying wire and context errors. `FaultError` reports captured CTRL/STAT
 without naming a wire protocol; an SWD fault still matches `swd.ErrFault`. If
 cancellation stops WAIT retries or interrupts sticky cleanup, the result keeps
 the context error without matching `ErrWait`. Independently joined cleanup
-failures remain visible. An incomplete sticky-clear exchange still requires
-cleanup before ordinary traffic can continue.
+failures remain visible, including wrapped errors and their concrete types. An
+incomplete sticky-clear exchange still requires cleanup before ordinary traffic
+can continue.
 
 A completed SWD read with bad data parity reports `swd.ErrParity`, including a
 read retried after WAIT, without retaining the earlier WAIT classification or
