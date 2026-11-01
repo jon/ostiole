@@ -98,7 +98,13 @@ The zero identity contains neither register. `DebugPort.Identity()` retains the
 last successful identity after release or a cleanup failure.
 `dp.CleanupPending()` reports without traffic whether this session still needs
 `Release`, including a retained setup failure. It does not report MEM-AP or
-probe cleanup, or promise that restoration communication remains possible.
+probe cleanup, or promise that restoration communication remains possible. A
+failed connection retains both its setup error and a deadline reported by
+completed SWD cleanup. If the final started frame restores the link after the
+cleanup context expires, `CleanupPending` is false and later `Release` calls
+send no traffic. A live failure which leaves restoration pending still retains
+the owner for retry.
+
 Release acquired MEM-APs before releasing the debug port, and keep the wire
 connection and probe open until that cleanup succeeds.
 
