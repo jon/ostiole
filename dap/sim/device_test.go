@@ -258,10 +258,6 @@ func TestMappedDeviceFaultUsesDAPRecovery(t *testing.T) {
 	if err := memory.Release(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	memory, err = dap.OpenMemAP(t.Context(), dp, apSel(0))
-	if err != nil {
-		t.Fatal(err)
-	}
 	t.Cleanup(func() {
 		if err := memory.Release(context.Background()); err != nil {
 			t.Error(err)

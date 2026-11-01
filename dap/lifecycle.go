@@ -261,6 +261,7 @@ func (dp *DebugPort) reenter(ctx context.Context) error {
 }
 
 func (dp *DebugPort) beginConnect() {
+	dp.memAPs = nil
 	dp.reentryID = Identity{}
 	dp.reentryKnown = false
 	dp.state.beginConnect()

@@ -40,18 +40,21 @@ const (
 )
 
 // MemAP performs arbitrary-range and aligned-scalar reads and writes through one
-// memory access port.
+// memory access port in one debug-port session.
 //
 // Its methods and all uses of its DebugPort must be serialized. Release the
 // MemAP before releasing its DebugPort. Reads and writes change volatile
 // MEM-AP registers; Release restores the saved values. If a failed Size64
 // transfer might have started its first DRW access, release the MemAP and then
-// the DebugPort before reconnecting.
+// the DebugPort before reconnecting. A still-valid handle may be reused after
+// successful Release within that session; later releases restore the original
+// acquisition snapshot. Reconnect requires a new handle.
 type MemAP struct {
 	dp           *DebugPort
 	sel          APSel
 	epoch        uint64
 	restoreEpoch uint64
+	sessionID    uint64
 	csw          uint32
 	savedCSW     uint32
 	savedTAR     uint32
@@ -68,8 +71,38 @@ type MemAP struct {
 // OpenMemAP validates sel and saves the state changed by target-memory access.
 // It performs AP traffic. A returned MemAP must be paired with MemAP.Release.
 // The debug port must be connected and must not have cleanup pending.
+// Only one handle may own a selector in that session. A duplicate is rejected
+// before traffic, including after MemAP.Release; reuse the existing valid
+// handle instead. A failed acquisition does not reserve the selector.
 func OpenMemAP(ctx context.Context, dp *DebugPort, sel APSel) (memory *MemAP, err error) {
-	defer func() { err = callerError(ctx, err) }()
+	defer func() {
+		err = callerError(ctx, err)
+		if err != nil && memory != nil {
+			delete(dp.memAPs, sel)
+			memory = nil
+		}
+	}()
+	if _, err := validateAPSel(sel); err != nil {
+		return nil, err
+	}
+	if err := dp.requireConnected(ctx); err != nil {
+		return nil, err
+	}
+	if _, owned := dp.memAPs[sel]; owned {
+		return nil, errors.New("dap: access port is already owned")
+	}
+	memory, err = dp.snapshotMemAP(ctx, sel)
+	if err != nil {
+		return nil, err
+	}
+	if dp.memAPs == nil {
+		dp.memAPs = make(map[APSel]struct{})
+	}
+	dp.memAPs[sel] = struct{}{}
+	return memory, nil
+}
+
+func (dp *DebugPort) snapshotMemAP(ctx context.Context, sel APSel) (*MemAP, error) {
 	selection, err := validateAPSel(sel)
 	if err != nil {
 		return nil, err
@@ -116,6 +149,7 @@ func OpenMemAP(ctx context.Context, dp *DebugPort, sel APSel) (memory *MemAP, er
 		sel:          sel,
 		epoch:        dp.state.apGeneration,
 		restoreEpoch: dp.state.apGeneration,
+		sessionID:    dp.state.sessionID,
 		csw:          configuredCSW,
 		savedCSW:     csw,
 		savedTAR:     tar,
@@ -245,6 +279,9 @@ func (m *MemAP) checkActive(ctx context.Context, operation string) error {
 	if m == nil || m.dp == nil {
 		return errors.New("dap: nil MEM-AP")
 	}
+	if m.sessionID != m.dp.state.sessionID {
+		return errors.New("dap: MEM-AP belongs to an earlier debug-port session")
+	}
 	if m.epoch != m.dp.state.apGeneration {
 		return fmt.Errorf("dap: %s: MEM-AP state was invalidated by debug-port recovery", operation)
 	}
@@ -342,7 +379,10 @@ func sizeMask(size TransferSize) uint64 {
 //
 // Release remains available while debug-port cleanup is pending. Failed
 // restoration remains pending so the method can be retried. Call it before
-// DebugPort.Release. Re-entry and restoration use ctx; cancellation before
+// DebugPort.Release. Pending restoration from an earlier debug-port session
+// is rejected before traffic. Release does not free the session's selector
+// reservation or revalidate a stale client.
+// Re-entry and restoration use ctx; cancellation before
 // traffic retains the saved state for a fresh-context retry. Started SWD frames
 // and JTAG scans finish under their connection's independent completion budget.
 func (m *MemAP) Release(ctx context.Context) (err error) {
@@ -423,6 +463,9 @@ func (m *MemAP) prepareRelease(ctx context.Context) error {
 	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if m.sessionID != m.dp.state.sessionID {
+		return errors.New("dap: MEM-AP belongs to an earlier debug-port session")
 	}
 	if m.dp.state.session == sessionIdle {
 		return errors.New("dap: debug port is not connected")

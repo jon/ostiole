@@ -6,6 +6,10 @@
 // explicit chain and zero-based, TDO-first TAP index with a four- or eight-bit IR.
 // OpenMemAP validates one access port and snapshots the register values it will
 // change. Release them in reverse order: the MemAP first, then the DebugPort.
+// Each selector has one MemAP owner per debug-port session. MemAP.Release
+// restores state without freeing that reservation; a valid handle can be reused
+// in the same session. After reconnecting the debug port, acquire a new handle.
+// Earlier-session clients cannot access memory or restore their old snapshots.
 //
 // SWD retries a clean WAIT while the required posted data remains valid.
 // Fixed-frame WAIT cleanup discards pending AP read data; that read reports

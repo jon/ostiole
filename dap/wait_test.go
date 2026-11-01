@@ -1369,8 +1369,8 @@ func TestDebugPortRequiresRepairWhenStickyClearDoesNotTakeEffect(t *testing.T) {
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatalf("Connect() after repair: %v", err)
 	}
-	if _, err := mem.ReadWord(t.Context(), 0xe000ed00); err == nil || !strings.Contains(err.Error(), "invalidated") {
-		t.Fatalf("ReadWord() through pre-FAULT MEM-AP error = %v, want invalidated state", err)
+	if _, err := mem.ReadWord(t.Context(), 0xe000ed00); err == nil || !strings.Contains(err.Error(), "earlier debug-port session") {
+		t.Fatalf("ReadWord() through pre-FAULT MEM-AP error = %v, want earlier-session rejection", err)
 	}
 }
 
@@ -1454,9 +1454,18 @@ func TestDebugPortKeepsFramingAfterWAITThenFAULT(t *testing.T) {
 	if _, err := mem.ReadWord(t.Context(), 0xe000ed00); err == nil || !strings.Contains(err.Error(), "invalidated") {
 		t.Fatalf("ReadWord() through invalidated MEM-AP error = %v", err)
 	}
+	if err := mem.Release(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	mem, err = dap.OpenMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
-		t.Fatalf("OpenMemAP() after clean FAULT: %v", err)
+		t.Fatalf("OpenMemAP() after reconnect: %v", err)
 	}
 	if _, err := mem.ReadWord(t.Context(), 0xe000ed00); err != nil {
 		t.Fatalf("ReadWord() through replacement MEM-AP: %v", err)

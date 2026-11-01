@@ -31,6 +31,7 @@ type debugPortState struct {
 	dpWritePending bool
 	ownedPower     uint32
 	apGeneration   uint64
+	sessionID      uint64
 }
 
 func (s *debugPortState) recordSELECT(value uint32) {
@@ -56,6 +57,7 @@ func (s *debugPortState) beginProtocolEntry() {
 }
 
 func (s *debugPortState) beginConnect() {
+	s.sessionID++
 	s.session = sessionRepairRequired
 	s.beginProtocolEntry()
 }
