@@ -99,3 +99,31 @@ func callerError(ctx context.Context, err error) error {
 	}
 	return err
 }
+
+// A canceled WAIT cleanup keeps its cleanup causes, but is no longer a
+// retryable WAIT. SWD joins that acknowledgement beside its cleanup error.
+func canceledWAITCause(ctx context.Context, err error) error {
+	if err == swd.ErrWait {
+		return err
+	}
+	err = callerError(ctx, err)
+	if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	return omitWAIT(err)
+}
+
+func omitWAIT(err error) error {
+	if err == swd.ErrWait {
+		return nil
+	}
+	joined, ok := err.(interface{ Unwrap() []error })
+	if !ok {
+		return err
+	}
+	var causes []error
+	for _, cause := range joined.Unwrap() {
+		causes = append(causes, omitWAIT(cause))
+	}
+	return errors.Join(causes...)
+}

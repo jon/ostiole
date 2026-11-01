@@ -8,33 +8,39 @@ import (
 	"github.com/jon/ostiole/swd"
 )
 
-func (e *swdExecutor) readAP(ctx context.Context, addr uint8) (bool, uint32, error) {
-	_, err := e.transfer(ctx, apTransferRequest(addr&0x0c, true), 0)
+func (e *swdExecutor) readAP(ctx context.Context, sel APSel, addr uint16) (bool, uint32, error) {
+	_, err := e.transfer(ctx, apTransferRequest(uint8(addr&0x0c), true), 0)
 	if err != nil {
 		possible := !requestWasRejected(err) && !requestWasNotSent(err) && !errors.Is(err, swd.ErrFault)
-		return possible, 0, fmt.Errorf("dap: post raw AP read at %#02x: %w", addr, err)
+		if possible && errors.Is(err, swd.ErrParity) {
+			err = errors.Join(err, ErrIndeterminate)
+		}
+		return possible, 0, fmt.Errorf("dap: post %s register %#x read: %w", sel, addr, err)
 	}
 	e.pendingRead = true
 	defer func() { e.pendingRead = false }()
 	value, err := e.dp.readDP(ctx, RDBUFF)
+	if err != nil {
+		err = fmt.Errorf("dap: complete %s register %#x read: %w", sel, addr, err)
+	}
 	return true, value, err
 }
 
-func (e *swdExecutor) writeAP(ctx context.Context, addr uint8, value uint32) (bool, error) {
-	_, err := e.transfer(ctx, apTransferRequest(addr&0x0c, false), value)
+func (e *swdExecutor) writeAP(ctx context.Context, sel APSel, addr uint16, value uint32) (bool, error) {
+	_, err := e.transfer(ctx, apTransferRequest(uint8(addr&0x0c), false), value)
 	if err != nil {
 		possible := !requestWasRejected(err) && !requestWasNotSent(err) && !errors.Is(err, swd.ErrFault)
 		if possible {
 			err = errors.Join(err, ErrIndeterminate)
 		}
-		return possible, fmt.Errorf("dap: write raw AP register at %#02x: %w", addr, err)
+		return possible, fmt.Errorf("dap: write %s register %#x: %w", sel, addr, err)
 	}
 	if _, err := e.dp.readDP(ctx, RDBUFF); err != nil {
 		rejected := faultReportsWriteDataError(err)
 		if !rejected && !confirmedSWDCompletionParity(err) {
 			err = errors.Join(err, ErrIndeterminate)
 		}
-		return !rejected, fmt.Errorf("dap: complete raw AP write at %#02x: %w", addr, err)
+		return !rejected, fmt.Errorf("dap: complete %s register %#x write: %w", sel, addr, err)
 	}
 	return true, nil
 }

@@ -106,8 +106,18 @@ Port operations and queued results support `errors.Is` with `dap.ErrWait`,
 `dap.ErrFault`, and `dap.ErrProtocol`. These classifications retain the
 underlying wire and context errors. `FaultError` reports captured CTRL/STAT
 without naming a wire protocol; an SWD fault still matches `swd.ErrFault`. If
-cancellation stops WAIT retries, the result remains a context error.
-Independently joined cleanup failures remain visible.
+cancellation stops WAIT retries or interrupts sticky cleanup, the result keeps
+the context error without matching `ErrWait`. Independently joined cleanup
+failures remain visible. An incomplete sticky-clear exchange still requires
+cleanup before ordinary traffic can continue.
+
+A completed SWD read with bad data parity reports `swd.ErrParity`, including a
+read retried after WAIT, without retaining the earlier WAIT classification or
+losing known framing. A raw AP read whose posting response has bad parity also
+reports `ErrIndeterminate`: the AP request was accepted, but its posted result
+was not retrieved. Raw access still invalidates existing MEM-AP clients.
+Immediate SWD raw AP errors name the selector and complete register offset,
+including the 12-bit ADIv6 window.
 
 In fixed-frame SWD mode, clearing STICKYORUN after WAIT writes ABORT and
 discards any pending AP read result. If an accepted read still needs that

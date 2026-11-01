@@ -591,7 +591,7 @@ func (t *swdTxn) handleBatchFailure(ctx context.Context, steps []txnStep, result
 	value, _ := results[0].value()
 	if errors.Is(err, swd.ErrWait) {
 		if err != swd.ErrWait {
-			return t.failBatchWAITCleanup(steps, results, err)
+			return t.failBatchWAITCleanup(ctx, steps, results, err)
 		}
 		return t.retryBatchWAIT(ctx, steps, results, waits)
 	}
@@ -623,12 +623,12 @@ func (t *swdTxn) handleBatchNotExecuted(step txnStep, batchErr error, waits int)
 	return t.failStep(step, batchErr)
 }
 
-func (t *swdTxn) failBatchWAITCleanup(steps []txnStep, results []transferResult, err error) error {
+func (t *swdTxn) failBatchWAITCleanup(ctx context.Context, steps []txnStep, results []transferResult, err error) error {
 	if !batchSuffixAbandoned(results) {
 		return t.failUnexpectedBatchSuffix(steps[:clockedTransferCount(results)], err)
 	}
 	step := steps[0]
-	err = t.executionError(step, err)
+	err = t.executionError(step, canceledWAITCause(ctx, err))
 	t.dp.state.loseFraming()
 	t.ops[step.op].result.resolve(0, err)
 	t.resolveSuffix(step.op + 1)

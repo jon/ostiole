@@ -106,6 +106,12 @@ guess. The batch then requires repair and marks that suffix indeterminate.
 Chunks end after ABORT because clearing sticky state can permit ordinary
 requests to complete again.
 
+In `swd/sim`, a target's `Read` can return its value with exactly
+`swd.ErrParity` to emit incorrect read-data parity after acceptance. Both simple
+and fixed responses complete their wire phases; other target errors fail the
+physical exchange. This supports parity-failure tests without making
+higher-layer tests encode SWD frames.
+
 `Batch.Commit` inspects every response in a physical chunk. An early read parity
 error cannot hide a later WAIT, FAULT, or invalid acknowledgement. The returned
 error includes each physical failure with its operation index. A WAIT is cleared
