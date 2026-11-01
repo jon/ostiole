@@ -97,10 +97,24 @@ acknowledgement, data phase, turnaround, and idle clocks as one unit.
 With the default one-clock turnaround and eight idle clocks, either fixed
 response is 54 clocks. Several complete frames can share one transport exchange;
 that changes the host/probe boundary, not the SWD packet format. A WAIT in such
-an exchange sets STICKYORUN, so the target abandons later requests and returns
-FAULT for them. The host can clear STICKYORUN and resume at the request which
-returned WAIT. If a later request instead appears to complete, its effect is no
-longer safe to guess.
+an exchange sets STICKYORUN, so the target abandons later non-exempt requests
+and returns FAULT for them. DPIDR reads, bank-zero CTRL/STAT reads, and ABORT
+writes remain sticky-exempt; their confirmed results are retained. The host can
+clear STICKYORUN and resume at the request which returned WAIT. If a later
+non-exempt request instead appears to complete, its effect is no longer safe to
+guess. The batch then requires repair and marks that suffix indeterminate.
+Chunks end after ABORT because clearing sticky state can permit ordinary
+requests to complete again.
+
+`Batch.Commit` inspects every response in a physical chunk. An early read parity
+error cannot hide a later WAIT, FAULT, or invalid acknowledgement. The returned
+error includes each physical failure with its operation index. A WAIT is cleared
+once when framing remains usable; cleanup failure stays attached to that WAIT
+and to Commit. Lost protocol state or an inconsistent suffix instead requires
+repair without sending cleanup into the uncertain stream. The first invalid
+acknowledgement makes its remaining suffix indeterminate. Earlier confirmed
+results, including sticky-exempt responses, retain their physical outcomes;
+later unsent chunks report `ErrNotExecuted`. No requested operation is replayed.
 
 In overrun mode, WAIT sets STICKYORUN and later requests can be abandoned. The
 host clears STICKYORUN through ABORT before retrying the exact request which

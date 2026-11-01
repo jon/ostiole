@@ -197,8 +197,8 @@ func TestPendingSELECTABORT(t *testing.T) {
 				conn, target, wire := newSelectionConnection(t, overrun)
 				before := len(wire.calls)
 				discardSelection(t, conn, batch)
-				if overrun && batch && !slices.Equal(wire.calls[before:], []int{162}) {
-					t.Fatalf("ABORT traffic = %v, want packed SELECT/ABORT/RDBUFF", wire.calls[before:])
+				if overrun && batch && !slices.Equal(wire.calls[before:], []int{108, 54}) {
+					t.Fatalf("ABORT traffic = %v, want SELECT/ABORT followed by RDBUFF", wire.calls[before:])
 				}
 				assertSelectionWriteBlocked(t, conn, target, wire)
 				assertSelectionRecovery(t, conn, target)
