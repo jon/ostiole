@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/bits"
 
 	"github.com/jon/ostiole/dap"
 	"github.com/jon/ostiole/swd"
@@ -34,7 +35,11 @@ const (
 // Target models SW-DP, AP and target-memory state. All calls, fixture changes,
 // and uses of devices shared with other targets must be serialized. Its zero
 // value accepts fixture configuration and has identity zero; New supplies an
-// explicit identity. UNKNOWN posted data is represented by zero.
+// explicit identity. UNKNOWN posted data is represented by zero. Subword DRW
+// reads fill inactive byte lanes with 0xa5. Unmapped halfwords crossing a DRW
+// word boundary wrap their active lanes modulo four, a simulator choice.
+// MEM-AP banked data registers are
+// not modeled; accesses return an error.
 type Target struct {
 	started     bool
 	debugWords  map[uint64]uint32
@@ -241,7 +246,8 @@ func (t *Target) AddMEMAP(sel dap.APSel, idr uint32, words map[uint32]uint32) er
 	return nil
 }
 
-// SetMEMAPCFG changes one simulated MEM-AP's CFG register.
+// SetMEMAPCFG changes one simulated MEM-AP's CFG fixture.
+// Raw AP writes to CFG are ignored.
 func (t *Target) SetMEMAPCFG(sel dap.APSel, cfg uint32) error {
 	if t == nil {
 		return errors.New("dap/sim: nil target")
@@ -496,7 +502,7 @@ func (ap *accessPort) readRegister(ctx context.Context, reg uint8) (uint32, erro
 	if !ap.memAP {
 		return ap.regs[reg], nil
 	}
-	if err := ap.validateLargeDataRegister(reg, "read"); err != nil {
+	if err := ap.validateRegisterAccess(reg, "read"); err != nil {
 		return 0, err
 	}
 	if (reg == 8 || reg == 0xf0) && ap.regs[0xf4]&(1<<1) == 0 {
@@ -512,14 +518,14 @@ func (ap *accessPort) readRegister(ctx context.Context, reg uint8) (uint32, erro
 }
 
 func (ap *accessPort) writeRegister(ctx context.Context, reg uint8, value uint32) error {
+	if ap.readOnlyRegister(reg) {
+		return nil
+	}
 	if !ap.memAP {
 		ap.regs[reg] = value
 		return nil
 	}
-	if reg == 0xf8 || reg == 0xf0 {
-		return nil
-	}
-	if err := ap.validateLargeDataRegister(reg, "write"); err != nil {
+	if err := ap.validateRegisterAccess(reg, "write"); err != nil {
 		return err
 	}
 	if reg == 8 && ap.regs[0xf4]&(1<<1) == 0 {
@@ -538,7 +544,14 @@ func (ap *accessPort) writeRegister(ctx context.Context, reg uint8, value uint32
 	return nil
 }
 
-func (ap *accessPort) validateLargeDataRegister(reg uint8, operation string) error {
+func (ap *accessPort) readOnlyRegister(reg uint8) bool {
+	return reg == 0xfc || ap.memAP && (reg == 0xf0 || reg == 0xf4 || reg == 0xf8)
+}
+
+func (ap *accessPort) validateRegisterAccess(reg uint8, operation string) error {
+	if reg >= 0x10 && reg <= 0x1c {
+		return fmt.Errorf("dap/sim: MEM-AP banked data register %#02x is not modeled", reg)
+	}
 	if ap.largePhase == largeDataIdle || reg == 0 || reg == 0x0c {
 		return nil
 	}
@@ -577,7 +590,13 @@ func (ap *accessPort) readDRW(ctx context.Context) (uint32, error) {
 		return 0, err
 	}
 	ap.incrementTAR(width)
-	return uint32(value) << ap.laneShift(width), nil
+	shift := ap.laneShift(width)
+	result := bits.RotateLeft32(uint32(value), int(shift))
+	if width < 4 {
+		mask := bits.RotateLeft32(uint32((uint64(1)<<uint(width*8))-1), int(shift))
+		result |= 0xa5a5a5a5 &^ mask
+	}
+	return result, nil
 }
 
 func (ap *accessPort) writeDRW(ctx context.Context, value uint32) error {
@@ -602,7 +621,7 @@ func (ap *accessPort) writeDRW(ctx context.Context, value uint32) error {
 		}
 	}
 	width := 1 << size
-	data := uint64(value >> ap.laneShift(width))
+	data := uint64(bits.RotateLeft32(value, -int(ap.laneShift(width))))
 	if err := ap.writeMemoryValue(ctx, ap.targetAddress(), width, data); err != nil {
 		return err
 	}
@@ -632,11 +651,14 @@ func (ap *accessPort) targetAddress() uint64 {
 }
 
 func (ap *accessPort) laneShift(width int) uint {
+	if width >= 4 {
+		return 0
+	}
 	lane := int(ap.targetAddress() & 3)
 	if ap.regs[0xf4]&1 != 0 {
 		lane = 4 - width - lane
 	}
-	return uint(lane * 8)
+	return uint(lane&3) * 8
 }
 
 func (ap *accessPort) memoryValue(ctx context.Context, addr uint64, width int) (uint64, error) {

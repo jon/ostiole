@@ -32,7 +32,8 @@ type deviceMapping struct {
 
 // MapMEMAPDevice maps size bytes of one MEM-AP to device before any target
 // traffic. Mappings cannot overlap or change after traffic starts. Unmapped
-// addresses retain the ordinary byte-memory fixture behavior. The mapping owns
+// addresses retain the ordinary byte-memory fixture behavior, including raw
+// unaligned DRW accesses. Mapped accesses require natural alignment. The mapping owns
 // no cleanup; the caller owns device and serializes all uses of shared devices.
 func (t *Target) MapMEMAPDevice(sel dap.APSel, addr, size uint64, device MemoryDevice) error {
 	if t == nil {
@@ -86,12 +87,15 @@ func (ap *accessPort) overlapsDevice(start, end uint64) bool {
 
 func (ap *accessPort) deviceForAccess(addr uint64, width int) (MemoryDevice, error) {
 	end, err := memoryRangeEnd(addr, width)
-	if err != nil || addr%uint64(width) != 0 {
+	if err != nil {
 		return nil, ErrBusFault
 	}
 	for _, mapping := range ap.devices {
 		if addr > mapping.end || end < mapping.start {
 			continue
+		}
+		if addr%uint64(width) != 0 {
+			return nil, ErrBusFault
 		}
 		if addr < mapping.start || end > mapping.end {
 			return nil, fmt.Errorf("%w: access crosses device mapping", ErrBusFault)
