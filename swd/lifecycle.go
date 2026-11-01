@@ -12,6 +12,8 @@ const (
 
 	overrunDetect = uint32(1 << 0)
 	stickyOverrun = uint32(1 << 1)
+	stickyCompare = uint32(1 << 4)
+	stickyError   = uint32(1 << 5)
 	writeDataErr  = uint32(1 << 7)
 
 	clearStickyCompare  = uint32(1 << 1)
@@ -113,8 +115,10 @@ func (c *Conn) cleanupFailedConnect(connectErr *error, timeout time.Duration) {
 // release retains enough state for another call to retry. Framing repair
 // uses the same dormant fallback as Connect. Release leaves SWD selected;
 // it does not restore the prior interface mode. Release is harmless on an
-// idle or nil connection. Cancellation before a release attempt returns an
-// error matching ErrNotExecuted as well as the context error.
+// idle or nil connection. Before changing ORUNDETECT, it clears observed
+// supported sticky flags so they do not block restoration. It does not replay
+// interrupted target-memory access. Cancellation before a release attempt
+// returns an error matching ErrNotExecuted as well as the context error.
 func (c *Conn) Release(ctx context.Context) (err error) {
 	if c == nil || c.wire == nil || c.state == connectionIdle {
 		return nil
@@ -293,14 +297,30 @@ func (c *Conn) changeOverrun(ctx context.Context, state uint32, enabled, allowFa
 }
 
 func (c *Conn) prepareOverrunWrite(ctx context.Context, state uint32) (uint32, error) {
-	if c.response != responseOverrun || state&stickyOverrun == 0 {
+	var clear uint32
+	if state&stickyOverrun != 0 {
+		clear |= clearStickyOverrun
+	}
+	if state&stickyError != 0 {
+		clear |= clearStickyError
+	}
+	if state&writeDataErr != 0 {
+		clear |= clearWriteDataError
+	}
+	if state&stickyCompare != 0 && c.identity>>16&1 == 0 {
+		clear |= clearStickyCompare
+	}
+	if clear == 0 {
 		return state, nil
 	}
-	if err := c.writeRaw(ctx, 0x00, clearStickyOverrun); err != nil {
+	if err := c.writeRaw(ctx, 0x00, clear); err != nil {
 		c.requireRepair()
 		return 0, err
 	}
-	return state &^ stickyOverrun, nil
+	if clear&clearStickyCompare != 0 {
+		state &^= stickyCompare
+	}
+	return state &^ (stickyOverrun | stickyError | writeDataErr), nil
 }
 
 func (c *Conn) settleOverrunWrite(ctx context.Context, enabled, allowFallback bool) (bool, bool, uint32, error) {

@@ -264,8 +264,11 @@ one attempt.
 Release uses the same activation fallback when framing repair is needed and
 checks the established identity before restoring owned state. It restores
 ORUNDETECT but leaves SWD selected; it does not return the interface to dormant
-mode. Activation does not halt or reset the processor, request system power, or
-add ADIv6 AP addressing.
+mode. Before changing ORUNDETECT, it clears observed STICKYORUN, STICKYERR and
+WDATAERR, plus STICKYCMP on a non-minimal DP, so those flags do not block the
+restoration write. A failed clear retains restoration for a fresh-context retry.
+Release does not replay an interrupted target-memory access. Activation does not
+halt or reset the processor, request system power, or add ADIv6 AP addressing.
 
 Multidrop SWD has another boundary worth stating plainly: there is no generic
 way to ask an unselected multidrop bus which target IDs are present. The host
