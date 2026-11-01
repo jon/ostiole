@@ -155,6 +155,7 @@ type cancelAPTarget struct {
 	cancel       context.CancelFunc
 	req          swdsim.Request
 	afterBarrier bool
+	skip         int
 	started      bool
 }
 
@@ -172,6 +173,10 @@ func (t *cancelAPTarget) Write(ctx context.Context, req swdsim.Request, value ui
 
 func (t *cancelAPTarget) cancelAfter(req swdsim.Request, err error) {
 	if err != nil || t.cancel == nil {
+		return
+	}
+	if req == t.req && t.skip > 0 {
+		t.skip--
 		return
 	}
 	if req == t.req && t.afterBarrier {
@@ -222,6 +227,7 @@ type interruptedSize64Case struct {
 	name              string
 	req               swdsim.Request
 	afterBarrier      bool
+	skip              int
 	wantIndeterminate bool
 	run               func(context.Context, *dap.MemAP) error
 }
@@ -242,6 +248,13 @@ func TestMEMAPReleaseTerminatesInterruptedSize64TransferBeforeRestoringAddress(t
 		{name: "write after low word", req: apWrite(0x0c), afterBarrier: true, run: func(ctx context.Context, mem *dap.MemAP) error {
 			return mem.WriteScalar(ctx, 0x100, dap.Size64, 0x1122334455667788)
 		}},
+		{name: "read after high request", req: apRead(0x0c), skip: 1, wantIndeterminate: true, run: func(ctx context.Context, mem *dap.MemAP) error {
+			_, err := mem.ReadScalar(ctx, 0x100, dap.Size64)
+			return err
+		}},
+		{name: "write after high request", req: apWrite(0x0c), skip: 1, wantIndeterminate: true, run: func(ctx context.Context, mem *dap.MemAP) error {
+			return mem.WriteScalar(ctx, 0x100, dap.Size64, 0x1122334455667788)
+		}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) { testInterruptedSize64Cleanup(t, test) })
@@ -250,15 +263,20 @@ func TestMEMAPReleaseTerminatesInterruptedSize64TransferBeforeRestoringAddress(t
 
 func testInterruptedSize64Cleanup(t *testing.T, test interruptedSize64Case) {
 	t.Helper()
-	target := &cancelAPTarget{waitTarget: newWaitTarget(), req: test.req, afterBarrier: test.afterBarrier}
+	target := &cancelAPTarget{waitTarget: newWaitTarget(), req: test.req, afterBarrier: test.afterBarrier, skip: test.skip}
 	addMEMAP(t, target, 0, 0x00010001, nil)
-	if err := target.SetMEMAPCFG(apSel(0), 1<<2); err != nil {
+	if err := target.SetMEMAPCFG(apSel(0), 1<<2|1<<1); err != nil {
 		t.Fatal(err)
 	}
 	wire := &packedTxnWire{inner: swdsim.New(target), limit: 54}
 	dp := dap.NewDebugPort(dap.SWDP(swd.New(wire)))
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
+	}
+	for reg, value := range map[uint16]uint32{0: 0xa5000051, 4: 0x7788, 8: 7} {
+		if err := dp.WriteRawAP(t.Context(), apSel(0).Address(reg), value); err != nil {
+			t.Fatal(err)
+		}
 	}
 	mem, err := dap.OpenMemAP(t.Context(), dp, apSel(0))
 	if err != nil {
@@ -286,8 +304,20 @@ func testInterruptedSize64Cleanup(t *testing.T, test interruptedSize64Case) {
 		t.Fatalf("Release() after interrupted Size64 %s: %v", test.name, err)
 	}
 	assertFirstReleaseAPRequestIsCSW(t, target.requests[before:])
+	if n := countRequests(target.requests[before:], apRead(12)) + countRequests(target.requests[before:], apWrite(12)); n != 0 {
+		t.Errorf("Size64 cleanup replayed %d DRW requests", n)
+	}
 	if err := dp.Release(t.Context()); err != nil {
 		t.Fatalf("DebugPort.Release() after interrupted Size64 %s: %v", test.name, err)
+	}
+	if _, err := dp.Connect(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for reg, want := range map[uint8]uint32{0: 0xa5000051, 4: 0x7788, 8: 7} {
+		assertAPRegister(t, dp, reg, want)
+	}
+	if err := dp.Release(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 }
 

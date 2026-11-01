@@ -128,6 +128,9 @@ func restoreHardwareScratch(ctx context.Context, dp *dap.DebugPort, mem **dap.Me
 	var attemptErr error
 	identityVerified := true
 	for {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(attemptErr, err)
+		}
 		if *mem != nil {
 			restored, err := restoreHardwareScratchAttempt(ctx, mem, addr, original)
 			if restored {
