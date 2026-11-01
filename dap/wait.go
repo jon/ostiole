@@ -169,7 +169,7 @@ func requestWasNotSent(err error) bool {
 
 func (e *swdExecutor) finishRetryError(req transferRequest, value uint32, err error, waits int, apWork bool) (uint32, error) {
 	if err == swd.ErrFault {
-		return 0, e.handleFault(req, apWork)
+		return 0, e.handleFault(req, apWork, false)
 	}
 	if waits == 0 && err == swd.ErrParity {
 		return value, err
@@ -184,7 +184,7 @@ func (e *swdExecutor) finishRetryError(req transferRequest, value uint32, err er
 	return 0, e.invalidateWait(errors.Join(swd.ErrWait, cause))
 }
 
-func (e *swdExecutor) handleFault(req transferRequest, apWork bool) error {
+func (e *swdExecutor) handleFault(req transferRequest, apWork, preserveAP bool) error {
 	fault := &FaultError{cause: swd.ErrFault}
 	if !e.dp.state.responseKnown() || !e.dp.state.faultBankZero() {
 		e.dp.state.loseFraming()
@@ -209,10 +209,17 @@ func (e *swdExecutor) handleFault(req transferRequest, apWork bool) error {
 			return err
 		}
 	}
-	if apAffected {
+	fault.cleared = true
+	if apAffected && (!preserveAP || !ordinaryFaultCleared(fault)) {
 		e.dp.state.invalidateAP()
 	}
 	return fault
+}
+
+func ordinaryFaultCleared(err error) bool {
+	var fault *FaultError
+	return errors.As(err, &fault) && fault.cleared &&
+		fault.CTRLSTAT&stickyError != 0 && fault.CTRLSTAT&(writeDataError|stickyCompare) == 0
 }
 
 func faultMayAffectAP(req transferRequest, apWork bool, state uint32) bool {

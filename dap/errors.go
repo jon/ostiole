@@ -32,6 +32,7 @@ type FaultError struct {
 	CTRLSTAT   uint32
 	StateValid bool
 	cause      error
+	cleared    bool
 }
 
 func (e *FaultError) Error() string {
