@@ -34,15 +34,25 @@ const (
 // restoration, so Release is then idle. Earlier acquired state is retained.
 // A bootstrap WAIT triggers one fresh entry and DAPABORT before retrying.
 // This can abandon an inherited AP transaction. Calling Connect again repairs
-// framing and rejects a changed DPIDR.
-func (c *Conn) Connect(ctx context.Context) (dpidr uint32, err error) {
+// framing and rejects a changed DPIDR. WithCleanupTimeout changes the independent
+// failed-attempt restoration budget; each call defaults to one second.
+func (c *Conn) Connect(ctx context.Context, options ...ConnectOption) (dpidr uint32, err error) {
 	if c == nil || c.wire == nil {
 		return 0, errors.New("swd: nil connection")
 	}
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
-	defer c.cleanupFailedConnect(&err)
+	config := connectOptions{cleanupTimeout: time.Second}
+	for _, option := range options {
+		if option != nil {
+			option(&config)
+		}
+	}
+	if config.cleanupTimeout <= 0 {
+		return 0, errors.New("swd: cleanup timeout must be positive")
+	}
+	defer c.cleanupFailedConnect(&err, config.cleanupTimeout)
 	dpidr, state, err := c.prepareConnection(ctx)
 	if err != nil {
 		return 0, err
@@ -80,7 +90,7 @@ func (c *Conn) prepareConnection(ctx context.Context) (uint32, uint32, error) {
 	return dpidr, state, nil
 }
 
-func (c *Conn) cleanupFailedConnect(connectErr *error) {
+func (c *Conn) cleanupFailedConnect(connectErr *error, timeout time.Duration) {
 	if *connectErr == nil {
 		return
 	}
@@ -91,7 +101,7 @@ func (c *Conn) cleanupFailedConnect(connectErr *error) {
 	if c.state == connectionIdle {
 		return
 	}
-	cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	if err := c.Release(cleanupCtx); err != nil {
 		*connectErr = errors.Join(*connectErr, fmt.Errorf("swd: clean up failed Connect: %w", err))

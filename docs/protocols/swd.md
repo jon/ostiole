@@ -372,3 +372,16 @@ The runs did not independently measure the inherited ORUNDETECT value after
 release, exercise an Ostiole ADIv6 AP, or read target memory. No processor halt
 or reset was requested. OpenOCD performed its own debug-port initialization; the
 bench was not power-cycled to test startup state.
+
+## Failed-entry cleanup budget
+
+`conn.Connect(ctx)` uses a one-second independent budget to restore acquired
+ORUNDETECT state after a failed attempt. A first failure before that state is
+captured needs no restoration. To allow more time at a slower clock, use
+`conn.Connect(ctx, swd.WithCleanupTimeout(3*time.Second))`. The option applies
+to that call; a later call without it uses the default again. Nonpositive
+budgets are rejected before traffic. The operation still uses `ctx`, and
+explicit `conn.Release(ctx)` uses the context supplied to that release.
+
+When DAP owns the SWD connection, set `dap.WithCleanupTimeout` on the debug
+port; DAP passes that budget to the nested SWD connection attempt.

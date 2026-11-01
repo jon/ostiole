@@ -111,7 +111,13 @@ attempt three seconds. The defaults are one second for SWD and thirty seconds
 for JTAG. Full JTAG chain validation alone exceeds one second at 100 kHz; allow
 more time at slower clocks. Recovery does not reuse a canceled operation
 context. The option does not change the deadline for ordinary operations, and
-`Connect` rejects nonpositive durations before sending traffic.
+`Connect` rejects nonpositive durations before sending traffic. On SWD, DAP
+passes this budget to restoration inside a failed transport `Connect`.
+
+Explicit `MemAP.Release(ctx)` and `DebugPort.Release(ctx)` use the supplied
+context for re-entry and restoration. A canceled or expired context before
+traffic preserves pending restoration for a fresh-context retry. Recovery inside
+a failed operation still has its separate bounded context.
 
 Pass a non-nil context to operations, including transaction commits and owner
 release. Operations reject nil contexts before sending traffic or changing

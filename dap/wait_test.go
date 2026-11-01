@@ -1551,8 +1551,13 @@ func TestMEMAPReleaseReentersAfterDPWAITCleanupFailure(t *testing.T) {
 	wire.onReentry = func() { reentryRequest = len(target.requests) }
 	canceled, cancel := context.WithCancel(t.Context())
 	cancel()
-	if err := mem.Release(canceled); err != nil {
-		t.Fatalf("Release() after SWD framing loss: %v", err)
+	before := len(target.requests)
+	assertCanceledMEMAPRelease(t, mem, canceled)
+	if len(target.requests) != before {
+		t.Fatal("canceled MEM-AP release sent register traffic")
+	}
+	if err := mem.Release(t.Context()); err != nil {
+		t.Fatalf("Release() retry after SWD framing loss: %v", err)
 	}
 	if wire.trafficBeforeReentry != 0 {
 		t.Fatalf("framed transfers before SWD re-entry = %d, want 0", wire.trafficBeforeReentry)
