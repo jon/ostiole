@@ -133,12 +133,17 @@ func (b *Batch) queue(op batchOp) *batchResult {
 // operations report ErrNotExecuted.
 //
 // Commit does not replay a requested register operation. After a packed WAIT,
-// it clears STICKYORUN and returns the WAIT. Later frames in the same physical
-// chunk which the target abandoned report FAULT. Operations in later chunks
+// it clears STICKYORUN when framing remains usable; otherwise it requires repair.
+// Later non-exempt frames which the target abandoned in that chunk report FAULT. Operations in later chunks
 // report ErrNotExecuted. If STICKYORUN cleanup fails, Commit and the WAITed
 // result return both errors. Cancellation stops the next frame or chunk;
 // completed results retain their physical outcomes while Commit reports the
 // context error. Started frames use the independent completion budget.
+//
+// Every response is inspected, even after an earlier parity error. Valid DPIDR,
+// bank-zero CTRL/STAT, and ABORT results remain confirmed after WAIT or FAULT.
+// A chunk ends after ABORT, which can clear sticky state. Protocol loss marks
+// its remaining suffix indeterminate and requires repair without more traffic.
 func (b *Batch) Commit(ctx context.Context) error {
 	if b == nil || b.committed {
 		return ErrBatchCommitted
@@ -281,7 +286,7 @@ func (b *Batch) overrunChunkEnd(start, limit int) int {
 		op := b.ops[i]
 		boundary := shadow.selectPending && isPossibleCTRLSTATRead(op.req, shadow.priorBank)
 		shadow.observeTransfer(op.req, 0, op.data, nil)
-		if boundary {
+		if boundary || isAbortWrite(op.req) {
 			return i + 1
 		}
 	}
@@ -303,9 +308,9 @@ func (b *Batch) commitOverrunChunk(ctx context.Context, start, end int) error {
 	if err != nil {
 		return completionError(ctx, b.failOverrunExchange(start, end, err))
 	}
-	values, errs, firstError := b.decodeOverrunChunk(input, start, end)
-	waitWithPending := b.observeOverrunChunk(start, end, values, errs)
-	return completionError(ctx, b.finishOverrunChunk(completionCtx, start, end, errs, firstError, waitWithPending))
+	values, errs := b.decodeOverrunChunk(input, start, end)
+	waitWithPending, exempt := b.observeOverrunChunk(start, end, values, errs)
+	return completionError(ctx, b.finishOverrunChunk(completionCtx, start, end, errs, waitWithPending, exempt))
 }
 
 func (b *Batch) failOverrunExchange(start, end int, err error) error {
@@ -316,24 +321,22 @@ func (b *Batch) failOverrunExchange(start, end int, err error) error {
 	return fmt.Errorf("swd: batch chunk at operation %d: %w", start, err)
 }
 
-func (b *Batch) decodeOverrunChunk(input []byte, start, end int) ([]uint32, []error, int) {
+func (b *Batch) decodeOverrunChunk(input []byte, start, end int) ([]uint32, []error) {
 	values := make([]uint32, end-start)
 	errs := make([]error, end-start)
-	firstError := -1
 	for i := start; i < end; i++ {
 		values[i-start], errs[i-start] = decodeFixedFrame(input, (i-start)*fixedFrameBits, b.ops[i].req)
-		if firstError < 0 && errs[i-start] != nil {
-			firstError = i
-		}
 	}
-	return values, errs, firstError
+	return values, errs
 }
 
-func (b *Batch) observeOverrunChunk(start, end int, values []uint32, errs []error) bool {
+func (b *Batch) observeOverrunChunk(start, end int, values []uint32, errs []error) (bool, []bool) {
 	waitWithPending := false
+	exempt := make([]bool, end-start)
 	for i := start; i < end; i++ {
 		op := &b.ops[i]
 		resultErr := errs[i-start]
+		exempt[i-start] = b.conn.stickyExempt(op.req)
 		if resultErr == ErrWait && b.conn.selectPending {
 			waitWithPending = true
 		} else {
@@ -341,46 +344,77 @@ func (b *Batch) observeOverrunChunk(start, end int, values []uint32, errs []erro
 		}
 		op.result.resolve(values[i-start], resultErr)
 	}
-	return waitWithPending
+	return waitWithPending, exempt
 }
 
-func (b *Batch) finishOverrunChunk(ctx context.Context, start, end int, errs []error, firstError int, waitWithPending bool) error {
-	if firstError < 0 {
-		return nil
+func (c *Conn) stickyExempt(req request) bool {
+	if isDPIDRRead(req) || isAbortWrite(req) {
+		return true
 	}
-	firstErr := errs[firstError-start]
-	if firstErr == ErrProtocol {
+	bankZero := c.bank.valid && c.bank.bank == 0
+	if c.selectPending {
+		bankZero = bankZero && c.priorBank.valid && c.priorBank.bank == 0
+	}
+	return !req.isAP() && req.isRead() && req.address() == 0x04 && bankZero
+}
+
+func firstFrameError(errs []error, matches ...error) int {
+	for index, err := range errs {
+		for _, match := range matches {
+			if err == match {
+				return index
+			}
+		}
+	}
+	return -1
+}
+
+func (b *Batch) finishOverrunChunk(ctx context.Context, start, end int, errs []error, waitWithPending bool, exempt []bool) error {
+	abandonedEnd := end
+	if protocol := firstFrameError(errs, ErrProtocol); protocol >= 0 {
+		abandonedEnd = start + protocol
 		b.conn.requireRepair()
-		b.markIndeterminate(firstError, end, firstErr)
-		return fmt.Errorf("swd: batch stopped at operation %d: %w", firstError, firstErr)
+		b.markIndeterminate(abandonedEnd, end, ErrProtocol)
 	}
-	if firstErr == ErrWait || firstErr == ErrFault {
-		if err := b.validateAbandonedSuffix(firstError, end); err != nil {
-			return err
-		}
+	var suffixErr error
+	if failed := firstFrameError(errs, ErrWait, ErrFault); failed >= 0 {
+		suffixErr = b.validateAbandonedSuffix(start+failed, abandonedEnd, start, exempt)
 	}
-	if firstErr == ErrWait {
-		if isAbortWrite(b.ops[firstError].req) {
-			b.conn.requireRepair()
-			cleanupErr := errors.Join(firstErr, errors.New("swd: ABORT returned WAIT; STICKYORUN cleanup is unavailable"))
-			b.ops[firstError].result.err = cleanupErr
-			return cleanupErr
-		}
-		if err := b.conn.clearOverrunAfterWAIT(ctx); err != nil {
-			cleanupErr := errors.Join(firstErr, err)
-			b.ops[firstError].result.err = cleanupErr
-			return cleanupErr
-		}
-		if waitWithPending {
-			b.conn.requireRepair()
+	if waited := firstFrameError(errs, ErrWait); waited >= 0 && b.conn.state == connectionReady {
+		b.cleanupPackedWAIT(ctx, start+waited, waitWithPending)
+	}
+	var results []error
+	for i := start; i < end; i++ {
+		if err := b.ops[i].result.err; err != nil {
+			results = append(results, fmt.Errorf("swd: operation %d: %w", i, err))
 		}
 	}
-	return fmt.Errorf("swd: batch stopped at operation %d: %w", firstError, firstErr)
+	if err := errors.Join(append(results, suffixErr)...); err != nil {
+		return fmt.Errorf("swd: batch chunk at operation %d: %w", start, err)
+	}
+	return nil
 }
 
-func (b *Batch) validateAbandonedSuffix(first, end int) error {
+func (b *Batch) cleanupPackedWAIT(ctx context.Context, index int, waitWithPending bool) {
+	var err error
+	if isAbortWrite(b.ops[index].req) {
+		b.conn.requireRepair()
+		err = errors.New("swd: ABORT returned WAIT; STICKYORUN cleanup is unavailable")
+	} else {
+		err = b.conn.clearOverrunAfterWAIT(ctx)
+	}
+	if err != nil {
+		b.ops[index].result.err = errors.Join(b.ops[index].result.err, err)
+	}
+	if waitWithPending {
+		b.conn.requireRepair()
+	}
+}
+
+func (b *Batch) validateAbandonedSuffix(first, end, start int, exempt []bool) error {
 	for i := first + 1; i < end; i++ {
-		if b.ops[i].result.err == ErrFault {
+		err := b.ops[i].result.err
+		if err == ErrFault || exempt[i-start] && (err == nil || err == ErrParity) {
 			continue
 		}
 		b.conn.requireRepair()
