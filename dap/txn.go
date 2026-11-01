@@ -169,7 +169,9 @@ func (t *Txn) queue(op txnOp) *txnResult {
 // bound both paths. Faults and ambiguous transfers are not replayed. If the
 // context ends, it supplies the operation error; independent cleanup failures
 // remain visible. Commit resolves every result before returning and can be
-// called only once.
+// called only once. Physical SWD DP reads at offsets 0x00 and 0x04 execute in
+// separate batches, including banked logical reads: a rejected SELECT can leave
+// them reaching sticky-exempt bank-zero registers.
 func (t *Txn) Commit(ctx context.Context) (err error) {
 	if t == nil || t.committed {
 		return ErrTxnCommitted
@@ -542,7 +544,11 @@ func nextBatchBoundary(steps []txnStep, start int) int {
 }
 
 func txnResponseBoundary(step txnStep) bool {
-	return step.dpReg == DPIDR || step.dpReg == CTRLSTAT || step.dpReg == ABORT
+	// A rejected SELECT can leave a banked read reaching bank-zero DPIDR or
+	// CTRL/STAT. Keep those physical reads apart from earlier requests whose
+	// failure could make the read sticky-exempt.
+	return step.dpReg == ABORT ||
+		!step.req.AP && step.req.Read && (step.req.Addr == 0x00 || step.req.Addr == 0x04)
 }
 
 func (t *swdTxn) transferSteps(ctx context.Context, steps []txnStep) ([]transferResult, error) {
