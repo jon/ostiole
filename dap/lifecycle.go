@@ -326,3 +326,11 @@ func (dp *DebugPort) Identity() (Identity, bool) {
 	}
 	return dp.identity, dp.identified
 }
+
+// CleanupPending reports whether this debug-port session still requires Release,
+// without traffic. It is true after successful Connect or retained failed setup,
+// and false before entry or after successful Release. It does not report MEM-AP
+// or probe cleanup and does not imply that restoration communication is possible.
+func (dp *DebugPort) CleanupPending() bool {
+	return dp != nil && dp.state.session != sessionIdle
+}

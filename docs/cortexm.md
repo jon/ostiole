@@ -33,8 +33,12 @@ restoration state for another `Release`.
 
 Cleanup needs a usable memory connection. A poisoned transport or invalidated
 MEM-AP can prevent restoration; retaining the target does not repair either.
-Retain both the target and its memory owner after a release failure so
-restoration can be retried.
+Retain both the target and its memory owner after a live release failure so
+restoration can be retried. If terminal probe loss makes restoration impossible,
+`armdebug.Conn.Close` can release host resources and reports
+`armdebug.ErrRestorationAbandoned`. The target may remain halted with debug
+control unrestored; a successful later host close does not resume it. Keep the
+original target error when joining the Arm owner's cleanup error.
 
 ## Effects
 
@@ -227,8 +231,8 @@ cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 cleanupErr := core.Release(cleanupCtx)
 cancel()
 err = errors.Join(err, cleanupErr)
-// Close the Arm debug owner only after target release succeeds.
-// On failure retain both owners for a later cleanup attempt.
+// On live failure retain both owners for a later target cleanup attempt.
+// After terminal probe loss, Close can release host resources without restoring the target.
 ```
 
 The Cortex-M0 [control example](../examples/simple/cortexm-control/main.go)
@@ -391,10 +395,11 @@ if releaseErr == nil {
 ```
 
 Inspect `results` and `err`. When release fails, retain `group` and `owner` for
-another cleanup attempt rather than close the memory dependency. An ambiguous
-write, new unowned halt, lost permission, or unusable memory can prevent
-recovery. Successful release restores debug control; it does not undo executed
-instructions.
+another cleanup attempt while restoration remains possible. After terminal probe
+loss, closing the Arm owner releases host resources with the abandonment error
+described above. An ambiguous write, new unowned halt, lost permission, or
+unusable memory can prevent recovery. Successful release restores debug control;
+it does not undo executed instructions.
 
 ### Member registers and stepping
 

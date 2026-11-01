@@ -175,6 +175,11 @@ impossible while host resources still need cleanup. A timeout, target FAULT,
 authentication failure, or recoverable scan status alone does not establish
 terminal loss.
 
+`armdebug.Conn.Close` uses this distinction: live restoration failures retain
+the owner for retry; terminal loss abandons pending restoration, reports
+`armdebug.ErrRestorationAbandoned`, and continues closing host resources.
+Subsequent attempts retry only pending host cleanup.
+
 `usb.Device.CleanupPending` and `usb.ClaimedInterface.CleanupPending`
 distinguish retained host resources from a final cached close error. Known host
 connection loss matches `usb.ErrDeviceGone` while retaining native error

@@ -11,6 +11,11 @@ import (
 	"github.com/jon/ostiole/probe"
 )
 
+// ErrRestorationAbandoned reports that terminal probe failure prevented target
+// restoration. Host resources may have been released; a halted target can remain
+// halted. Another Close may be needed for pending host cleanup.
+var ErrRestorationAbandoned = errors.New("armdebug: target restoration abandoned")
+
 // Conn owns a probe, debug-port state, and MEM-APs acquired through OpenMemAP. Do not copy
 // it or use its transferred probe directly. Calls and borrowed clients must be
 // serialized. Close owns release; borrowers must not reconnect or release the
@@ -49,10 +54,11 @@ func Connect(ctx context.Context, opened *probe.Probe, config Config) (*Conn, er
 }
 
 func (c *Conn) fail(cause error) (*Conn, error) {
-	if err := c.Close(); err != nil {
+	err := c.Close()
+	if err != nil && c.probe != nil {
 		return c, errors.Join(cause, err)
 	}
-	return nil, cause
+	return nil, errors.Join(cause, err)
 }
 
 // Info returns detached probe metadata, including after closing.
@@ -73,16 +79,39 @@ func (c *Conn) Port() *dap.DebugPort {
 	return c.port
 }
 
-// Close releases owned MEM-APs in reverse acquisition order, then DAP and its wire,
-// before closing the probe. It stops on failure,
-// retaining dependencies for retry. Each release gets a fresh context bounded
-// by Config.CleanupTimeout; lower-layer recovery and host cleanup have their own bounds.
-// There is no forced abandonment. Closing a nil or already closed Conn does nothing.
+// Close releases owned MEM-APs in reverse acquisition order, then DAP and its
+// wire, before closing the probe. Live restoration failures retain dependencies
+// for retry. If the probe reports restoration impossible, Close abandons pending
+// target restoration, returns ErrRestorationAbandoned and continues host cleanup.
+// Releasing host resources does not resume a halted target. Each release gets a
+// fresh context bounded by Config.CleanupTimeout; lower-layer recovery and host
+// cleanup have their own bounds. Host close errors are returned on the attempt
+// that encounters them; only pending resources remain owned for retry.
+// Closing a nil or fully released Conn does nothing.
 func (c *Conn) Close() error {
 	if c == nil {
 		return nil
 	}
 	c.closing = true
+	err := c.releaseTarget()
+	if err != nil && (c.probe == nil || c.probe.RestorationPossible()) {
+		return err
+	}
+	if err != nil && !errors.Is(err, ErrRestorationAbandoned) {
+		err = errors.Join(err, ErrRestorationAbandoned)
+	}
+	c.memories = nil
+	c.port = nil
+	return errors.Join(err, c.closeProbe())
+}
+
+func (c *Conn) releaseTarget() error {
+	if c.probe != nil && !c.probe.RestorationPossible() {
+		if len(c.memories) != 0 || c.port.CleanupPending() {
+			return ErrRestorationAbandoned
+		}
+		return nil
+	}
 	if err := c.releaseMemAPs(); err != nil {
 		return err
 	}
@@ -90,18 +119,20 @@ func (c *Conn) Close() error {
 		ctx, cancel := c.cleanupContext()
 		err := c.port.Release(ctx)
 		cancel()
-		if err != nil {
-			return err
-		}
-		c.port = nil
-	}
-	if c.probe != nil {
-		if err := c.probe.Close(); err != nil {
-			return err
-		}
-		c.probe = nil
+		return err
 	}
 	return nil
+}
+
+func (c *Conn) closeProbe() error {
+	if c.probe == nil {
+		return nil
+	}
+	err := c.probe.Close()
+	if !c.probe.CleanupPending() {
+		c.probe = nil
+	}
+	return err
 }
 
 func (c *Conn) cleanupContext() (context.Context, context.CancelFunc) {
