@@ -73,19 +73,7 @@ func (d *Device) setAltSetting(claim *ClaimedInterface, alternate uint8) (map[ui
 		return nil, fmt.Errorf("usb: enumerate interface %d pipes: %w", claim.number, err)
 	}
 	d.replaceRoutes(pipes)
-	return endpointsFromDarwinPipes(pipes), nil
-}
-
-func endpointsFromDarwinPipes(pipes []darwinPipe) map[uint8]Endpoint {
-	endpoints := make(map[uint8]Endpoint, len(pipes))
-	for _, pipe := range pipes {
-		endpoints[pipe.endpoint] = Endpoint{
-			Address:       pipe.endpoint,
-			TransferType:  TransferType(pipe.transferType),
-			MaxPacketSize: pipe.maxPacketSize,
-		}
-	}
-	return endpoints
+	return nil, nil
 }
 
 func (d *Device) replaceRoutes(pipes []darwinPipe) {

@@ -57,6 +57,8 @@ type AlternateSetting struct {
 }
 
 // Endpoint describes one endpoint in an interface alternate setting.
+// MaxPacketSize is the descriptor's packet payload size, excluding periodic
+// transaction multipliers and burst capacity.
 type Endpoint struct {
 	Address       uint8
 	TransferType  TransferType

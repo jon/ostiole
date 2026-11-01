@@ -72,6 +72,13 @@ func (d *Device) openBulkTransfers(claim *ClaimedInterface) (bulkTransferEngine,
 	if !ok {
 		return nil, errors.New("usb: interface cannot submit bulk transfers")
 	}
+	if d.routes == nil {
+		pipes, err := d.iface.pipes()
+		if err != nil {
+			return nil, fmt.Errorf("usb: reload interface %d pipes: %w", claim.number, err)
+		}
+		d.replaceRoutes(pipes)
+	}
 	return opener.openBulkTransfers(d.routes)
 }
 
