@@ -71,25 +71,33 @@ func parseAP(command string, args []string) (dap.APSel, error) {
 	return dap.NewAPSel(uint8(*selection)), nil
 }
 
-func inspectDP(ctx context.Context) (_ dap.DPIDRInfo, err error) {
-	session, err := openDAP(ctx)
+func inspectDP(ctx context.Context) (dap.DPIDRInfo, error) {
+	return inspectDPWith(ctx, openFTDIProbe)
+}
+
+func inspectDPWith(ctx context.Context, open probeOpener) (_ dap.DPIDRInfo, err error) {
+	session, err := openDAPWith(ctx, open)
+	if session != nil {
+		defer func() { err = errors.Join(err, session.close()) }()
+	}
 	if err != nil {
 		return dap.DPIDRInfo{}, err
 	}
-	defer func() {
-		err = errors.Join(err, session.close())
-	}()
 	return session.identity, nil
 }
 
-func inspectAP(ctx context.Context, selection dap.APSel) (_ apIdentity, err error) {
-	session, err := openDAP(ctx)
+func inspectAP(ctx context.Context, selection dap.APSel) (apIdentity, error) {
+	return inspectAPWith(ctx, selection, openFTDIProbe)
+}
+
+func inspectAPWith(ctx context.Context, selection dap.APSel, open probeOpener) (_ apIdentity, err error) {
+	session, err := openDAPWith(ctx, open)
+	if session != nil {
+		defer func() { err = errors.Join(err, session.close()) }()
+	}
 	if err != nil {
 		return apIdentity{}, err
 	}
-	defer func() {
-		err = errors.Join(err, session.close())
-	}()
 	idr, err := session.port.ReadAPIDR(ctx, selection)
 	if err != nil {
 		return apIdentity{}, err

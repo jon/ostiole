@@ -249,8 +249,8 @@ trivial example:
 go run ./cmd/ost swd dpidr
 ```
 
-The DAP form establishes the explicit debug-port lifecycle and reports the
-decoded identity fields before releasing the power state it acquired:
+The DAP form uses an Arm debug owner and reports the decoded identity fields
+before releasing the power state it acquired:
 
 ```sh
 go run ./cmd/ost dap dp id
@@ -272,6 +272,12 @@ go run ./cmd/ost target cortex-m id --ap 0
 It reports DPIDR, the selected AP IDR, and CPUID while restoring MEM-AP and
 debug-port state. None of these commands reset or halt the target, write target
 memory, or change persistent state.
+
+These commands select one FTDI port A through probe discovery at 1 MHz. DAP
+commands retain the Arm owner until cleanup, including after setup errors.
+Pending live restoration keeps lower resources open; terminal transport loss
+permits host cleanup and reports abandoned restoration. Operation and cleanup
+errors are returned together.
 
 Run `go run ./cmd/ost help` for the available command hierarchy.
 

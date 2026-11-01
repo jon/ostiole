@@ -3,91 +3,130 @@ package app
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
+	"github.com/jon/ostiole/armdebug"
 	"github.com/jon/ostiole/dap"
-	"github.com/jon/ostiole/ftdi"
+	"github.com/jon/ostiole/discover"
+	ftdidiscovery "github.com/jon/ostiole/ftdi/discovery"
+	"github.com/jon/ostiole/probe"
 	"github.com/jon/ostiole/swd"
-	"github.com/jon/ostiole/usb"
 )
 
+type probeOpener func(context.Context) (*probe.Probe, error)
+
 type swdSession struct {
-	channel    *ftdi.Channel
+	opened     *probe.Probe
 	connection *swd.Conn
 }
 
 type dapSession struct {
-	wire     *swdSession
+	owner    *armdebug.Conn
+	opened   *probe.Probe
 	port     *dap.DebugPort
 	identity dap.DPIDRInfo
 	memory   *dap.MemAP
 }
 
-func openSWD(ctx context.Context) (*swdSession, error) {
-	session, err := openSWDTransport(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := session.connection.Connect(ctx); err != nil {
-		return nil, errors.Join(err, session.close())
-	}
-	return session, nil
+func openFTDIProbe(ctx context.Context) (*probe.Probe, error) {
+	return discover.OpenProbe(ctx, discover.Selection{Provider: ftdidiscovery.ID, Function: "A"})
 }
 
-func openSWDTransport(ctx context.Context) (*swdSession, error) {
-	enumerator := usb.New()
-	devices, err := enumerator.List(ctx, ftdi.SupportedDevices())
-	if err != nil {
-		return nil, err
-	}
-	if len(devices) != 1 {
-		return nil, fmt.Errorf("require exactly one supported FTDI attachment; found %d", len(devices))
-	}
-	device, err := enumerator.Open(ctx, devices[0])
-	if err != nil {
-		return nil, err
-	}
-	channel, err := ftdi.Open(ctx, device, ftdi.Config{Port: ftdi.PortA, MaxClockHz: 1_000_000})
-	if err != nil {
-		closeOwner := device.Close
-		if channel != nil {
-			closeOwner = channel.Close
+func openSWDWith(ctx context.Context, open probeOpener) (*swdSession, error) {
+	opened, err := open(ctx)
+	if opened == nil {
+		if err == nil {
+			err = errors.New("ost: no opened probe")
 		}
-		return nil, errors.Join(err, closeOwner())
+		return nil, err
 	}
-	connection := swd.New(channel)
-	return &swdSession{channel: channel, connection: connection}, nil
+	session := &swdSession{opened: opened}
+	if err != nil {
+		return session, err
+	}
+	wire, err := opened.SWD(ctx, probe.SWDConfig{MaxClockHz: 1_000_000})
+	if err != nil {
+		return session, err
+	}
+	session.connection = swd.New(wire)
+	_, err = session.connection.Connect(ctx)
+	return session, err
 }
 
 func (s *swdSession) close() error {
-	if s == nil || s.channel == nil {
+	if s == nil || s.opened == nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	return errors.Join(s.connection.Release(ctx), s.channel.Close())
+	err := s.releaseProtocol()
+	if err != nil && s.connection.CleanupPending() && s.opened.RestorationPossible() {
+		return err
+	}
+	s.connection = nil
+	hostErr := s.opened.Close()
+	if !s.opened.CleanupPending() {
+		s.opened = nil
+	}
+	return errors.Join(err, hostErr)
 }
 
-func openDAP(ctx context.Context) (*dapSession, error) {
-	wire, err := openSWDTransport(ctx)
-	if err != nil {
+func (s *swdSession) releaseProtocol() error {
+	if !s.connection.CleanupPending() {
+		return nil
+	}
+	if !s.opened.RestorationPossible() {
+		return armdebug.ErrRestorationAbandoned
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	err := s.connection.Release(ctx)
+	cancel()
+	if err != nil && !s.opened.RestorationPossible() {
+		return errors.Join(err, armdebug.ErrRestorationAbandoned)
+	}
+	return err
+}
+
+func openDAPWith(ctx context.Context, open probeOpener) (*dapSession, error) {
+	opened, err := open(ctx)
+	if opened == nil {
+		if err == nil {
+			err = errors.New("ost: no opened probe")
+		}
 		return nil, err
 	}
-	session := &dapSession{wire: wire, port: dap.NewDebugPort(dap.SWDP(wire.connection))}
-	identity, err := session.port.Connect(ctx)
 	if err != nil {
-		return nil, errors.Join(err, session.close())
+		return &dapSession{opened: opened}, err
 	}
-	session.identity, _ = identity.DPIDR()
-	return session, nil
+	owner, err := armdebug.Connect(ctx, opened, armdebug.Config{
+		Port: armdebug.SWDP(probe.SWDConfig{MaxClockHz: 1_000_000}),
+	})
+	if owner == nil {
+		return nil, err
+	}
+	session := &dapSession{owner: owner, port: owner.Port()}
+	if err != nil {
+		return session, err
+	}
+	value, err := session.port.ReadDP(ctx, dap.DPIDR)
+	if err != nil {
+		return session, err
+	}
+	session.identity, err = dap.DecodeDPIDR(value)
+	return session, err
 }
 
 func (s *dapSession) close() error {
 	if s == nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	return errors.Join(s.memory.Release(ctx), s.port.Release(ctx), s.wire.close())
+	if s.owner != nil {
+		return s.owner.Close()
+	}
+	if s.opened == nil {
+		return nil
+	}
+	err := s.opened.Close()
+	if !s.opened.CleanupPending() {
+		s.opened = nil
+	}
+	return err
 }

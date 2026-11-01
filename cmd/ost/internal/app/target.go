@@ -38,19 +38,23 @@ func runTarget(ctx context.Context, args []string, stdout io.Writer, ops operati
 	return err
 }
 
-func identifyCortexM(ctx context.Context, selection dap.APSel) (_ targetIdentity, err error) {
-	session, err := openDAP(ctx)
+func identifyCortexM(ctx context.Context, selection dap.APSel) (targetIdentity, error) {
+	return identifyCortexMWith(ctx, selection, openFTDIProbe)
+}
+
+func identifyCortexMWith(ctx context.Context, selection dap.APSel, open probeOpener) (_ targetIdentity, err error) {
+	session, err := openDAPWith(ctx, open)
+	if session != nil {
+		defer func() { err = errors.Join(err, session.close()) }()
+	}
 	if err != nil {
 		return targetIdentity{}, err
 	}
-	defer func() {
-		err = errors.Join(err, session.close())
-	}()
 	apidr, err := session.port.ReadAPIDR(ctx, selection)
 	if err != nil {
 		return targetIdentity{}, err
 	}
-	session.memory, err = dap.OpenMemAP(ctx, session.port, selection)
+	session.memory, err = session.owner.OpenMemAP(ctx, selection)
 	if err != nil {
 		return targetIdentity{}, err
 	}
