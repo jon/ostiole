@@ -116,6 +116,16 @@ failed AP until retry succeeds. Simulation covers interleaved AP access,
 independent saved-state restoration, and retry without repeating completed
 releases.
 
+`probe.RegisterSWDBackend` optionally supplies completed register operations.
+`Probe.SupportsRegisterSWD` checks capability without I/O; `RegisterSWD`
+configures and lends the transport without protocol entry. The Arm owner prefers
+that capability before activation and never falls back after an activation
+error. Borrowed calls become inactive when probe cleanup starts, including after
+a retryable host close error. Behavioral tests exercise two modeled Cortex-M0
+targets through shared register/DAP/MEM-AP owners, retain an owned halt across a
+cleared memory FAULT, then restore debug state before host close. This
+establishes composition behavior, not a bundled adapter or hardware support.
+
 ## FTDI MPSSE
 
 `ftdi.Candidates` classifies a detached USB snapshot into supported MPSSE ports.

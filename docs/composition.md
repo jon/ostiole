@@ -65,6 +65,13 @@ if err != nil {
 port := connected.Port()
 ```
 
+For SWD, `armdebug` checks `opened.SupportsRegisterSWD()` before activation. An
+advertised register backend uses `opened.RegisterSWD` and `dap.RegisterDP`;
+otherwise it uses the existing borrowed wire and `dap.SWDP`. An activation
+error, including `probe.ErrUnsupportedRegisterSWD` returned after activation
+began, ends setup without falling back. Existing `armdebug.Config`, MEM-AP,
+Target, and Group calls are unchanged.
+
 The call takes responsibility for `opened` even on invalid input. Stop using the
 supplied probe directly. Keep any non-nil returned owner, including on an error,
 until `Close` succeeds; the single deferred attempt above reports a failure but
@@ -261,6 +268,21 @@ connection := swd.New(wire)
 Use a named error result for this cleanup pattern. Release any SWD or DAP state
 before closing the probe. The caller must stop using the transferred backend
 directly; the borrowed wire has no independent close operation.
+
+A `probe.RegisterSWDBackend` lends completed register operations instead of SWD
+bits. Query `opened.SupportsRegisterSWD()` before choosing activation, then call
+`opened.RegisterSWD(ctx, config)`. The returned `probe.RegisterSWD` implements
+`dap.RegisterTransport`; bind it with `dap.RegisterDP(registers)`. Activation
+configures the adapter but performs no protocol entry. The backend retains all
+resources after a failure, and the probe attempts host cleanup; keep it for
+retry while cleanup remains pending. Nil and typed-nil successful surfaces are
+rejected through the same cleanup path.
+
+Only one SWD wire, register transport, or JTAG surface may be activated from one
+probe. Release DAP before closing the probe. The borrowed register surface has
+no independent host close; closing the probe invalidates every borrowed
+operation even when host cleanup must be retried. Inactive register reads and
+writes return `dap.RegisterUnsent` with an error.
 
 After releasing borrowed protocol and target owners, retain a probe according to
 its cleanup state while preserving the error from the close attempt:

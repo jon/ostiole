@@ -1,6 +1,6 @@
 //go:build integration
 
-package dap
+package dap_test
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jon/ostiole/dap"
 	"github.com/jon/ostiole/discover"
 	"github.com/jon/ostiole/ftdi"
 	ftdidiscovery "github.com/jon/ostiole/ftdi/discovery"
@@ -56,17 +57,17 @@ func exerciseJTAGDPMemory(t *testing.T, ctx context.Context, discovered bool) (u
 	if err != nil {
 		t.Fatal(errors.Join(err, closeOwner()))
 	}
-	dp := NewDebugPort(JTAGDP(chain, 0), WithMaxWaits(100))
-	var mem *MemAP
+	dp := dap.NewDebugPort(dap.JTAGDP(chain, 0), dap.WithMaxWaits(100))
+	var mem *dap.MemAP
 	defer closeJTAGDPBench(t, dp, &mem, closeOwner)
 	identity, err := dp.Connect(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	id, _ := identity.IDCODE()
-	power, overrun := dp.state.ownedPower, dp.jtag.ownedOverrun
+	power, overrun := dap.JTAGOwnedStateForTest(dp)
 	t.Logf("JTAG-DP IDCODE=%#08x acquired power=%#08x inherited ORUNDETECT=%v", id, power, overrun)
-	sel := NewAPSel(1)
+	sel := dap.NewAPSel(1)
 	idr, err := dp.ReadAPIDR(ctx, sel)
 	if err != nil {
 		t.Fatal(err)
@@ -79,7 +80,7 @@ func exerciseJTAGDPMemory(t *testing.T, ctx context.Context, discovered bool) (u
 			t.Fatal(err)
 		}
 	}
-	mem, err = OpenMemAP(ctx, dp, sel)
+	mem, err = dap.OpenMemAP(ctx, dp, sel)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +108,7 @@ func exerciseJTAGDPMemory(t *testing.T, ctx context.Context, discovered bool) (u
 	return power, overrun
 }
 
-func closeJTAGDPBench(t *testing.T, dp *DebugPort, mem **MemAP, closeOwner func() error) {
+func closeJTAGDPBench(t *testing.T, dp *dap.DebugPort, mem **dap.MemAP, closeOwner func() error) {
 	t.Helper()
 	var err error
 	for range 3 {

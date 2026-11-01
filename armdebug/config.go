@@ -98,6 +98,10 @@ func (c Config) cleanupTimeout() time.Duration {
 
 func (p PortConfig) bind(ctx context.Context, opened *probe.Probe) (dap.Port, error) {
 	if !p.isJTAG {
+		if opened.SupportsRegisterSWD() {
+			registers, err := opened.RegisterSWD(ctx, p.swd)
+			return dap.RegisterDP(registers), err
+		}
 		wire, err := opened.SWD(ctx, p.swd)
 		return dap.SWDP(swd.New(wire)), err
 	}
