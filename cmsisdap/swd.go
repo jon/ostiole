@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 )
 
 const maxSWDTransferBits = 16_384
@@ -14,9 +16,19 @@ type swdCapture struct {
 }
 
 func protocolSupportsSWDSequence(version string) bool {
-	var major, minor, patch int
-	count, err := fmt.Sscanf(version, "%d.%d.%d", &major, &minor, &patch)
-	return count == 3 && err == nil && (major > 1 || major == 1 && minor >= 2)
+	parts := strings.Split(version, ".")
+	if len(parts) < 2 || len(parts) > 3 {
+		return false
+	}
+	var values [3]uint64
+	for i, part := range parts {
+		value, err := strconv.ParseUint(part, 10, 32)
+		if err != nil {
+			return false
+		}
+		values[i] = value
+	}
+	return values[0] > 1 || values[0] == 1 && values[1] >= 2
 }
 
 // MaxTransferBits reports the conservative logical SWDIO limit, or zero while
@@ -41,13 +53,10 @@ func (s *Session) SWDIO(ctx context.Context, direction, output []byte, bits int)
 	if bits <= 0 || bits > maxSWDTransferBits || len(direction)*8 < bits || len(output)*8 < bits {
 		return nil, fmt.Errorf("cmsisdap: invalid %d-bit SWD stream", bits)
 	}
-	if err := s.transportReady(ctx); err != nil {
+	if err := s.sequenceReady(ctx); err != nil {
 		return nil, err
 	}
 	defer func() { err = errors.Join(err, ctx.Err()) }()
-	if !s.configured {
-		return nil, errors.New("cmsisdap: SWD is not configured")
-	}
 
 	packets, err := planSWDStream(direction, output, bits, s.packetSize)
 	if err != nil {
@@ -179,3 +188,16 @@ func packSWDBits(data []byte, start, bits int) []byte {
 }
 
 func swdBit(data []byte, bit int) bool { return data[bit/8]&(1<<uint(bit%8)) != 0 }
+
+func (s *Session) sequenceReady(ctx context.Context) error {
+	if err := s.transportReady(ctx); err != nil {
+		return err
+	}
+	if !s.configured {
+		return errors.New("cmsisdap: SWD is not configured")
+	}
+	if !protocolSupportsSWDSequence(s.info.ProtocolVersion) {
+		return fmt.Errorf("cmsisdap: protocol version %q does not support DAP_SWD_Sequence", s.info.ProtocolVersion)
+	}
+	return nil
+}

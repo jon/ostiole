@@ -145,19 +145,19 @@ func TestOpenWithSWDRetainsPersistentDisconnectFailure(t *testing.T) {
 	}
 }
 
-func TestConfigureSWDRejectsProtocolWithoutSequenceBeforeEffects(t *testing.T) {
-	device := metadataPeer()
-	device.claim.responses[infoProtocolVersion] = infoResponse([]byte("1.1.0\x00"))
-	session, err := openSession(t.Context(), device)
+func TestSWDIORejectsProtocolWithoutSequenceBeforeEffects(t *testing.T) {
+	peer := newSWDCommandPeer(64)
+	peer.device.claim.responses[infoProtocolVersion] = infoResponse([]byte("1.1.0\x00"))
+	session, err := openSession(t.Context(), peer.device, WithSWD(100_000))
 	if err != nil {
 		t.Fatal(err)
 	}
-	before := append([]string(nil), device.claim.operations...)
-	if err := session.ConfigureSWD(t.Context(), 100_000); err == nil || !strings.Contains(err.Error(), "does not support DAP_SWD_Sequence") {
-		t.Fatalf("ConfigureSWD with protocol 1.1 error = %v", err)
+	before := len(peer.commands)
+	if _, err := session.SWDIO(t.Context(), []byte{3}, []byte{0}, 2); err == nil || !strings.Contains(err.Error(), "does not support DAP_SWD_Sequence") {
+		t.Fatalf("SWDIO with protocol 1.1 error = %v", err)
 	}
-	if !reflect.DeepEqual(device.claim.operations, before) {
-		t.Fatalf("old-protocol ConfigureSWD operations = %v", device.claim.operations[len(before):])
+	if len(peer.commands) != before {
+		t.Fatal("old-protocol SWDIO sent a command")
 	}
 	if err := session.Close(); err != nil {
 		t.Fatal(err)

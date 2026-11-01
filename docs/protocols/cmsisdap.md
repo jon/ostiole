@@ -16,6 +16,8 @@ implements.
   https://arm-software.github.io/CMSIS-DAP/latest/group__DAP__SWJ__Clock.html
 [sequence]:
   https://arm-software.github.io/CMSIS-DAP/latest/group__DAP__SWD__Sequence.html
+[swj-sequence]:
+  https://arm-software.github.io/CMSIS-DAP/latest/group__DAP__SWJ__Sequence.html
 [disconnect]:
   https://arm-software.github.io/CMSIS-DAP/latest/group__DAP__Disconnect.html
 
@@ -69,20 +71,35 @@ clock, or touch a target.
 
 ## SWD connection and sequences
 
-`WithSWD` during open or `ConfigureSWD` afterward first requires protocol 1.2 or
-later and the SWD capability reported by `DAP_Info`. It sends
-[DAP_Connect][connect] with port 1, then sends the caller's requested maximum
-frequency as the little-endian hertz value in [DAP_SWJ_Clock][clock]. A
-successful clock response says that the request was accepted; CMSIS-DAP does not
-report the rate the probe attained. Reconfiguring an active session disconnects
-it first.
+`session.SWJSequence(ctx, output, bits)` sends one output-only
+[DAP_SWJ_Sequence][swj-sequence] command on a configured SWD session. The caller
+supplies 1 through 256 bits packed least-significant first; the complete request
+must fit the negotiated packet size. Invalid input is rejected before traffic.
+The command does not require optional `DAP_SWD_Sequence` support. Once accepted,
+it finishes under the session completion budget before reporting caller
+cancellation. Use direct sequences only while no protocol owner borrows the
+session. Reusable SWD entry operations remain in `swd` rather than applications
+assembling their own entry sequences.
+
+`WithSWD` during open or `ConfigureSWD` afterward requires the SWD capability
+reported by `DAP_Info`. It sends [DAP_Connect][connect] with port 1, then sends
+the caller's requested maximum frequency as the little-endian hertz value in
+[DAP_SWJ_Clock][clock]. A successful clock response says that the request was
+accepted; CMSIS-DAP does not report the rate the probe attained. Reconfiguring
+an active session disconnects it first.
 
 The configured session provides explicit sequences through
-[DAP_SWD_Sequence][sequence], available in CMSIS-DAP 1.2 and later. For each set
-direction bit, the probe drives SWDIO; for each clear bit, it samples SWDIO.
-Each run carries at most 64 cycles, with 64 encoded as zero; data is packed
-least-significant bit first. Output bytes are absent from input sequences, so a
-caller's output bits are never driven while the target owns SWDIO.
+[DAP_SWD_Sequence][sequence], available in CMSIS-DAP 1.2 and later. `SWDIO`
+checks this command's version requirement before sending traffic. The version
+may have two or three decimal components, such as `1.2` or `2.1.0`. Malformed
+strings and firmware identifiers such as `0254` do not establish optional
+sequence support. They do not prevent SWD port configuration or mandatory
+output commands, whose responses establish whether they are implemented. For
+each set direction bit, the probe drives SWDIO; for each clear bit, it samples
+SWDIO. Each run carries at most 64 cycles, with 64 encoded as zero; data is
+packed least-significant bit first. Output bytes are absent from input
+sequences, so a caller's output bits are never driven while the target owns
+SWDIO.
 
 One command can contain several runs. The driver preflights the entire call,
 keeping every request and response within the negotiated packet size and every
