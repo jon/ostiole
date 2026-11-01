@@ -17,7 +17,9 @@ type Request struct {
 	Addr uint8
 }
 
-// Target supplies DP and AP register behavior.
+// Target supplies DP and AP register behavior. Read may return a value with
+// exactly swd.ErrParity to emit that value with incorrect wire parity after
+// acceptance. Other read errors fail the physical exchange.
 type Target interface {
 	Read(context.Context, Request) (uint32, error)
 	Write(context.Context, Request, uint32) error
@@ -236,11 +238,11 @@ func (w *Wire) fixedFrame(ctx context.Context, direction, output, input []byte, 
 
 func (w *Wire) fixedRead(ctx context.Context, input []byte, req Request, offset int) error {
 	value, err := w.target.Read(ctx, req)
-	if err != nil {
+	if err != nil && err != swd.ErrParity {
 		return err
 	}
 	setUint32At(input, offset+12, value)
-	setBit(input, offset+44, parity32(value))
+	setBit(input, offset+44, parity32(value) != (err == swd.ErrParity))
 	return nil
 }
 
@@ -328,12 +330,12 @@ func (w *Wire) read(ctx context.Context, direction, output []byte, bits int, req
 		return nil, errors.New("swd/sim: invalid read-data direction")
 	}
 	value, err := w.target.Read(ctx, req)
-	if err != nil {
+	if err != nil && err != swd.ErrParity {
 		return nil, err
 	}
 	input := make([]byte, 6)
 	setUint32(input, value)
-	setBit(input, 32, parity32(value))
+	setBit(input, 32, parity32(value) != (err == swd.ErrParity))
 	return input, nil
 }
 

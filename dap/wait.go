@@ -22,7 +22,7 @@ const (
 	writeDataError = uint32(1 << 7)
 )
 
-var errFramingUnknown = errors.New("dap: SWD framing is unknown")
+var errFramingUnknown = errors.New("dap: protocol framing is unknown")
 
 type requestNotSentError struct {
 	cause error
@@ -171,7 +171,7 @@ func (e *swdExecutor) finishRetryError(req transferRequest, value uint32, err er
 	if err == swd.ErrFault {
 		return 0, e.handleFault(req, apWork, false)
 	}
-	if waits == 0 && err == swd.ErrParity {
+	if err == swd.ErrParity {
 		return value, err
 	}
 	if waits == 0 {
@@ -394,7 +394,7 @@ func lostPostedRead(ctx context.Context) error {
 }
 
 func (e *swdExecutor) prepareWaitRetry(ctx context.Context, req transferRequest, err error, waits int) error {
-	if err := e.validateWait(req, err); err != nil {
+	if err := e.validateWait(req, canceledWAITCause(ctx, err)); err != nil {
 		if e.pendingRead {
 			return errors.Join(err, ErrIndeterminate)
 		}

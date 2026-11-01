@@ -88,6 +88,8 @@ func (dp *DebugPort) ReadAPIDR(ctx context.Context, sel APSel) (APIDRInfo, error
 // existing MemAP values. The caller must understand the selected AP class and
 // restore any state the read changes. The address must be four-byte aligned.
 // The debug port must be connected and have no cleanup pending.
+// Bad parity while posting an SWD read also reports ErrIndeterminate: the
+// request was accepted, but its result was not retrieved. It is not replayed.
 func (dp *DebugPort) ReadRawAP(ctx context.Context, addr APAddress) (uint32, error) {
 	if err := dp.requireConnected(ctx); err != nil {
 		return 0, err
@@ -120,7 +122,7 @@ func (dp *DebugPort) readAPEffect(ctx context.Context, sel APSel, addr uint16) (
 		result := dp.jtag.accessAP(ctx, apTransferRequest(uint8(addr&0x0c), true), 0)
 		return result.outcome != transferUnsent && result.outcome != transferRejected, result.data, jtagResultError(result)
 	}
-	return dp.conn.readAP(ctx, uint8(addr&0x0c))
+	return dp.conn.readAP(ctx, sel, addr)
 }
 
 // WriteRawAP writes the register at one complete access-port address and waits
@@ -163,7 +165,7 @@ func (dp *DebugPort) writeAPEffect(ctx context.Context, sel APSel, addr uint16, 
 		result := dp.jtag.accessAP(ctx, apTransferRequest(uint8(addr&0x0c), false), value)
 		return result.outcome != transferUnsent && result.outcome != transferRejected, jtagResultError(result)
 	}
-	return dp.conn.writeAP(ctx, uint8(addr&0x0c), value)
+	return dp.conn.writeAP(ctx, sel, addr, value)
 }
 
 func (dp *DebugPort) selectAP(ctx context.Context, sel APSel, addr uint16) error {
