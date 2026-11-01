@@ -64,6 +64,9 @@ func TestHILComponentIdentity(t *testing.T) {
 
 func openIdentityBench(t *testing.T, ctx context.Context, selection discover.Selection, port armdebug.PortConfig) *armdebug.Conn {
 	t.Helper()
+	if selection.Provider == "cmsisdap" {
+		t.Skip("CMSIS-DAP explicit sequences do not provide a general SWD wire")
+	}
 	inventory, err := discover.Probes(ctx)
 	if err != nil {
 		t.Fatal(err)

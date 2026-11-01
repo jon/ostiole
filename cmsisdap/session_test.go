@@ -109,8 +109,11 @@ func (c *peerUSBClaim) SubmitBulk(_ context.Context, endpoint uint8, buffer []by
 			return nil, fmt.Errorf("unexpected command %x", buffer)
 		}
 	}
-	count := copy(c.pendingIn.buffer, response)
-	c.pendingIn.count = count
+	if len(response) > len(c.pendingIn.buffer) {
+		c.pendingIn.err = fmt.Errorf("peer: response is %d bytes, capacity is %d", len(response), len(c.pendingIn.buffer))
+	} else {
+		c.pendingIn.count = copy(c.pendingIn.buffer, response)
+	}
 	c.pendingIn = nil
 	return &peerBulkTransfer{count: len(buffer)}, nil
 }

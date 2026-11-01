@@ -52,3 +52,31 @@ type sessionFake struct{ attachmentFake }
 
 func (*sessionFake) SWDIO(context.Context, []byte, []byte, int) ([]byte, error) { return nil, nil }
 func (*sessionFake) MaxTransferBits() int                                       { return 64 }
+
+func TestAttachmentOwnerRejectsSWDBeforeActivation(t *testing.T) {
+	d := &attachmentFake{err: errors.New("release failed")}
+	backend := newAttachmentOwner(d)
+	if _, ok := backend.(probe.SWDBackend); ok {
+		t.Fatal("attachment-only owner advertises SWD activation")
+	}
+	p := probe.New(probe.Info{}, backend)
+	if _, err := p.SWD(t.Context(), probe.SWDConfig{MaxClockHz: 100_000}); !errors.Is(err, probe.ErrUnsupportedSWD) {
+		t.Fatalf("SWD error = %v", err)
+	}
+	if d.closes != 0 {
+		t.Fatal("unsupported activation changed ownership")
+	}
+	if err := p.Close(); !errors.Is(err, d.err) {
+		t.Fatalf("Close error = %v", err)
+	}
+	if !p.CleanupPending() || d.closes != 1 {
+		t.Fatal("lost retryable attachment")
+	}
+	d.err = nil
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if p.CleanupPending() || d.closes != 2 {
+		t.Fatal("attachment release not final")
+	}
+}

@@ -108,15 +108,13 @@ and remain the caller's cleanup responsibility.
 The generic `examples/simple/arm-info` program uses this ownership path:
 
 ```sh
-go run ./examples/simple/arm-info -provider cmsisdap -serial SERIAL -ap 0
+go run ./examples/simple/arm-info -provider jlink -serial SERIAL -ap 0
 ```
 
-It defaults to a 1 MHz SW-DP; `-clock` selects the requested ceiling in Hz. The
-default meets the micro:bit nRF51's
-[startup clock requirement](protocols/cmsisdap.md#nrf51-startup-clock). It reads
-DPIDR, AP IDR, and Cortex-M identity, and attempts owner cleanup up to three
-times. It does not halt, reset, or write target memory. Probe filters may be
-omitted only when selection remains unique; the AP argument is required.
+It defaults to a 1 MHz SW-DP; `-clock` selects the requested ceiling in Hz. It
+reads DPIDR, AP IDR, and Cortex-M identity, and attempts owner cleanup up to
+three times. It does not halt, reset, or write target memory. Probe filters may
+be omitted only when selection remains unique; the AP argument is required.
 
 A generic tool enables the bundled providers with these imports:
 
@@ -298,7 +296,6 @@ Concrete drivers can open that owner from an exact USB identity:
 ```go
 opened, err := jlink.OpenProbe(ctx, identity)
 // Or: ftdi.OpenProbe(ctx, identity, ftdi.PortA)
-// Or: cmsisdap.OpenProbe(ctx, identity)
 if err != nil {
     return err
 }
@@ -359,55 +356,13 @@ requires the exact v2 bulk interface. An application which knows a composite
 probe by serial or another explicit policy may select it from `devices` even
 when its device product string is absent from `Candidates`.
 
-To use that selected v2 probe as an SWD wire, configure it during `Open` and
-return a cleanup function even when `connection.Connect` fails:
-
-```go
-func connectCMSISDAPSWD(ctx context.Context, device *usb.Device) (_ uint32, cleanup func() error, err error) {
-    session, err := cmsisdap.Open(ctx, device, cmsisdap.WithSWD(1_000_000))
-    if err != nil {
-        if session != nil {
-            return 0, session.Close, err
-        }
-        closeErr := device.Close()
-        if closeErr != nil {
-            return 0, device.Close, errors.Join(err, closeErr)
-        }
-        return 0, nil, err
-    }
-    connection := swd.New(session)
-    connectionOwned := true
-    var abandoned error
-    cleanup = func() error {
-        cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-        defer cancel()
-        if connectionOwned {
-            if err := connection.Release(cleanupCtx); err != nil {
-                if !errors.Is(err, cmsisdap.ErrSessionPoisoned) {
-                    return err
-                }
-                abandoned = errors.Join(abandoned, fmt.Errorf("release SWD connection: %w", err))
-            }
-            connectionOwned = false
-        }
-        return errors.Join(abandoned, session.Close())
-    }
-    raw, err := connection.Connect(ctx)
-    return raw, cleanup, err
-}
-```
-
-`WithSWD` requires the advertised SWD capability, sends `DAP_Connect(SWD)`, and
-requests a maximum frequency in hertz through `DAP_SWJ_Clock`. `MaxClockHz`
-reports that accepted request because CMSIS-DAP does not report the attained
-clock. `SWDIO` converts direction runs to packet-bounded `DAP_SWD_Sequence`
-commands; the session remains the USB owner. A `connection.Release` failure that
-leaves the session usable, a complete `DAP_Disconnect` failure, or an
-interface-release failure leaves cleanup retryable in reverse order. After a
-poisoned exchange, the helper records `ErrSessionPoisoned`, lets `Close` report
-the abandoned port and finish USB cleanup without another command, and returns
-that terminal error. Device close runs once; later calls to `Session.Close`
-return its cached result.
+A configured CMSIS-DAP session supports safe explicit `SWDIO` sequences, with
+whole-call preflight and direction restrictions. It cannot serve as the wire for
+`swd.New`: firmware enables output at command end, while a general SWD wire must
+also preserve target ownership across calls. `cmsisdap.OpenProbe` therefore
+provides attachment ownership without a borrowed SWD or JTAG backend. See the
+[sequence contract](protocols/cmsisdap.md#swd-connection-and-sequences) before
+using direct sequences.
 
 A metadata-only J-Link session follows the same explicit inventory rule:
 
@@ -808,9 +763,6 @@ release: MEM-AP → debug port → FTDI channel
 
 acquire: USB device → J-Link session (configures SWD) → debug port → MEM-AP
 release: MEM-AP → debug port → J-Link session
-
-acquire: USB device → CMSIS-DAP session (connects SWD) → debug port → MEM-AP
-release: MEM-AP → debug port → CMSIS-DAP session
 ```
 
 Use a fresh, bounded cleanup context if the operation context may already be

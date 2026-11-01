@@ -31,7 +31,9 @@ func (s *Session) MaxTransferBits() int {
 // SWDIO executes one direction-explicit SWD bit stream. Direction and data are
 // packed least-significant bit first. For each set direction bit, the probe
 // drives SWDIO; for each clear bit, it samples SWDIO. Packet commands are sent
-// in order and never replayed.
+// in order and never replayed. The complete stream is validated before traffic.
+// It must finish with host ownership, and each target-driven phase must fit in
+// one command. These restrictions do not satisfy the general swd.Wire contract.
 func (s *Session) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
 	if bits <= 0 || bits > maxSWDTransferBits || len(direction)*8 < bits || len(output)*8 < bits {
 		return nil, fmt.Errorf("cmsisdap: invalid %d-bit SWD stream", bits)
@@ -43,26 +45,45 @@ func (s *Session) SWDIO(ctx context.Context, direction, output []byte, bits int)
 		return nil, errors.New("cmsisdap: SWD is not configured")
 	}
 
+	packets, err := planSWDStream(direction, output, bits, s.packetSize)
+	if err != nil {
+		return nil, err
+	}
 	input := make([]byte, (bits+7)/8)
-	position := 0
-	for packet := 1; position < bits; packet++ {
-		request, captures, next := planSWDPacket(direction, output, bits, position, s.packetSize)
-		if next == position {
-			return nil, fmt.Errorf("cmsisdap: packet size %d cannot hold an SWD sequence", s.packetSize)
-		}
-		response, err := s.exchange(ctx, request)
+	for index, packet := range packets {
+		response, err := s.exchange(ctx, packet.request)
 		if err != nil {
-			return nil, fmt.Errorf("cmsisdap: DAP_SWD_Sequence packet %d: %w", packet, err)
+			return nil, fmt.Errorf("cmsisdap: DAP_SWD_Sequence packet %d: %w", index+1, err)
 		}
 		if err := s.validateStatusResponse(response, commandSWDSequence); err != nil {
-			return nil, fmt.Errorf("cmsisdap: DAP_SWD_Sequence packet %d: %w", packet, err)
+			return nil, fmt.Errorf("cmsisdap: DAP_SWD_Sequence packet %d: %w", index+1, err)
 		}
-		if err := s.decodeSWDResponse(input, response, captures); err != nil {
-			return nil, fmt.Errorf("cmsisdap: DAP_SWD_Sequence packet %d: %w", packet, err)
+		if err := s.decodeSWDResponse(input, response, packet.captures); err != nil {
+			return nil, fmt.Errorf("cmsisdap: DAP_SWD_Sequence packet %d: %w", index+1, err)
 		}
-		position = next
 	}
 	return input, nil
+}
+
+type swdPacket struct {
+	request  []byte
+	captures []swdCapture
+}
+
+func planSWDStream(direction, output []byte, bits, packetSize int) ([]swdPacket, error) {
+	if !swdBit(direction, bits-1) {
+		return nil, errors.New("cmsisdap: SWD sequence must end with host ownership")
+	}
+	var packets []swdPacket
+	for position := 0; position < bits; {
+		request, captures, next := planSWDPacket(direction, output, bits, position, packetSize)
+		if next == position {
+			return nil, fmt.Errorf("cmsisdap: packet size %d cannot preserve SWD direction boundary at bit %d", packetSize, position)
+		}
+		packets = append(packets, swdPacket{request: request, captures: captures})
+		position = next
+	}
+	return packets, nil
 }
 
 func planSWDPacket(direction, output []byte, bits, start, packetSize int) ([]byte, []swdCapture, int) {
@@ -73,6 +94,9 @@ func planSWDPacket(direction, output []byte, bits, start, packetSize int) ([]byt
 	for position < bits && request[1] != 0xff {
 		input := !swdBit(direction, position)
 		run := swdRun(direction, position, bits)
+		if input && !swdCaptureFits(run, len(request), responseBytes, int(request[1]), packetSize) {
+			break
+		}
 		capacity := 0
 		if input && len(request)+1 <= packetSize {
 			capacity = (packetSize - responseBytes) * 8
@@ -99,6 +123,12 @@ func planSWDPacket(direction, output []byte, bits, start, packetSize int) ([]byt
 	return request, captures, position
 }
 
+func swdCaptureFits(bits, requestBytes, responseBytes, sequences, packetSize int) bool {
+	descriptors := (bits + 63) / 64
+	return responseBytes+(bits+7)/8 <= packetSize &&
+		requestBytes+descriptors <= packetSize && sequences+descriptors <= 255
+}
+
 func (s *Session) decodeSWDResponse(input, response []byte, captures []swdCapture) error {
 	offset := 2
 	for _, capture := range captures {
@@ -119,7 +149,7 @@ func (s *Session) decodeSWDResponse(input, response []byte, captures []swdCaptur
 func swdRun(direction []byte, start, bits int) int {
 	value := swdBit(direction, start)
 	count := 1
-	for count < 64 && start+count < bits && swdBit(direction, start+count) == value {
+	for start+count < bits && swdBit(direction, start+count) == value {
 		count++
 	}
 	return count

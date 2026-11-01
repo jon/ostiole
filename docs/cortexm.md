@@ -243,7 +243,7 @@ execution:
 
 ```sh
 go run ./examples/simple/cortexm-control \
-  -provider cmsisdap -serial SERIAL -ap 0 -clock 1000000 -allow-control -step
+  -provider jlink -serial SERIAL -ap 0 -clock 1000000 -allow-control -step
 ```
 
 The public [debug simulator](cortexm-simulation.md) composes M0 and Secure M33
@@ -425,6 +425,10 @@ when access fails. The group has no policy for suspending inherited CTI routes
 during stepping.
 
 ## Hardware procedure
+
+The CMSIS-DAP target procedure below describes the earlier unrestricted sequence
+adapter. It is not supported by the current restricted sequence surface; the
+generic CMSIS-DAP owner rejects SWD before activation.
 
 The opt-in integration test selects the CMSIS-DAP micro:bit with serial
 `9900360140124e4500279015000000360000000097969901`, AP0, and a requested 1 MHz

@@ -112,3 +112,18 @@ func (o *owner) RestorationPossible() bool {
 	}
 	return true
 }
+
+// OpenAttachment acquires an exact attachment without advertising a wire backend.
+func OpenAttachment(ctx context.Context, identity usb.DeviceInfo) (*probe.Probe, error) {
+	return open(ctx, identity, "", newAttachmentOwner)
+}
+
+type attachmentOwner struct{ state owner }
+
+func newAttachmentOwner(device attachment) probe.Backend {
+	return &attachmentOwner{state: owner{device: device}}
+}
+
+func (o *attachmentOwner) Close() error              { return o.state.Close() }
+func (o *attachmentOwner) CleanupPending() bool      { return o.state.CleanupPending() }
+func (o *attachmentOwner) RestorationPossible() bool { return o.state.RestorationPossible() }

@@ -181,7 +181,7 @@ error without attempting target-memory access.
 
 ```sh
 go run ./examples/simple/coresight-info \
-  -provider cmsisdap -serial SERIAL -ap 0
+  -provider jlink -serial SERIAL -ap 0
 ```
 
 To inspect another known page, supply `-base ADDRESS`; this bypasses the BASE
@@ -195,7 +195,7 @@ at most 4096 entry reads across the hierarchy:
 
 ```sh
 go run ./examples/simple/coresight-info \
-  -provider cmsisdap -serial SERIAL -ap 0 -walk
+  -provider jlink -serial SERIAL -ap 0 -walk
 ```
 
 `-base ADDRESS` also applies to walks. The output includes parent and entry
@@ -205,6 +205,10 @@ and attempting owner cleanup. These fixed bounds keep the example small; library
 callers supply their own `WalkLimits`.
 
 ## Hardware evidence
+
+The CMSIS-DAP observations below used the earlier unrestricted sequence adapter.
+They are historical target evidence, not a supported composition of the current
+explicit sequence surface.
 
 On September 12, 2026, the macOS Nostalgia bench ran:
 
