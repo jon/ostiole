@@ -170,6 +170,9 @@ func (dp *DebugPort) failConnect(cause error) error {
 		return errors.Join(cause, fmt.Errorf("dap: roll back power requests: %w", err))
 	}
 	if err := dp.releaseLink(ctx); err != nil {
+		if releaseCompletionKnown(err) {
+			dp.completeRelease()
+		}
 		return errors.Join(cause, err)
 	}
 	dp.completeRelease()
@@ -183,6 +186,8 @@ func (dp *DebugPort) failConnect(cause error) error {
 // Once an attempt starts, other DP and AP operations remain blocked until
 // Release succeeds. Supply a fresh bounded context for cleanup retries.
 // Recovery inside a failed transport operation retains its independent budget.
+// A final SWD cleanup error is returned even when restoration completed;
+// subsequent Release calls are idle.
 // A failed SWD link release makes the next attempt re-enter before DP traffic;
 // a release rejected before wire traffic does not lose known framing.
 func (dp *DebugPort) Release(ctx context.Context) (err error) {
@@ -212,6 +217,9 @@ func (dp *DebugPort) Release(ctx context.Context) (err error) {
 		return err
 	}
 	if err := dp.releaseLink(ctx); err != nil {
+		if releaseCompletionKnown(err) {
+			dp.completeRelease()
+		}
 		return err
 	}
 	dp.completeRelease()
@@ -223,8 +231,8 @@ func (dp *DebugPort) releaseLink(ctx context.Context) error {
 		return dp.jtag.release(ctx)
 	}
 	if err := dp.conn.Release(ctx); err != nil {
-		if !dp.conn.CleanupPending() && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
-			return nil
+		if !dp.conn.CleanupPending() {
+			return completedReleaseError{error: fmt.Errorf("dap: release SWD transport: %w", err)}
 		}
 		if !errors.Is(err, swd.ErrNotExecuted) {
 			dp.state.loseFraming()
