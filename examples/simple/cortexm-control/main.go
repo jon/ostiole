@@ -117,23 +117,37 @@ func control(ctx context.Context, core controlledTarget, step bool) error {
 	return nil
 }
 
-func release(core *cortexm.Target, c *armdebug.Conn) error {
-	var err error
+type targetRelease interface {
+	Release(context.Context) error
+}
+
+type connectionRelease interface {
+	Close() error
+	RestorationPossible() bool
+}
+
+func release(core targetRelease, c connectionRelease) error {
+	var attempts, err error
+	if c.RestorationPossible() {
+		for range 3 {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			err = core.Release(ctx)
+			cancel()
+			attempts = errors.Join(attempts, err)
+			if err == nil || !c.RestorationPossible() {
+				break
+			}
+		}
+		if err != nil && c.RestorationPossible() {
+			return fmt.Errorf("target restoration remains pending; memory owner retained: %w", attempts)
+		}
+	}
 	for range 3 {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		err = core.Release(ctx)
-		cancel()
+		err = c.Close()
+		attempts = errors.Join(attempts, err)
 		if err == nil {
-			break
+			return attempts
 		}
 	}
-	if err != nil {
-		return fmt.Errorf("target restoration remains pending; memory owner retained: %w", err)
-	}
-	for range 3 {
-		if err = c.Close(); err == nil {
-			return nil
-		}
-	}
-	return fmt.Errorf("connection cleanup remains pending: %w", err)
+	return fmt.Errorf("connection cleanup reported errors after three attempts: %w", attempts)
 }

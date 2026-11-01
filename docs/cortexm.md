@@ -47,6 +47,9 @@ restoration can be retried. If terminal probe loss makes restoration impossible,
 `armdebug.ErrRestorationAbandoned`. The target may remain halted with debug
 control unrestored; a successful later host close does not resume it. Keep the
 original target error when joining the Arm owner's cleanup error.
+`connected.RestorationPossible()` inspects the retained probe without traffic;
+it does not repair or validate the borrowed memory client. See
+[managed owner cleanup](composition.md#select-and-open-hardware-explicitly).
 
 ## Effects
 
@@ -251,7 +254,11 @@ releases the target before closing the connection. With `-step`, it also steps
 once and prints the resulting PC. It requires explicit consent to control
 execution. If the core is already halted, it reports the inherited halt, reads
 the registers, and skips stepping and resuming. A competing halt observed during
-control remains subject to the target ownership checks.
+control remains subject to the target ownership checks. The example makes up to
+three fresh, bounded target release attempts. A live failure retains the memory
+owner; known terminal loss proceeds through Arm owner cleanup without further
+target release traffic. Errors from earlier cleanup attempts remain in the
+result even if a later attempt succeeds.
 
 ```sh
 go run ./examples/simple/cortexm-control \

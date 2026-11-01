@@ -46,3 +46,16 @@ supplies completed register operations. `armdebug` selects the advertised
 register surface before activation, with no fallback after failure.
 
 [rp2350-procedure]: ../docs/coresight.md#adiv6-and-the-rp2350
+
+## Cleanup
+
+The managed examples retain errors from earlier cleanup attempts even when a
+later retry succeeds.
+
+The direct FTDI examples release their SWD or DAP owner before closing the
+channel. A failed release retains the channel while protocol restoration is
+still pending. A completed SWD or DAP release can report a context error; host
+cleanup then proceeds while preserving that error. Known terminal adapter loss
+skips further protocol traffic and reports the loss while releasing host
+resources. These small programs report remaining cleanup failures; exiting
+cannot restore target state.

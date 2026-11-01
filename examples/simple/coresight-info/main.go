@@ -143,13 +143,15 @@ func printComponent(component coresight.Component) {
 }
 
 func closeConnection(c *armdebug.Conn) error {
-	var err error
+	var attempts error
 	for range 3 {
-		if err = c.Close(); err == nil {
-			return nil
+		err := c.Close()
+		attempts = errors.Join(attempts, err)
+		if err == nil {
+			return attempts
 		}
 	}
-	return fmt.Errorf("cleanup remains pending after three attempts: %w", err)
+	return fmt.Errorf("cleanup reported errors after three attempts: %w", attempts)
 }
 
 func parseBase(value string) (uint64, error) {

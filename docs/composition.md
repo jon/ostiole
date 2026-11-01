@@ -93,6 +93,22 @@ Backends without the optional restoration contract retain conservative retry
 behavior. `Port()` returns nil once cleanup starts; previously returned pointers
 are governed by the borrowing contract, not forcibly revoked.
 
+`connected.RestorationPossible()` reports the retained probe's restoration
+availability without sending traffic. Use it after a borrowed target fails to
+release, before deciding whether to close its memory owner:
+
+```go
+cleanupErr := core.Release(cleanupCtx)
+if cleanupErr != nil && connected.RestorationPossible() {
+    return errors.Join(err, cleanupErr) // Retain core and connected for retry.
+}
+return errors.Join(err, cleanupErr, connected.Close())
+```
+
+A false result permits terminal host cleanup through `Close`; it does not prove
+that target state was restored. A true result does not validate an invalidated
+MEM-AP or make a stale client usable. Nil and released connections report false.
+
 Use the owner's method to acquire a MEM-AP whose cleanup it will track:
 
 ```go
