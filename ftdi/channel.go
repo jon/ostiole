@@ -104,6 +104,8 @@ type Channel struct {
 	receiving   bool
 	settle      func(context.Context) error
 	poisonErr   error
+	gone        bool
+	restored    bool
 }
 
 func newChannel(device usbDevice, config Config) (*Channel, error) {
@@ -160,6 +162,7 @@ func (c *Channel) ClockHz() uint32 {
 
 func (c *Channel) claimUSB() error {
 	claim, err := c.device.claimInterface(c.iface)
+	c.recordLoss(err)
 	if err != nil {
 		return err
 	}
@@ -174,6 +177,7 @@ type usbRead struct {
 
 func (c *Channel) openUSBTransfers(ctx context.Context) error {
 	endpoint, err := c.claim.Endpoint(ctx, c.bulkIn)
+	c.recordLoss(err)
 	if err != nil {
 		return err
 	}
@@ -205,28 +209,45 @@ func (c *Channel) releaseUSB() error {
 	if c.claim == nil {
 		return nil
 	}
+	var result error
 	if c.receiveStop != nil {
 		select {
 		case <-c.receiveStop:
 		default:
 			close(c.receiveStop)
 		}
-		if err := c.claim.AbortBulk(c.bulkIn); err != nil {
-			return err
+		result = c.claim.AbortBulk(c.bulkIn)
+		c.recordLoss(result)
+		if result != nil && !errors.Is(result, usb.ErrDeviceGone) {
+			return result
 		}
-		<-c.receiveDone
-		c.receive, c.receiveErr = nil, nil
-		c.receiveStop, c.receiveDone = nil, nil
+		if result == nil {
+			c.finishReceive()
+		}
 	}
-	if err := c.claim.Close(); err != nil {
-		return err
+	err := c.claim.Close()
+	c.recordLoss(err)
+	result = errors.Join(result, err)
+	if err != nil && cleanupPending(c.claim) {
+		return result
+	}
+	if c.receiveStop != nil {
+		c.finishReceive()
 	}
 	c.claim = nil
-	return nil
+	return result
+}
+
+func (c *Channel) finishReceive() {
+	<-c.receiveDone
+	c.receive, c.receiveErr = nil, nil
+	c.receiveStop, c.receiveDone = nil, nil
 }
 
 func (c *Channel) control(ctx context.Context, request uint8, value uint16) (int, error) {
-	return c.device.ControlTransfer(ctx, requestTypeOut, request, value, c.index, nil)
+	count, err := c.device.ControlTransfer(ctx, requestTypeOut, request, value, c.index, nil)
+	c.recordLoss(err)
+	return count, err
 }
 
 func (c *Channel) bulkWrite(ctx context.Context, data []byte) (int, error) {
@@ -315,6 +336,7 @@ func (c *Channel) receiveStopped() bool {
 
 func (c *Channel) submitUSBRead(ctx context.Context, buffer []byte) (usbRead, error) {
 	transfer, err := c.claim.SubmitBulk(ctx, c.bulkIn, buffer)
+	c.recordLoss(err)
 	if err != nil {
 		return usbRead{}, err
 	}
@@ -359,11 +381,8 @@ func (c *Channel) transportReady() error {
 	if c == nil || c.device == nil {
 		return errors.New("ftdi: nil channel")
 	}
-	c.receiveMu.Lock()
-	err := c.poisonErr
-	c.receiveMu.Unlock()
-	if err != nil {
-		return errors.Join(err, ErrChannelPoisoned)
+	if err := c.restorationFailure(); err != nil {
+		return err
 	}
 	return nil
 }

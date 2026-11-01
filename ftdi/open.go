@@ -8,7 +8,8 @@ import (
 )
 
 // Open initializes one MPSSE port and clock, leaving target pins as inputs. A non-nil channel
-// owns device even on error and must be closed; retain it if Close fails.
+// owns device even on error and must be closed; after a Close error, retain it
+// while CleanupPending reports true.
 // A nil channel leaves device with the caller. No reset pin is driven.
 // Each transfer establishes its pin directions; the caller verifies wiring.
 func Open(ctx context.Context, device *usb.Device, config Config) (*Channel, error) {
