@@ -23,8 +23,8 @@ type debugPortOptions struct {
 // WithCleanupTimeout sets the independent budget for each recovery attempt.
 // The default is one second for SWD and thirty seconds for JTAG. Connect
 // rejects nonpositive durations before traffic. Ordinary operations remain
-// bounded by their caller's context between frames; a started SWD frame uses
-// the connection's independent completion budget.
+// bounded by their caller's context between transfers; started SWD frames and
+// JTAG scans use their connection's independent completion budget.
 func WithCleanupTimeout(timeout time.Duration) Option {
 	return Option{apply: func(options *debugPortOptions) {
 		options.cleanupTimeout = timeout

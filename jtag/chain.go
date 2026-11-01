@@ -30,7 +30,7 @@ func NewChain(conn *Conn, layout Layout) (*Chain, error) {
 	if err := layout.Validate(); err != nil {
 		return nil, err
 	}
-	c := &Chain{conn: conn, layout: append(Layout(nil), layout...), selected: -1}
+	c := &Chain{conn: conn, layout: append(Layout(nil), layout...), selected: -1, released: true}
 	for _, spec := range c.layout {
 		c.irBits += spec.ir
 	}
@@ -54,7 +54,12 @@ func (c *Chain) Connect(ctx context.Context) error {
 		return ErrChainInvalid
 	}
 	c.valid, c.selected = false, -1
-	c.released = false
+	serial := c.conn.serial
+	defer func() {
+		if c.conn.serial != serial {
+			c.released = false
+		}
+	}()
 	c.generation++
 	found, err := c.conn.Discover(ctx, len(c.layout))
 	if err != nil {
@@ -108,6 +113,8 @@ func (c *Chain) ready() bool {
 // Release parks a validated chain in BYPASS/Idle and invalidates all borrowed
 // TAPs. It does not restore inherited instructions or close the wire. If state
 // was lost, it revalidates the same layout before parking; failure is retryable.
+// Before entry traffic, Release sends no traffic. Completed parking clears
+// CleanupPending before returning caller cancellation.
 func (c *Chain) Release(ctx context.Context) error {
 	if c == nil || c.released {
 		return nil
@@ -119,7 +126,11 @@ func (c *Chain) Release(ctx context.Context) error {
 	}
 	c.valid = false
 	c.generation++
-	_, err := c.conn.ScanIR(ctx, ones(c.irBits), c.irBits)
-	c.released = err == nil
+	capture, err := c.conn.ScanIR(ctx, ones(c.irBits), c.irBits)
+	c.released = capture != nil
 	return err
 }
+
+// CleanupPending reports whether a chain entry attempt started traffic and
+// still needs Release. It does not report the wire owner's host resources.
+func (c *Chain) CleanupPending() bool { return c != nil && c.conn != nil && !c.released }

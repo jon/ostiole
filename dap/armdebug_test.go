@@ -177,8 +177,8 @@ func TestArmJTAGFailedMemoryReleaseRetainsDependencies(t *testing.T) {
 	observed := false
 	b.beforeTransfer = func(ctx context.Context) error {
 		deadline, ok := ctx.Deadline()
-		if !observed && (!ok || time.Until(deadline) < 3*time.Second || time.Until(deadline) > 4*time.Second) {
-			t.Fatal("missing custom cleanup budget")
+		if !observed && (!ok || time.Until(deadline) < 29*time.Second || time.Until(deadline) > 30*time.Second) {
+			t.Fatal("missing independent scan completion budget")
 		}
 		observed = true
 		return want

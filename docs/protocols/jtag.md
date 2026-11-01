@@ -36,6 +36,21 @@ Run-Test/Idle clocks when the selected instruction needs them. A zero-cycle
 request sends no traffic. Scans and idle requests are capped by `MaxScanBits`
 (1,048,576); wire limits still apply to each physical transfer.
 
+A started `ScanIR` or `ScanDR` finishes its entry, remaining shift clocks, and
+exit to Idle under an independent thirty-second budget before reporting caller
+cancellation. Cancellation before traffic sends no clocks. Configure a slower
+connection with `jtag.New(wire, jtag.WithCompletionTimeout(time.Minute))`;
+existing `jtag.New(wire)` calls keep the default. Nonpositive explicit budgets
+are rejected before traffic. A completed scan returns its complete capture even
+when it also reports cancellation; a non-nil capture confirms that the exit to
+Idle completed.
+
+If completion fails after traffic, ordinary movement is blocked with
+`ErrStateUnknown` and the scan is not replayed. Explicit Reset remains available
+and has its ordinary update effects, including possible updates from an
+incomplete shift. The completion budget applies to scans; raw Move, Reset, and
+Idle use their supplied contexts.
+
 `Discover(ctx, maxTAPs)` resets the chain and returns detached reset-register
 observations, nearest TDO first. Each observation is either an IDCODE or an
 explicit one-bit bypass entry; it says nothing about the instruction-register
@@ -99,6 +114,12 @@ Coincidental `01` bits can satisfy more than one proposed set of IR boundaries.
 Obtain individual IR lengths from the device specification, not from IDCODE
 enumeration. Connect does not enable hidden TAPs or perform board-specific
 configuration.
+
+`chain.CleanupPending()` reports whether entry traffic left a parking
+obligation. A newly constructed chain and an entry rejected before traffic own
+no parking; Release then sends no clocks. Completed parking clears the
+obligation before reporting final-scan cancellation, so a repeated Release sends
+no clocks.
 
 Release parks the chain in BYPASS/Idle, without restoring inherited instructions
 or closing the wire. After lost state it validates the same layout before

@@ -89,6 +89,9 @@ func (e *jtagExecutor) release(ctx context.Context) error {
 		e.ownedOverrun = false
 	}
 	if err := e.chain.Release(ctx); err != nil {
+		if !e.chain.CleanupPending() && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+			return nil
+		}
 		e.dp.state.loseFraming()
 		return err
 	}

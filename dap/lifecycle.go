@@ -173,7 +173,7 @@ func (dp *DebugPort) failConnect(cause error) error {
 // Release restores volatile debug-port state owned by this connection.
 //
 // Release may be retried. Each attempt, including protocol re-entry, uses ctx.
-// A started SWD frame completes under its connection's independent budget.
+// Started SWD frames and JTAG scans use their connection's completion budget.
 // Once an attempt starts, other DP and AP operations remain blocked until
 // Release succeeds. Supply a fresh bounded context for cleanup retries.
 // Recovery inside a failed transport operation retains its independent budget.
