@@ -359,9 +359,11 @@ func openCMSISDAP(ctx context.Context) (_ *cmsisdap.Session, cleanup func() erro
     }
     session, err := cmsisdap.Open(ctx, device)
     if err != nil {
-        closeErr := device.Close()
-        if closeErr != nil {
-            return nil, device.Close, errors.Join(err, closeErr)
+        if session != nil && session.CleanupPending() {
+            return nil, session.Close, err
+        }
+        if device.CleanupPending() {
+            return nil, device.Close, err
         }
         return nil, nil, err
     }
@@ -370,9 +372,10 @@ func openCMSISDAP(ctx context.Context) (_ *cmsisdap.Session, cleanup func() erro
 ```
 
 On success the session owns the device, and `cleanup` calls `session.Close`.
-After a failed open whose device cleanup also fails, `cleanup` calls
-`device.Close` again. Retain a non-nil cleanup function. Calling it again either
-retries a retained interface claim or returns the cached device-close result.
+After failed open, a retained session owns its command port, claim, and device;
+otherwise the caller retains any pending device cleanup. Keep a non-nil cleanup
+function and report its errors. Final cleanup errors are already part of the
+open error and do not require another close after resources are released.
 Product matching is case-sensitive and only shortlists candidates; `Open` still
 requires the exact v2 bulk interface. An application which knows a composite
 probe by serial or another explicit policy may select it from `devices` even
@@ -381,10 +384,18 @@ when its device product string is absent from `Candidates`.
 A configured CMSIS-DAP session supports safe explicit `SWDIO` sequences, with
 whole-call preflight and direction restrictions. It cannot serve as the wire for
 `swd.New`: firmware enables output at command end, while a general SWD wire must
-also preserve target ownership across calls. `cmsisdap.OpenProbe` therefore
-provides attachment ownership without a borrowed SWD or JTAG backend. See the
-[sequence contract](protocols/cmsisdap.md#swd-connection-and-sequences) before
-using direct sequences.
+also preserve target ownership across calls. Use completed register operations
+for target compositions:
+
+```go
+registers := cmsisdap.NewRegisterSWD(session) // session configured with WithSWD
+dp := dap.NewDebugPort(dap.RegisterDP(registers))
+```
+
+Connect the debug port explicitly and release it before closing the session. See
+the
+[register ownership contract](protocols/cmsisdap.md#completed-register-ownership)
+and [sequence contract](protocols/cmsisdap.md#swd-connection-and-sequences).
 
 A metadata-only J-Link session follows the same explicit inventory rule:
 
