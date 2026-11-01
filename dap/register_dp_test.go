@@ -39,46 +39,6 @@ func TestRegisterCompletedSELECTErrorKeepsSelection(t *testing.T) {
 	}
 }
 
-func TestRegisterDPBindingRejectsAPBeforeTraffic(t *testing.T) {
-	for _, kind := range []string{"read", "write", "identity", "memory", "mixed transaction"} {
-		t.Run(kind, func(t *testing.T) {
-			model := newRegisterModel(t)
-			dp := dap.NewDebugPort(dap.RegisterDP(model))
-			if _, err := dp.Connect(t.Context()); err != nil {
-				t.Fatal(err)
-			}
-			releaseErrorPort(t, dp)
-			before := len(model.requests)
-			err := registerUnsupportedAPCall(t, dp, kind)
-			if err == nil || len(model.requests) != before {
-				t.Fatalf("unsupported AP=%v traffic=%d/%d", err, len(model.requests), before)
-			}
-		})
-	}
-}
-
-func registerUnsupportedAPCall(t *testing.T, dp *dap.DebugPort, kind string) (err error) {
-	t.Helper()
-
-	sel := dap.NewAPSel(1)
-	switch kind {
-	case "read":
-		_, err = dp.ReadRawAP(t.Context(), sel.Address(0))
-	case "write":
-		err = dp.WriteRawAP(t.Context(), sel.Address(0), 0)
-	case "identity":
-		_, err = dp.ReadAPIDR(t.Context(), sel)
-	case "memory":
-		_, err = dap.OpenMemAP(t.Context(), dp, sel)
-	default:
-		txn := dp.NewTxn()
-		txn.WriteDP(dap.SELECT, 1)
-		txn.ReadAPIDR(sel)
-		err = txn.Commit(t.Context())
-	}
-	return err
-}
-
 func TestRegisterDPConstructorAndEntryPreflight(t *testing.T) {
 	for _, option := range []dap.Option{dap.WithCleanupTimeout(0), dap.WithCleanupTimeout(-time.Second)} {
 		model := newRegisterModel(t)
@@ -501,4 +461,13 @@ func TestRegisterDPNilFunctionAndValueBindings(t *testing.T) {
 	if err := dp.Release(t.Context()); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func (f functionRegister) ReadAP(context.Context, uint8) (uint32, dap.RegisterStatus, error) {
+	f()
+	return 0, dap.RegisterCompleted, nil
+}
+func (f functionRegister) WriteAP(context.Context, uint8, uint32) (dap.RegisterStatus, error) {
+	f()
+	return dap.RegisterCompleted, nil
 }

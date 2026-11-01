@@ -40,7 +40,7 @@ func shareAPModel(t testing.TB, model *jtagDPModel, target *sim.Target) {
 }
 
 func TestSharedMEMAPScalarBlockAndRestoration(t *testing.T) {
-	for _, link := range []string{"SWD", "JTAG"} {
+	for _, link := range []string{"SWD", "JTAG", "Register"} {
 		for _, bigEndian := range []bool{false, true} {
 			t.Run(link+map[bool]string{false: "/LE", true: "/BE"}[bigEndian], func(t *testing.T) {
 				exerciseSharedMEMAP(t, link, bigEndian)
@@ -66,13 +66,7 @@ func exerciseSharedMEMAP(t *testing.T, link string, bigEndian bool) {
 	if err := target.SetMEMAPDebugBase(sel, 0xe00ff003, 1); err != nil {
 		t.Fatal(err)
 	}
-	port := dap.SWDP(swd.New(swdsim.New(target)))
-	if link == "JTAG" {
-		model, wire, chain := jtagModelChain(t, 8, 1)
-		wire.limit = 13
-		shareAPModel(t, model, target)
-		port = dap.JTAGDP(chain, 1)
-	}
+	port := sharedMEMAPPort(t, target, link)
 	dp := dap.NewDebugPort(port)
 	if _, err := dp.Connect(t.Context()); err != nil {
 		t.Fatal(err)
@@ -101,6 +95,21 @@ func exerciseSharedMEMAP(t *testing.T, link string, bigEndian bool) {
 	}
 	if err := dp.Release(t.Context()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func sharedMEMAPPort(t *testing.T, target *sim.Target, link string) dap.Port {
+	t.Helper()
+	switch link {
+	case "Register":
+		return dap.RegisterDP(&registerModel{target: target})
+	case "JTAG":
+		model, wire, chain := jtagModelChain(t, 8, 1)
+		wire.limit = 13
+		shareAPModel(t, model, target)
+		return dap.JTAGDP(chain, 1)
+	default:
+		return dap.SWDP(swd.New(swdsim.New(target)))
 	}
 }
 

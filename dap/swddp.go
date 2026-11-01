@@ -297,9 +297,7 @@ func (dp *DebugPort) writeDP(ctx context.Context, reg DPRegister, value uint32) 
 	}
 	_, err = dp.conn.transfer(ctx, dpTransferRequest(reg, false), value)
 	if err != nil {
-		if registerCompletionKnown(err) {
-			dp.recordDPWrite(reg, value)
-		}
+		dp.recordFailedDPWrite(reg, value, err)
 		return fmt.Errorf("dap: write %s: %w", info.name, err)
 	}
 	dp.recordDPWrite(reg, value)
@@ -316,6 +314,15 @@ func (dp *DebugPort) prepareDPWrite(ctx context.Context, reg DPRegister, info dp
 		}
 	}
 	return nil
+}
+
+func (dp *DebugPort) recordFailedDPWrite(reg DPRegister, value uint32, err error) {
+	if registerCompletionKnown(err) {
+		dp.recordDPWrite(reg, value)
+	} else if dp.conn.register != nil && reg == ABORT && value&dapAbort != 0 &&
+		!requestWasNotSent(err) && !requestWasRejected(err) {
+		dp.state.invalidateAP()
+	}
 }
 
 func (dp *DebugPort) recordDPWrite(reg DPRegister, value uint32) {

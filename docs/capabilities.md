@@ -294,12 +294,14 @@ SWD connection must be serialized; the packages do not add locking. The
 [Arm Debug Access Port guide](ports/dap.md) describes ADIv5 register access,
 posted transactions, power handshakes, and the current bench result.
 
-A caller-supplied `dap.RegisterTransport` can also bind completed DP operations
-through `dap.RegisterDP`. This path supplies DP identity, banks, power, ordered
-DP transactions, and restoration, with explicit completion outcomes. It rejects
-AP and MEM-AP operations before traffic. Behavioral tests cover this interface;
-no bundled adapter or physical hardware support is established by it. See
-[completed DP operations](ports/dap.md#completed-dp-register-operations).
+A caller-supplied `dap.RegisterTransport` can also bind completed register
+operations through `dap.RegisterDP`. This path supplies DP identity, banks,
+power, ordered DP/AP transactions, MEM-AP access, and restoration, with explicit
+completion outcomes. Shared behavioral tests cover scalar and block memory in
+both byte orders, large addresses, and independently observed CSW/TAR/TARHI
+restoration. No bundled adapter or physical hardware support is established by
+it. See
+[completed register operations](ports/dap.md#completed-register-operations).
 
 ## ADIv6 debug-space inspection
 

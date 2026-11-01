@@ -9,11 +9,18 @@ import (
 )
 
 func (e *swdExecutor) registerOperation(ctx context.Context, req transferRequest, data uint32) (uint32, RegisterStatus, error) {
-	if req.Read {
+	switch {
+	case req.AP && req.Read:
+		return e.register.ReadAP(ctx, req.Addr)
+	case req.Read:
 		return e.register.ReadDP(ctx, req.Addr)
+	case req.AP:
+		status, err := e.register.WriteAP(ctx, req.Addr, data)
+		return 0, status, err
+	default:
+		status, err := e.register.WriteDP(ctx, req.Addr, data)
+		return 0, status, err
 	}
-	status, err := e.register.WriteDP(ctx, req.Addr, data)
-	return 0, status, err
 }
 
 func (e *swdExecutor) registerExchange(ctx context.Context, req transferRequest, data uint32) transferResult {
@@ -48,7 +55,7 @@ func registerCompletionKnown(err error) bool {
 	return !requestWasNotSent(err) && errors.As(err, &completed)
 }
 
-func (e *swdExecutor) transferRegister(ctx context.Context, req transferRequest, data uint32) (uint32, error) {
+func (e *swdExecutor) transferRegister(ctx context.Context, req transferRequest, data uint32, preserveAP bool) (uint32, error) {
 	if e.dp.state.response == responseLost {
 		return 0, errFramingUnknown
 	}
@@ -64,7 +71,7 @@ func (e *swdExecutor) transferRegister(ctx context.Context, req transferRequest,
 			}
 			continue
 		}
-		return e.finishRegister(req, result)
+		return e.finishRegister(req, result, preserveAP)
 	}
 }
 
@@ -83,7 +90,7 @@ func (e *swdExecutor) registerWait(ctx context.Context, req transferRequest, cau
 	return nil
 }
 
-func (e *swdExecutor) finishRegister(req transferRequest, result transferResult) (uint32, error) {
+func (e *swdExecutor) finishRegister(req transferRequest, result transferResult, preserveAP bool) (uint32, error) {
 	if errors.Is(result.cause, ErrProtocol) {
 		e.dp.state.loseFraming()
 		return 0, errors.Join(result.cause, ErrIndeterminate)
@@ -92,7 +99,7 @@ func (e *swdExecutor) finishRegister(req transferRequest, result transferResult)
 		return 0, &requestNotSentError{cause: errors.Join(ErrNotExecuted, result.cause)}
 	}
 	if errors.Is(result.cause, ErrFault) {
-		return e.finishRegisterFault(req, result)
+		return e.finishRegisterFault(req, result, preserveAP)
 	}
 	if result.outcome == transferConfirmed {
 		if req.Read && errors.Is(result.cause, swd.ErrParity) {
@@ -128,15 +135,18 @@ func registerStatusConsistent(status RegisterStatus, err error) bool {
 	return true
 }
 
-func (e *swdExecutor) finishRegisterFault(req transferRequest, result transferResult) (uint32, error) {
+func (e *swdExecutor) finishRegisterFault(req transferRequest, result transferResult, preserveAP bool) (uint32, error) {
 	if req == dpTransferRequest(SELECT, false) && result.outcome != transferRejected {
 		e.dp.state.invalidateSELECT()
 	}
-	err := errors.Join(result.cause, e.handleFault(req, waitMayAffectAP(req), false))
+	err := errors.Join(result.cause, e.handleFault(req, waitMayAffectAP(req), preserveAP))
 	if result.outcome == transferRejected {
 		return 0, rejectedRequestError{error: err}
 	}
-	return 0, errors.Join(err, ErrIndeterminate)
+	if result.outcome == transferIndeterminate || !req.Read {
+		err = errors.Join(err, ErrIndeterminate)
+	}
+	return 0, err
 }
 
 func soleRegisterWAIT(err error) bool {

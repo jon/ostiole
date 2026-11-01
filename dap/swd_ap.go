@@ -8,7 +8,14 @@ import (
 	"github.com/jon/ostiole/swd"
 )
 
-func (e *swdExecutor) readAP(ctx context.Context, sel APSel, addr uint16) (bool, uint32, error) {
+func (e *swdExecutor) readAP(ctx context.Context, sel APSel, addr uint16, preserveAP bool) (bool, uint32, error) {
+	if e.register != nil {
+		value, err := e.transferRegister(ctx, apTransferRequest(uint8(addr&12), true), 0, preserveAP)
+		if err != nil {
+			err = fmt.Errorf("dap: read %s register %#x: %w", sel, addr, err)
+		}
+		return !requestWasNotSent(err) && !requestWasRejected(err), value, err
+	}
 	_, err := e.transfer(ctx, apTransferRequest(uint8(addr&0x0c), true), 0)
 	if err != nil {
 		possible := !requestWasRejected(err) && !requestWasNotSent(err) && !errors.Is(err, swd.ErrFault)
@@ -26,7 +33,14 @@ func (e *swdExecutor) readAP(ctx context.Context, sel APSel, addr uint16) (bool,
 	return true, value, err
 }
 
-func (e *swdExecutor) writeAP(ctx context.Context, sel APSel, addr uint16, value uint32) (bool, error) {
+func (e *swdExecutor) writeAP(ctx context.Context, sel APSel, addr uint16, value uint32, preserveAP bool) (bool, error) {
+	if e.register != nil {
+		_, err := e.transferRegister(ctx, apTransferRequest(uint8(addr&12), false), value, preserveAP)
+		if err != nil {
+			err = fmt.Errorf("dap: write %s register %#x: %w", sel, addr, err)
+		}
+		return !requestWasNotSent(err) && !requestWasRejected(err), err
+	}
 	_, err := e.transfer(ctx, apTransferRequest(uint8(addr&0x0c), false), value)
 	if err != nil {
 		possible := !requestWasRejected(err) && !requestWasNotSent(err) && !errors.Is(err, swd.ErrFault)

@@ -57,28 +57,32 @@ func (dp *DebugPort) executeAP(ctx context.Context, op *txnOp) (uint32, error) {
 	var possible bool
 	var err error
 	if op.kind == txnWriteRawAP {
-		possible, err = dp.writeAPEffect(ctx, op.apSel, op.apAddr, op.data)
+		possible, err = dp.writeAPEffect(ctx, op.apSel, op.apAddr, op.data, op.preserveAP)
 	} else {
-		possible, value, err = dp.readAPEffect(ctx, op.apSel, op.apAddr)
+		possible, value, err = dp.readAPEffect(ctx, op.apSel, op.apAddr, op.preserveAP)
 	}
 	raw := op.kind == txnWriteRawAP || op.kind == txnReadRawAP
-	if possible && raw && (!op.preserveAP || errors.Is(err, ErrIndeterminate)) && dp.state.apGeneration == generation {
+	if possible && raw && (!op.preserveAP || errors.Is(err, ErrIndeterminate) && !ordinaryFaultCleared(err)) && dp.state.apGeneration == generation {
 		dp.state.invalidateAP()
 	}
 	return value, err
 }
 
 func (dp *DebugPort) writeSequence(ctx context.Context, op *txnOp) error {
-	if dp.conn != nil {
+	if dp.conn != nil && dp.conn.register == nil {
 		return dp.writeSWDSequence(ctx, op)
 	}
 	for _, value := range op.values {
-		possible, err := dp.writeAPEffect(ctx, op.apSel, op.apAddr, value)
+		possible, err := dp.writeAPEffect(ctx, op.apSel, op.apAddr, value, op.preserveAP)
 		if possible {
 			op.accepted++
 		}
 		if err != nil {
-			op.uncertainWrite = possible
+			if registerCompletionKnown(err) {
+				op.confirmed++
+			} else {
+				op.uncertainWrite = possible
+			}
 			return err
 		}
 		op.confirmed++
