@@ -3,6 +3,7 @@ package jtag
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 // Wire clocks exactly bits TCK cycles, driving TMS and TDI and sampling TDO.
@@ -23,13 +24,22 @@ var ErrStateUnknown = errors.New("jtag: TAP state is unknown; reset required")
 // wire and serialize all calls. A zero Conn has no wire. Movement may update
 // instructions or data registers; even Reset can affect target debug state.
 type Conn struct {
-	wire   Wire
-	state  State
-	serial uint64
+	wire              Wire
+	state             State
+	serial            uint64
+	completionTimeout time.Duration
 }
 
 // New constructs a connection without traffic. Reset establishes its TAP state.
-func New(wire Wire) *Conn { return &Conn{wire: wire} }
+func New(wire Wire, options ...Option) *Conn {
+	c := &Conn{wire: wire, completionTimeout: 30 * time.Second}
+	for _, option := range options {
+		if option.completionSet {
+			c.completionTimeout = option.completionTimeout
+		}
+	}
+	return c
+}
 
 // State returns the last confirmed state, or Unknown after an ambiguous error.
 func (c *Conn) State() State {
@@ -48,6 +58,9 @@ func (c *Conn) validate(ctx context.Context) (int, error) {
 	}
 	if c == nil || c.wire == nil {
 		return 0, errors.New("jtag: nil wire")
+	}
+	if c.completionTimeout <= 0 {
+		return 0, errors.New("jtag: completion timeout must be positive")
 	}
 	limit := 4096
 	if w, ok := c.wire.(TransferLimits); ok {

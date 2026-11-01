@@ -338,7 +338,7 @@ func sizeMask(size TransferSize) uint64 {
 // restoration remains pending so the method can be retried. Call it before
 // DebugPort.Release. Re-entry and restoration use ctx; cancellation before
 // traffic retains the saved state for a fresh-context retry. Started SWD frames
-// finish under the connection's independent completion budget.
+// and JTAG scans finish under their connection's independent completion budget.
 func (m *MemAP) Release(ctx context.Context) (err error) {
 	if m == nil || m.dp == nil {
 		return nil
