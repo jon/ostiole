@@ -93,3 +93,40 @@ func TestSWDIOResponsePacketLimit(t *testing.T) {
 		}
 	}
 }
+
+func TestSWDIOKeepsTargetPhaseWithinRequestAndSequenceLimits(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		packetSize    uint16
+		prefix, input int
+	}{
+		{"request", 16, 88, 69},
+		{"sequence count", 1024, 253, 129},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			peer := newSWDSequencePeer(test.packetSize)
+			session, err := openSession(t.Context(), peer.device, WithSWD(100_000))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = session.Close() }()
+			bits := test.prefix + test.input + 1
+			direction := make([]byte, (bits+7)/8)
+			for bit := range test.prefix {
+				setTestBit(direction, bit, test.name == "request" || bit%2 == 0)
+			}
+			setTestBit(direction, bits-1, true)
+			if _, err := session.SWDIO(t.Context(), direction, make([]byte, len(direction)), bits); err != nil {
+				t.Fatal(err)
+			}
+			for _, position := range peer.commandEnds {
+				if position > test.prefix && position < bits-1 {
+					t.Fatalf("firmware enabled output inside target phase at bit %d", position)
+				}
+			}
+			if peer.cycles != bits {
+				t.Fatalf("clocks=%d want%d", peer.cycles, bits)
+			}
+		})
+	}
+}

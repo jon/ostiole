@@ -6,13 +6,43 @@ import (
 	"fmt"
 	"github.com/jon/ostiole/usb"
 	"io"
+	"time"
 )
 
-// ErrSessionPoisoned reports that an ambiguous USB transfer left the command
-// session unsafe to reuse. Close the session and open a new one.
+// ErrSessionPoisoned reports an ambiguous command exchange or incomplete SWD
+// stream which is unsafe to continue. Close the session and open a new one.
 var ErrSessionPoisoned = errors.New("cmsisdap: session is poisoned")
 
+type commandCompletion struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (c *commandCompletion) close() {
+	if c.cancel != nil {
+		c.cancel()
+	}
+}
+
+func (c *commandCompletion) start(ctx context.Context, timeout time.Duration) context.Context {
+	if c.ctx == nil {
+		c.ctx, c.cancel = context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	}
+	return c.ctx
+}
+
+// exchange returns the physical command outcome. Public operations add caller
+// cancellation after recording the response and any resulting ownership.
 func (s *Session) exchange(ctx context.Context, request []byte) ([]byte, error) {
+	var completion commandCompletion
+	defer completion.close()
+	return s.exchangeWithCompletion(ctx, request, &completion)
+}
+
+func (s *Session) exchangeWithCompletion(ctx context.Context, request []byte, completion *commandCompletion) ([]byte, error) {
+	if completion.ctx != nil {
+		ctx = completion.ctx
+	}
 	if err := s.transportReady(ctx); err != nil {
 		return nil, err
 	}
@@ -36,6 +66,11 @@ func (s *Session) exchange(ctx context.Context, request []byte) ([]byte, error) 
 		}
 		return nil, err
 	}
+	timeout := s.completionTimeout
+	if timeout == 0 {
+		timeout = time.Second
+	}
+	ctx = completion.start(ctx, timeout)
 	if err := s.completeCommand(ctx, output, len(request)); err != nil {
 		return nil, err
 	}

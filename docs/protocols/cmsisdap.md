@@ -102,11 +102,23 @@ unpipelined commands, up to 16,384 bits. Commands are never replayed.
 [firmware]:
   https://github.com/ARM-software/CMSIS-DAP/blob/main/Firmware/Source/DAP.c
 
-When the probe returns a complete `DAP_ERROR`, `SWDIO` returns an error naming
-that packet but leaves the command stream synchronized. A response with the
-wrong command ID, missing captured data, or an ambiguous USB exchange poisons
-the session because a later response can no longer be attributed safely. Close
-and explicit reopen are then required.
+Cancellation before a command is submitted sends no target traffic. After the
+first OUT is accepted, the remaining OUT/IN completions and all subsequent
+packets share an independent one-second budget. Increase it with
+`cmsisdap.WithCompletionTimeout(5*time.Second)` when opening slower sessions;
+nonpositive values are rejected before interface claim or command traffic.
+Caller cancellation is returned after the physical outcome has been recorded. A
+non-nil `SWDIO` capture means that the entire stream completed, even when the
+error also reports cancellation. A confirmed final clock response likewise
+updates configuration before `ConfigureSWD` returns cancellation. Failed open
+then attempts cleanup of the state actually acquired.
+
+A complete command rejection before any earlier sequence packet has run leaves
+the session usable. If an earlier packet has clocked a prefix, any later failure
+poisons the session so another operation cannot complete that prefix with
+unintended bits. Wrong command IDs, missing captured data, and ambiguous USB
+exchanges also poison the session. Close and explicit reopen are required; no
+failed operation is replayed.
 
 `Close` normally sends [DAP_Disconnect][disconnect] before releasing the USB
 interface. If `DAP_Disconnect` returns a complete error response, the session

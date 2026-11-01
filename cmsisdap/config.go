@@ -12,10 +12,11 @@ import (
 // maximum target clock. Reconfiguration disconnects an active port first. If
 // DAP_Disconnect returns a complete error response, Close keeps ownership so
 // the caller can retry.
-func (s *Session) ConfigureSWD(ctx context.Context, maxClockHz uint32) error {
+func (s *Session) ConfigureSWD(ctx context.Context, maxClockHz uint32) (err error) {
 	if err := s.validateSWDConfiguration(ctx, maxClockHz); err != nil {
 		return err
 	}
+	defer func() { err = errors.Join(err, ctx.Err()) }()
 	if s.connected {
 		if err := s.disconnect(ctx); err != nil {
 			return fmt.Errorf("cmsisdap: disconnect before SWD reconfiguration: %w", err)

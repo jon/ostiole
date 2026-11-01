@@ -2,6 +2,7 @@ package cmsisdap
 
 import (
 	"errors"
+	"time"
 
 	"github.com/jon/ostiole/usb"
 )
@@ -12,8 +13,9 @@ type Option struct {
 }
 
 type openConfig struct {
-	configureSWD bool
-	maxClockHz   uint32
+	configureSWD      bool
+	maxClockHz        uint32
+	completionTimeout time.Duration
 }
 
 // WithSWD configures Open to connect the SWD port and request a maximum target
@@ -25,6 +27,19 @@ func WithSWD(maxClockHz uint32) Option {
 		}
 		config.configureSWD = true
 		config.maxClockHz = maxClockHz
+		return nil
+	}}
+}
+
+// WithCompletionTimeout sets the positive budget for completing an accepted
+// command or an entire SWDIO call. The default is one second. Once OUT is
+// accepted, completion does not depend on caller cancellation.
+func WithCompletionTimeout(timeout time.Duration) Option {
+	return Option{apply: func(config *openConfig) error {
+		if timeout <= 0 {
+			return errors.New("completion timeout must be greater than zero")
+		}
+		config.completionTimeout = timeout
 		return nil
 	}}
 }
