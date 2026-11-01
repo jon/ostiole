@@ -1,10 +1,10 @@
 # CMSIS-DAP v2 USB and SWD sessions
 
-The `cmsisdap` package implements CMSIS-DAP v2 metadata and direction-explicit
-SWD over one USB command session. Arm's [CMSIS-DAP documentation][commands]
-defines the command protocol, and its [USB firmware guidance][usb] defines the
-v2 USB interface. This note records the narrower host boundary Ostiole
-implements.
+The `cmsisdap` package implements CMSIS-DAP v2 metadata, completed SWD register
+operations, and direction-explicit sequences over one USB command session. Arm's
+[CMSIS-DAP documentation][commands] defines the command protocol, and its [USB
+firmware guidance][usb] defines the v2 USB interface. This note records the
+narrower host boundary Ostiole implements.
 
 [commands]:
   https://arm-software.github.io/CMSIS-DAP/latest/group__DAP__Info.html
@@ -94,7 +94,7 @@ checks this command's version requirement before sending traffic. The version
 may have two or three decimal components, such as `1.2` or `2.1.0`. Malformed
 strings and firmware identifiers such as `0254` do not establish optional
 sequence support. They do not prevent SWD port configuration or mandatory
-output commands, whose responses establish whether they are implemented. For
+register commands, whose responses establish whether they are implemented. For
 each set direction bit, the probe drives SWDIO; for each clear bit, it samples
 SWDIO. Each run carries at most 64 cycles, with 64 encoded as zero; data is
 packed least-significant bit first. Output bytes are absent from input
@@ -159,6 +159,34 @@ resources are released, further session closes return nil without traffic.
 Release borrowed target and DAP owners before closing the session; freeing host
 resources does not restore a halted target.
 
+## Completed register ownership
+
+For a direct session configured with `WithSWD`, borrow its register transport
+without sending target traffic:
+
+```go
+registers := cmsisdap.NewRegisterSWD(session)
+dp := dap.NewDebugPort(dap.RegisterDP(registers))
+```
+
+`dp.Connect(ctx)` enters SWD through mandatory `DAP_SWJ_Sequence` commands,
+reads DPIDR, disables firmware WAIT retries, and captures and clears
+`CTRL/STAT.ORUNDETECT`. Release the DAP owner before `session.Close()` to
+restore the inherited overrun policy. Keep exclusive use of the session while
+this transport is borrowed; direct commands would invalidate its protocol state.
+`RegisterSWD.CleanupPending()` reports protocol restoration only, while
+`Session.CleanupPending()` also includes the command port and USB resources.
+
+Each physical register operation uses one `DAP_Transfer` request. Firmware
+completes posted AP reads and checks write completion; the DAP owner retains
+logical selection, power, and WAIT handling. An accepted write whose completion
+cannot be established is indeterminate and is never replayed. A completed AP
+read with a final FAULT reports the fault without claiming usable read data. A
+complete firmware response reporting target parity or an invalid target ACK
+requires explicit protocol repair while leaving host restoration available.
+Malformed command responses and ambiguous USB completion poison the command
+stream instead.
+
 ## Historical bench observations
 
 The target-access observations below used the earlier unrestricted sequence
@@ -215,8 +243,14 @@ owners.
 
 The historical read-only HIL requested 1 MHz.
 
-The current integration suite retains metadata-only reopen and passive v1
-rejection. It does not offer the earlier target-restoration procedure.
+The integration suite retains metadata-only reopen and passive v1 rejection.
+`TestHILCMSISDAPSWDReadOnlyStateRestoration` uses the register binding when
+`OSTIOLE_CMSISDAP_TARGET_HIL=1`, with the usual exact device or serial selector.
+It opens two fresh sessions at a requested 1 MHz, checks DPIDR/AP0 IDR/CPUID and
+halt state, and verifies AP0 CSW/TAR restoration before closing. The two
+sessions exercise configuration after metadata-only open and `WithSWD` during
+open. This procedure has been compiled but has no physical result for the
+register binding yet. Run it separately from other bench procedures.
 
 The startup observation used a physical unplug/replug before the test, with
 other debuggers stopped. Reopening a session alone does not reproduce power-on
