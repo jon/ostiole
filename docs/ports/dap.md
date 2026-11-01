@@ -167,25 +167,29 @@ JTAG's acknowledgement combines OK and FAULT. After each AP operation, the
 executor reads CTRL/STAT before reporting success or issuing another AP
 operation. On a sticky fault, the executor clears and checks the sticky state,
 then returns `FaultError` without replaying the operation. If clearing or
-checking fails, `Release` retries it before releasing the chain, even when the
-port inherited all power requests. An uncertain write, including immediate
-`WriteRawAP`, also reports `ErrIndeterminate` and invalidates existing MEM-AP
-handles; restoration remains available. JTAG transactions execute one logical
-operation at a time. SWD retains its packed physical requests and
-confirmed-prefix behavior. Both paths leave the unsent transaction suffix
-unexecuted after a failure; MEM-AP does not interpret either wire protocol.
+checking fails, MEM-AP restoration checks and clears the pending sticky state
+before its first AP request; debug-port `Release` retries cleanup before
+releasing the chain, even when the port inherited all power requests. An
+uncertain write, including immediate `WriteRawAP`, also reports
+`ErrIndeterminate` and invalidates existing MEM-AP handles; restoration remains
+available. JTAG transactions execute one logical operation at a time. SWD
+retains its packed physical requests and confirmed-prefix behavior. Both paths
+leave the unsent transaction suffix unexecuted after a failure; MEM-AP does not
+interpret either wire protocol.
 
 Connection setup aborts inherited AP work if pipeline priming reaches its WAIT
 bound, then primes once more. A canceled or failed prime leaves an abort pending
 for bounded cleanup. Setup establishes SELECT zero, clears sticky status, and
-temporarily disables inherited ORUNDETECT. Release restores that setting. Active
-pushed-operation or transaction-counter modes are rejected, and owned CTRL/STAT
-writes cannot enable them. A pending AP operation that exhausts its WAIT bound
-requires ABORT and invalidates AP-derived state; its error is indeterminate, not
-“not executed.” Cancellation remains the primary operation error, and recovery
-uses the independent cleanup budget. Abort recovery also checks and clears
-sticky status left by an operation finishing during the abort. A failed check
-blocks further AP access and chain release until cleanup succeeds.
+temporarily disables inherited ORUNDETECT. Release restores that setting and
+checks that it reads back as set; a failed check retains restoration for another
+release attempt. Active pushed-operation or transaction-counter modes are
+rejected, and owned CTRL/STAT writes cannot enable them. A pending AP operation
+that exhausts its WAIT bound requires ABORT and invalidates AP-derived state;
+its error is indeterminate, not “not executed.” Cancellation remains the primary
+operation error, and recovery uses the independent cleanup budget. Abort
+recovery also checks and clears sticky status left by an operation finishing
+during the abort. A failed check blocks further AP access and chain release
+until cleanup succeeds.
 
 After scan-state loss, cleanup revalidates the exact chain and reacquires the
 selected TAP before restoring AP or DAP state. If the identity has changed,
