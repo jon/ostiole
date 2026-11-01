@@ -47,10 +47,12 @@ register surface before activation, with no fallback after failure.
 
 [rp2350-procedure]: ../docs/coresight.md#adiv6-and-the-rp2350
 
-## Cleanup
+## Cancellation and cleanup
 
-The managed examples retain errors from earlier cleanup attempts even when a
-later retry succeeds.
+Interrupt and termination signals cancel each example's operation context.
+Cleanup uses a fresh bounded context before the program exits, and its errors
+are joined with any operation failure. The managed examples retain errors from
+earlier cleanup attempts even when a later retry succeeds.
 
 The direct FTDI examples release their SWD or DAP owner before closing the
 channel. A failed release retains the channel while protocol restoration is

@@ -279,6 +279,10 @@ Pending live restoration keeps lower resources open; terminal transport loss
 permits host cleanup and reports abandoned restoration. Operation and cleanup
 errors are returned together.
 
+Interrupt and termination signals cancel the operation. Cleanup uses fresh
+bounded contexts after cancellation, before the process exits. A remaining
+cleanup error is reported; process exit cannot restore a disconnected target.
+
 Run `go run ./cmd/ost help` for the available command hierarchy.
 
 ## License
