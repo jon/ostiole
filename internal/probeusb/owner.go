@@ -68,17 +68,47 @@ func (o *owner) SWD(ctx context.Context, config probe.SWDConfig) (probe.Wire, er
 }
 
 func (o *owner) Close() error {
+	var result error
 	if o.session != nil {
-		if err := o.session.Close(); err != nil {
+		err := o.session.Close()
+		if err != nil && cleanupPending(o.session) {
 			return err
 		}
 		o.session = nil
+		result = err
 	}
 	if o.device != nil {
-		if err := o.device.Close(); err != nil {
-			return err
+		err := o.device.Close()
+		if err == nil || !cleanupPending(o.device) {
+			o.device = nil
 		}
-		o.device = nil
+		result = errors.Join(result, err)
 	}
-	return nil
+	return result
+}
+
+func cleanupPending(backend probe.Backend) bool {
+	if state, ok := backend.(probe.CleanupState); ok {
+		return state.CleanupPending()
+	}
+	return true
+}
+
+func (o *owner) CleanupPending() bool {
+	return (o.session != nil && cleanupPending(o.session)) ||
+		(o.device != nil && cleanupPending(o.device))
+}
+
+func (o *owner) RestorationPossible() bool {
+	backend := o.session
+	if backend == nil {
+		backend = o.device
+	}
+	if backend == nil {
+		return false
+	}
+	if state, ok := backend.(probe.RestorationState); ok {
+		return state.RestorationPossible()
+	}
+	return true
 }

@@ -132,3 +132,7 @@ func (d *Device) Close() error {
 	})
 	return errors.Join(releaseErr, d.closeErr)
 }
+
+func (d *Device) cleanupPending() bool {
+	return d.handle != nil || d.iface != nil || d.claim != nil
+}

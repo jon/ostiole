@@ -97,6 +97,7 @@ func TestDarwinClaimRetainsOwnershipAfterFailedRelease(t *testing.T) {
 	if err := claim.Close(); !errors.Is(err, want) {
 		t.Fatalf("first Close() error = %v, want %v", err, want)
 	}
+	assertUSBCleanupPending(t, device, claim, true, true)
 	if _, err := device.ClaimInterface(1); err == nil {
 		t.Fatal("ClaimInterface() succeeded while release was pending")
 	}
@@ -104,6 +105,7 @@ func TestDarwinClaimRetainsOwnershipAfterFailedRelease(t *testing.T) {
 	if err := claim.Close(); err != nil {
 		t.Fatalf("second Close(): %v", err)
 	}
+	assertUSBCleanupPending(t, device, claim, true, false)
 	if _, err := device.ClaimInterface(1); err != nil {
 		t.Fatalf("ClaimInterface() after release: %v", err)
 	}
@@ -320,10 +322,12 @@ func TestDarwinDeviceCloseContinuesAfterTerminalInterfaceRelease(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			assertUSBCleanupPending(t, device, claim, true, true)
 			err = device.Close()
 			if !errors.Is(err, want) || (hostErr != nil && !errors.Is(err, hostErr)) {
 				t.Fatalf("Close() = %v, want %v and %v", err, want, hostErr)
 			}
+			assertUSBCleanupPending(t, device, claim, false, false)
 			if device.claim != nil || claim.device != nil || device.handle != nil || host.closes != 1 {
 				t.Fatalf("terminal cleanup retained ownership: device=%#v claim=%#v closes=%d", device, claim, host.closes)
 			}

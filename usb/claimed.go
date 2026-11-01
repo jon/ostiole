@@ -13,6 +13,12 @@ type ClaimedInterface struct {
 	transfers bulkTransferEngine
 }
 
+// CleanupPending reports whether the claim retains host resources requiring
+// Close, without I/O. A nil or released claim reports false.
+func (c *ClaimedInterface) CleanupPending() bool {
+	return c != nil && c.device != nil
+}
+
 // SetAltSetting selects an alternate setting on the claimed interface. If the
 // host reports a failed selection, the next endpoint lookup reads the active
 // alternate again.
