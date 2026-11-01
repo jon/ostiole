@@ -289,3 +289,15 @@ func TestDarwinClaimCloseRetriesFailedTransferAbort(t *testing.T) {
 		t.Fatal("retried close retained interface ownership")
 	}
 }
+
+func TestDarwinGoneAbortDrainsAndPreservesErrors(t *testing.T) {
+	gone := iokitErrorCode(0xe00002c0)
+	drains := 0
+	err := abortAndDrainDarwin(func() error { return gone }, func() error {
+		drains++
+		return context.DeadlineExceeded
+	})
+	if drains != 1 || !errors.Is(err, gone) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("abort/drain = %v, drain calls=%d", err, drains)
+	}
+}

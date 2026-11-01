@@ -280,6 +280,10 @@ struct ostiole_usb_bulk_transfer {
 
 ostiole_usb_bulk_engine* ostiole_usb_bulk_engine_open(
     ostiole_usb_interface* interface, kern_return_t* result) {
+  if (interface == NULL || interface->source == NULL) {
+    *result = kIOReturnNotOpen;
+    return NULL;
+  }
   ostiole_usb_bulk_engine* engine = calloc(1, sizeof(*engine));
   if (engine == NULL) {
     *result = kIOReturnNoMemory;
@@ -386,18 +390,24 @@ void ostiole_usb_bulk_engine_close(ostiole_usb_bulk_engine* engine) {
   free(engine);
 }
 
+int ostiole_usb_device_gone(kern_return_t result) {
+  return result == kIOReturnNoDevice || result == kIOReturnNotAttached ||
+         result == MACH_SEND_INVALID_DEST;
+}
+
 kern_return_t ostiole_usb_interface_close(ostiole_usb_interface* interface) {
+  kern_return_t result =
+      (*interface->interface)->USBInterfaceClose(interface->interface);
+  if (result != kIOReturnSuccess && result != kIOReturnNotOpen &&
+      !ostiole_usb_device_gone(result)) {
+    return result;
+  }
   if (interface->source != NULL) {
     CFRunLoopSourceInvalidate(interface->source);
     CFRelease(interface->source);
     interface->source = NULL;
   }
-  kern_return_t result =
-      (*interface->interface)->USBInterfaceClose(interface->interface);
-  if (result != kIOReturnSuccess && result != kIOReturnNotOpen) {
-    return result;
-  }
   (*interface->interface)->Release(interface->interface);
   free(interface);
-  return kIOReturnSuccess;
+  return result == kIOReturnNotOpen ? kIOReturnSuccess : result;
 }

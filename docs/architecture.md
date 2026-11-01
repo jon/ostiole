@@ -364,7 +364,14 @@ The `usb` API is the same on both supported hosts:
   loop. Unit tests exercise that Go worker with native calls replaced, including
   completion accounting, abort drains, and cleanup retries. Those tests do not
   execute IOKit. Successful completion counts cannot exceed the requested buffer
-  length.
+  length. A live interface-close failure preserves the event source for retry;
+  opening an engine without that source returns an error. Device disappearance
+  releases the interface's host resources while preserving the loss error, then
+  device cleanup continues. A failed endpoint abort after disappearance still
+  drains callbacks before request buffers can be released; a later close
+  finishes engine and interface cleanup after that reported error. Native
+  lifecycle tests run the C bridge against a fake interface and real
+  CoreFoundation event sources; they do not establish physical USB behavior.
 
 The API keeps USB endpoint addresses, directions, maximum packet sizes, transfer
 lengths, completion boundaries, short transfers, and zero-length transfers

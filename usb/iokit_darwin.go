@@ -195,11 +195,10 @@ func (i *iokitInterface) close() error {
 		return nil
 	}
 	result := C.ostiole_usb_interface_close(i.native)
-	if result != C.kIOReturnSuccess {
-		return iokitError(result)
+	if result == C.kIOReturnSuccess || C.ostiole_usb_device_gone(result) != 0 {
+		i.native = nil
 	}
-	i.native = nil
-	return nil
+	return iokitError(result)
 }
 
 func iokitError(result C.kern_return_t) error {
@@ -220,5 +219,9 @@ func iokitErrorCode(code uint32) error {
 	if code == uint32(C.kIOReturnSuccess) {
 		return nil
 	}
-	return fmt.Errorf("IOKit result %#x", code)
+	err := fmt.Errorf("IOKit result %#x", code)
+	if C.ostiole_usb_device_gone(C.kern_return_t(code)) != 0 {
+		return errors.Join(errDarwinDeviceGone, err)
+	}
+	return err
 }

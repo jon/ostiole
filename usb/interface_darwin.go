@@ -10,6 +10,7 @@ import (
 const darwinBulkPipe = 2
 
 var errDarwinDeviceClosed = errors.New("usb: device is closed")
+var errDarwinDeviceGone = errors.New("usb: device disappeared")
 
 type darwinPipe struct {
 	endpoint, ref, transferType uint8
@@ -98,10 +99,14 @@ func (d *Device) releaseInterface(claim *ClaimedInterface) error {
 	if d.claim != claim {
 		return errors.New("usb: claimed interface is not owned by this device")
 	}
-	if err := d.iface.close(); err != nil {
+	err := d.iface.close()
+	if err != nil && !errors.Is(err, errDarwinDeviceGone) {
 		return fmt.Errorf("usb: release interface %d: %w", claim.number, err)
 	}
 	d.iface, d.routes, d.claim = nil, nil, nil
 	claim.device = nil
+	if err != nil {
+		return fmt.Errorf("usb: release interface %d: %w", claim.number, err)
+	}
 	return nil
 }

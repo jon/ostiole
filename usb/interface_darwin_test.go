@@ -307,3 +307,29 @@ func TestDarwinAlternateSettingInvalidatesRoutesWhenPipesFail(t *testing.T) {
 		t.Fatalf("claim cache after failure = known %t endpoints %#v", claim.altKnown, claim.endpoints)
 	}
 }
+
+func TestDarwinDeviceCloseContinuesAfterTerminalInterfaceRelease(t *testing.T) {
+	for _, code := range []uint32{0xe00002c0, 0xe00002d9, 0x10000003} {
+		for _, hostErr := range []error{nil, errors.New("host close failed")} {
+			want := iokitErrorCode(code)
+			iface := &fakeDarwinInterface{closeErr: want}
+			host := &fakeDarwinInterfaceDevice{iface: iface}
+			host.closeErr = hostErr
+			device := &Device{handle: host}
+			claim, err := device.ClaimInterface(0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = device.Close()
+			if !errors.Is(err, want) || (hostErr != nil && !errors.Is(err, hostErr)) {
+				t.Fatalf("Close() = %v, want %v and %v", err, want, hostErr)
+			}
+			if device.claim != nil || claim.device != nil || device.handle != nil || host.closes != 1 {
+				t.Fatalf("terminal cleanup retained ownership: device=%#v claim=%#v closes=%d", device, claim, host.closes)
+			}
+			if err := device.Close(); !errors.Is(err, hostErr) || iface.closes != 1 || host.closes != 1 {
+				t.Fatalf("repeated Close() = %v, interface/device calls=%d/%d", err, iface.closes, host.closes)
+			}
+		}
+	}
+}
