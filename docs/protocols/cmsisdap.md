@@ -187,6 +187,13 @@ requires explicit protocol repair while leaving host restoration available.
 Malformed command responses and ambiguous USB completion poison the command
 stream instead.
 
+Direct `WriteDP` calls cannot change the transport-owned ORUNDETECT policy or
+DLCR turnaround. The transport tracks the DP bank from completed SELECT writes,
+including completion reported alongside caller cancellation. Rejected or unsent
+selection leaves the prior bank intact. An uncertain SELECT prevents writes at
+offset 4 until explicit selection or protocol re-entry establishes the bank; it
+is never replayed automatically.
+
 Through generic discovery, activate the optional register surface instead:
 
 ```go
