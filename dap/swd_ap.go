@@ -14,6 +14,8 @@ func (e *swdExecutor) readAP(ctx context.Context, addr uint8) (bool, uint32, err
 		possible := !requestWasRejected(err) && !requestWasNotSent(err) && !errors.Is(err, swd.ErrFault)
 		return possible, 0, fmt.Errorf("dap: post raw AP read at %#02x: %w", addr, err)
 	}
+	e.pendingRead = true
+	defer func() { e.pendingRead = false }()
 	value, err := e.dp.readDP(ctx, RDBUFF)
 	return true, value, err
 }

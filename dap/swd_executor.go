@@ -29,8 +29,9 @@ func (r transferResult) err() error { return r.cause }
 
 type swdExecutor struct {
 	*swd.Conn
-	dp         *DebugPort
-	recovering bool
+	dp          *DebugPort
+	recovering  bool
+	pendingRead bool
 }
 
 func newSWDExecutor(conn *swd.Conn, dp *DebugPort) *swdExecutor {

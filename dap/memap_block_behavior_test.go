@@ -185,9 +185,7 @@ func TestMEMAPReadBlockReturnsOnlyConfirmedPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target.arm(apRead(0x0c), 101)
-	target.fault = true
-	target.faultAfter = 3
+	target.armFaultAfter(apRead(0x0c), 3)
 	buf := make([]byte, len(data))
 	for i := range buf {
 		buf[i] = 0xee
