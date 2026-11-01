@@ -55,6 +55,15 @@ service.
 | `examples/...`    | Demonstrate public package compositions as executable programs.                                                                                                                                                      |
 | `cmd/ost`         | Provide a small command hierarchy over the same public packages.                                                                                                                                                     |
 
+A backend may implement `probe.RegisterSWDBackend` to lend completed SW-DP
+register operations. Its capability is visible before activation; the generic
+probe configures one surface and owns its host resources. `armdebug` prefers
+that capability for an SWD configuration, then passes the borrowed transport to
+`dap.RegisterDP`. Activation failure ends setup without trying the wire path.
+The register transport owns SWD entry and framing; DAP retains logical banks,
+power, transactions, and MEM-AP restoration. No bundled adapter implements this
+optional binding yet.
+
 Raw USB requests stay in `usb` and adapter drivers. MPSSE framing stays in
 `ftdi`. SWD request, acknowledgement, and parity rules stay in `swd`. Debug-port
 banking, AP identification, raw AP addresses, power ownership, and MEM-AP state

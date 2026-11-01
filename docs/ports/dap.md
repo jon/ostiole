@@ -126,20 +126,24 @@ before releasing its DP; acquisition snapshots remain owned by that handle.
 operations; zero is invalid. A transport completes response-mode cleanup before
 returning rejected WAIT. If that cleanup cannot finish, it reports an
 indeterminate outcome. Only rejected requests with an unambiguous WAIT cause are
-retried; additional failures remain visible and stop execution. Accepted or
-uncertain operations are never replayed. Cancellation after completion retains
-confirmed results while stopping the transaction suffix. A malformed status
-makes the port cleanup-only. A completed selection prerequisite cannot confirm
-an AP access that was never sent. A captured and successfully cleared ordinary
-bus FAULT during managed memory access leaves the selected and peer MEM-AP
-clients usable. Accepted writes with failed completion report `ErrIndeterminate`
-without replay. A completed or uncertain DAPABORT invalidates existing clients
-even when it returns FAULT; they are never revalidated. After failed entry, DAP
-attempts cleanup under an independent bounded context only when the transport
-reports pending restoration. A final release error remains visible on that
-attempt even if restoration finished; later releases are idle. These paths have
-behavioral coverage with a supplied transport; they do not establish support on
-a physical adapter.
+retried. Native SWD WAIT, FAULT, and protocol errors receive their DAP
+classifications before status validation; both error identities remain visible.
+Canonical DAP and SWD WAIT causes describe the same rejected response.
+Additional failures remain visible and stop execution. Accepted or uncertain
+operations are never replayed. Cancellation after completion retains confirmed
+results while stopping the transaction suffix. A malformed status makes the port
+cleanup-only, including a completed status contradicted by a native SWD unsent
+or indeterminate error. A completed selection prerequisite cannot confirm an AP
+access that was never sent. A captured and successfully cleared ordinary bus
+FAULT during managed memory access leaves the selected and peer MEM-AP clients
+usable. Accepted writes with failed completion report `ErrIndeterminate` without
+replay. A completed or uncertain DAPABORT invalidates existing clients even when
+it returns FAULT; they are never revalidated. After failed entry, DAP attempts
+cleanup under an independent bounded context only when the transport reports
+pending restoration. A final release error remains visible on that attempt even
+if restoration finished; later releases are idle. These paths have behavioral
+coverage with a supplied transport; they do not establish support on a physical
+adapter.
 
 ## Connection identity
 

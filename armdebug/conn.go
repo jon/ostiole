@@ -30,7 +30,9 @@ type Conn struct {
 }
 
 // Connect takes responsibility for opened on entry, even on invalid input.
-// It activates the configured wire and connects DAP, which owns protocol entry.
+// It activates the configured protocol surface and connects DAP, which owns
+// protocol entry. SWD prefers a register backend when advertised; activation
+// failures do not fall back to a wire.
 // Failed setup tries
 // cleanup; a non-nil result with an error must be retained for Close retries.
 // The supplied probe must not already have an activated protocol surface.

@@ -141,6 +141,11 @@ func TestRegisterDPOutcomeValidation(t *testing.T) {
 		{dap.RegisterIndeterminate, native, false, true},
 		{0, native, true, true},
 		{dap.RegisterCompleted, dap.ErrWait, true, true},
+		{dap.RegisterCompleted, swd.ErrWait, true, true},
+		{dap.RegisterCompleted, swd.ErrNotExecuted, true, true},
+		{dap.RegisterCompleted, swd.ErrIndeterminate, true, true},
+		{dap.RegisterUnsent, swd.ErrFault, true, true},
+		{dap.RegisterRejected, swd.ErrProtocol, true, true},
 		{dap.RegisterUnsent, dap.ErrFault, true, true},
 		{dap.RegisterRejected, swd.ErrParity, true, true},
 		{dap.RegisterIndeterminate, errors.Join(dap.ErrIndeterminate, dap.ErrNotExecuted), true, true},
@@ -399,7 +404,7 @@ func TestRegisterDPWAITKeepsAdditionalFailures(t *testing.T) {
 }
 
 func TestRegisterDPRetriesWrappedSoleWAIT(t *testing.T) {
-	for _, cause := range []error{fmt.Errorf("response: %w", dap.ErrWait), errors.Join(dap.ErrWait)} {
+	for _, cause := range []error{swd.ErrWait, fmt.Errorf("response: %w", swd.ErrWait), fmt.Errorf("response: %w", dap.ErrWait), errors.Join(dap.ErrWait), errors.Join(dap.ErrWait, swd.ErrWait), errors.Join(dap.ErrWait, dap.ErrWait)} {
 		model := newRegisterModel(t)
 		dp := dap.NewDebugPort(dap.RegisterDP(model))
 		if _, err := dp.Connect(t.Context()); err != nil {

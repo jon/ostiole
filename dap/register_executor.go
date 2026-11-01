@@ -28,6 +28,7 @@ func (e *swdExecutor) registerExchange(ctx context.Context, req transferRequest,
 		return transferResult{cause: err, outcome: transferUnsent}
 	}
 	value, status, err := e.registerOperation(ctx, req, data)
+	err = classifyPortError(err)
 	outcome := transferIndeterminate
 	switch status {
 	case RegisterCompleted:
@@ -121,8 +122,8 @@ func registerStatusConsistent(status RegisterStatus, err error) bool {
 	rejectedOrUnknown := status == RegisterRejected || status == RegisterIndeterminate
 	completedOrUnknown := status == RegisterCompleted || status == RegisterIndeterminate
 	claims := []struct{ present, allowed bool }{
-		{errors.Is(err, ErrIndeterminate), status == RegisterIndeterminate},
-		{errors.Is(err, ErrNotExecuted), status == RegisterUnsent},
+		{errors.Is(err, ErrIndeterminate) || errors.Is(err, swd.ErrIndeterminate), status == RegisterIndeterminate},
+		{errors.Is(err, ErrNotExecuted) || errors.Is(err, swd.ErrNotExecuted), status == RegisterUnsent},
 		{errors.Is(err, ErrWait), rejectedOrUnknown},
 		{errors.Is(err, ErrFault), status != RegisterUnsent},
 		{errors.Is(err, swd.ErrParity), completedOrUnknown},
@@ -150,12 +151,20 @@ func (e *swdExecutor) finishRegisterFault(req transferRequest, result transferRe
 }
 
 func soleRegisterWAIT(err error) bool {
-	if err == ErrWait {
+	if err == ErrWait || err == swd.ErrWait {
 		return true
 	}
 	if joined, ok := err.(interface{ Unwrap() []error }); ok {
 		causes := joined.Unwrap()
-		return len(causes) == 1 && soleRegisterWAIT(causes[0])
+		if len(causes) == 0 {
+			return false
+		}
+		for _, cause := range causes {
+			if !soleRegisterWAIT(cause) {
+				return false
+			}
+		}
+		return true
 	}
 	if cause := errors.Unwrap(err); cause != nil {
 		return soleRegisterWAIT(cause)

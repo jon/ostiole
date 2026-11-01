@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/jon/ostiole/dap"
 	"github.com/jon/ostiole/swd"
 )
 
@@ -62,11 +63,12 @@ var ErrUnsupportedSWD = errors.New("probe: SWD is not supported")
 // Probe owns one implementation. Calls on it and its borrowed surfaces must
 // be serialized. Its zero value owns nothing and cannot activate a protocol.
 type Probe struct {
-	info    Info
-	backend Backend
-	wire    Wire
-	jtag    JTAGWire
-	closing bool
+	info      Info
+	backend   Backend
+	wire      Wire
+	registers dap.RegisterTransport
+	jtag      JTAGWire
+	closing   bool
 }
 
 // New takes ownership of backend without I/O. The caller must stop using it
@@ -95,6 +97,7 @@ func (p *Probe) Close() error {
 	p.closing = true
 	p.wire = nil
 	p.jtag = nil
+	p.registers = nil
 	if p.backend == nil {
 		return nil
 	}
@@ -160,15 +163,15 @@ func (p *Probe) canActivate(ctx context.Context, hz uint32) error {
 	if hz < 1000 {
 		return errors.New("probe: clock ceiling must be at least 1 kHz")
 	}
-	if p == nil || p.backend == nil || p.closing || p.wire != nil || p.jtag != nil {
+	if p == nil || p.backend == nil || p.closing || p.wire != nil || p.jtag != nil || p.registers != nil {
 		return errors.New("probe: owner is not available for activation")
 	}
 	return nil
 }
 
-func (p *Probe) activationError(hasWire bool, err error) error {
-	if err == nil && !hasWire {
-		err = errors.New("probe: backend returned no wire")
+func (p *Probe) activationError(hasSurface bool, err error) error {
+	if err == nil && !hasSurface {
+		err = errors.New("probe: backend returned no protocol surface")
 	}
 	if err != nil {
 		return errors.Join(err, p.Close())

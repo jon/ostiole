@@ -112,6 +112,8 @@ func TestRegisterContradictoryErrorClassesAreProtocolErrors(t *testing.T) {
 		{dap.RegisterUnsent, dap.ErrFault},
 		{dap.RegisterRejected, swd.ErrParity},
 		{dap.RegisterCompleted, dap.ErrWait},
+		{dap.RegisterCompleted, swd.ErrNotExecuted},
+		{dap.RegisterCompleted, swd.ErrIndeterminate},
 	} {
 		model := newRegisterModel(t)
 		dp := dap.NewDebugPort(dap.RegisterDP(model))
