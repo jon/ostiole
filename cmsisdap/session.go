@@ -48,17 +48,18 @@ func (c ownedUSBClaim) SubmitBulk(ctx context.Context, endpoint uint8, buffer []
 // Session owns one CMSIS-DAP v2 command interface and its USB device. Calls on
 // a session must be serialized.
 type Session struct {
-	device      usbDevice
-	claim       usbClaim
-	command     commandInterface
-	packetSize  int
-	info        Info
-	poisoned    bool
-	gone        bool
-	connected   bool
-	configured  bool
-	maxClockHz  uint32
-	closePrefix error
+	device            usbDevice
+	claim             usbClaim
+	command           commandInterface
+	packetSize        int
+	info              Info
+	poisoned          bool
+	gone              bool
+	connected         bool
+	configured        bool
+	maxClockHz        uint32
+	closePrefix       error
+	completionTimeout time.Duration
 }
 
 // Open claims the CMSIS-DAP v2 command interface, reads probe metadata, applies
@@ -89,9 +90,9 @@ func openSession(ctx context.Context, device usbDevice, options ...Option) (resu
 	if err != nil {
 		return nil, errors.Join(err, device.Close())
 	}
-	session := &Session{device: device, command: command, info: Info{USB: device.Identity()}}
+	session := &Session{device: device, command: command, info: Info{USB: device.Identity()}, completionTimeout: config.completionTimeout}
 	defer func() {
-		result, err = settleOpenFailure(session, result, err)
+		result, err = settleOpenFailure(session, result, errors.Join(err, ctx.Err()))
 	}()
 	claim, err := device.claimInterface(command.number)
 	if err != nil {
@@ -124,6 +125,7 @@ func settleOpenFailure(session, result *Session, err error) (*Session, error) {
 	if err == nil {
 		return result, nil
 	}
+	result = nil
 	retain, cleanupErr := session.closeAfterOpenFailure()
 	if retain {
 		result = session
@@ -148,7 +150,7 @@ func prepareOpen(ctx context.Context, options []Option) (openConfig, error) {
 	if err := ctx.Err(); err != nil {
 		return openConfig{}, err
 	}
-	var config openConfig
+	config := openConfig{completionTimeout: time.Second}
 	for index, option := range options {
 		if option.apply == nil {
 			continue

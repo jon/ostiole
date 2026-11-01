@@ -34,13 +34,17 @@ func (s *Session) MaxTransferBits() int {
 // in order and never replayed. The complete stream is validated before traffic.
 // It must finish with host ownership, and each target-driven phase must fit in
 // one command. These restrictions do not satisfy the general swd.Wire contract.
-func (s *Session) SWDIO(ctx context.Context, direction, output []byte, bits int) ([]byte, error) {
+// After the first OUT is accepted, all packets share one independent completion
+// budget. Cancellation is returned after completion; a non-nil input means the
+// entire stream completed. An unfinished prefix poisons the session.
+func (s *Session) SWDIO(ctx context.Context, direction, output []byte, bits int) (input []byte, err error) {
 	if bits <= 0 || bits > maxSWDTransferBits || len(direction)*8 < bits || len(output)*8 < bits {
 		return nil, fmt.Errorf("cmsisdap: invalid %d-bit SWD stream", bits)
 	}
 	if err := s.transportReady(ctx); err != nil {
 		return nil, err
 	}
+	defer func() { err = errors.Join(err, ctx.Err()) }()
 	if !s.configured {
 		return nil, errors.New("cmsisdap: SWD is not configured")
 	}
@@ -49,20 +53,29 @@ func (s *Session) SWDIO(ctx context.Context, direction, output []byte, bits int)
 	if err != nil {
 		return nil, err
 	}
-	input := make([]byte, (bits+7)/8)
+	input = make([]byte, (bits+7)/8)
+	var completion commandCompletion
+	defer completion.close()
 	for index, packet := range packets {
-		response, err := s.exchange(ctx, packet.request)
+		response, err := s.exchangeWithCompletion(ctx, packet.request, &completion)
 		if err != nil {
-			return nil, fmt.Errorf("cmsisdap: DAP_SWD_Sequence packet %d: %w", index+1, err)
+			return nil, s.sequenceFailure(index, err)
 		}
 		if err := s.validateStatusResponse(response, commandSWDSequence); err != nil {
-			return nil, fmt.Errorf("cmsisdap: DAP_SWD_Sequence packet %d: %w", index+1, err)
+			return nil, s.sequenceFailure(index, err)
 		}
 		if err := s.decodeSWDResponse(input, response, packet.captures); err != nil {
-			return nil, fmt.Errorf("cmsisdap: DAP_SWD_Sequence packet %d: %w", index+1, err)
+			return nil, s.sequenceFailure(index, err)
 		}
 	}
 	return input, nil
+}
+
+func (s *Session) sequenceFailure(index int, err error) error {
+	if index > 0 {
+		err = s.poison(err)
+	}
+	return fmt.Errorf("cmsisdap: DAP_SWD_Sequence packet %d: %w", index+1, err)
 }
 
 type swdPacket struct {

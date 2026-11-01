@@ -283,7 +283,7 @@ func TestSWDIOStopsAfterCompletePacketFailure(t *testing.T) {
 	if input != nil || err == nil || !strings.Contains(err.Error(), "packet 2") {
 		t.Fatalf("SWDIO = (%x, %v)", input, err)
 	}
-	if len(peer.sequenceCommands) != 2 || session.MaxClockHz() == 0 || session.poisoned {
+	if len(peer.sequenceCommands) != 2 || session.MaxClockHz() == 0 || !session.poisoned {
 		t.Fatalf("failure state = commands %d clock %d poisoned %t", len(peer.sequenceCommands), session.MaxClockHz(), session.poisoned)
 	}
 }
