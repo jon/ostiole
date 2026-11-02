@@ -98,25 +98,35 @@ traffic. Changing the copy does not change the chain. A nil or uninitialized
 chain returns an empty layout.
 
 ```go
-first, err := jtag.IDCODE(4, firstID)
-if err != nil {
-    return err
+func checkChain(ctx context.Context, conn *jtag.Conn, firstID, secondID uint32) (*jtag.Chain, error) {
+    first, err := jtag.IDCODE(4, firstID)
+    if err != nil {
+        return nil, err
+    }
+    second, err := jtag.IDCODE(12, secondID)
+    if err != nil {
+        return nil, err
+    }
+    chain, err := jtag.NewChain(conn, jtag.Layout{first, second})
+    if err != nil {
+        return nil, err
+    }
+    if err := chain.Connect(ctx); err != nil {
+        return chain, err
+    }
+    cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+    defer cancel()
+    return chain, chain.Release(cleanupCtx)
 }
-second, err := jtag.IDCODE(12, secondID)
-if err != nil {
-    return err
-}
-chain, err := jtag.NewChain(conn, jtag.Layout{first, second})
-if err != nil {
-    return err
-}
-if err := chain.Connect(ctx); err != nil {
-    return err
-}
-cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-defer cancel()
-return chain.Release(cleanupCtx) // Retain chain and wire if this fails.
 ```
+
+The helper returns the chain after failed connection or release. Retain any
+returned chain and its wire owner while `CleanupPending` remains true.
+
+Size the cleanup budget for the selected clock and host latency. A full
+revalidation includes an IR measurement of 131,073 clocks plus TAP movement,
+which exceeds 1.31 seconds at 100 kHz. The example allows 30 seconds; slower
+clocks or hosts may need more.
 
 Connect resets the chain, validates reset-register observations, measures the
 total IR length, then checks the low `01` capture bits at each supplied IR

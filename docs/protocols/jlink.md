@@ -116,16 +116,22 @@ available for `Close`. For registered discovery, import `jlink/discovery` and
 activate the selected probe's borrowed wire:
 
 ```go
-owner, err := discover.OpenProbe(ctx, selector)
-if err != nil {
-    return err
+func openJTAG(ctx context.Context, selector discover.Selection) (*probe.Probe, *jtag.Conn, error) {
+    owner, err := discover.OpenProbe(ctx, selector)
+    if err != nil {
+        return owner, nil, err
+    }
+    wire, err := owner.JTAG(ctx, probe.JTAGConfig{MaxClockHz: 100_000})
+    if err != nil {
+        return owner, nil, err
+    }
+    return owner, jtag.New(wire), nil
 }
-wire, err := owner.JTAG(ctx, probe.JTAGConfig{MaxClockHz: 100_000})
-if err != nil {
-    return errors.Join(err, owner.Close())
-}
-conn := jtag.New(wire)
 ```
+
+The helper returns any non-nil owner alongside an error. The caller must close
+that owner and retain it while `CleanupPending` remains true. An activation
+failure does not authorize reopening or selecting another probe.
 
 Both constructors leave TAP state unknown until explicit reset or discovery. Use
 an explicit `jtag.Layout` for selected-TAP operations. Retain the chain and

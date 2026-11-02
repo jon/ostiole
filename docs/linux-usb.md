@@ -84,16 +84,16 @@ command in a restoration-bounded subshell:
   driver=/sys/bus/usb/drivers/ftdi_sio
   unbound=0
   restore_driver() {
-    status=$?
+    restore_rc=$?
     trap - EXIT
     if [ "$unbound" -eq 1 ] &&
       ! printf '%s' "$interface" | sudo tee "$driver/bind" >/dev/null
     then
-      if [ "$status" -eq 0 ]; then
-        status=1
+      if [ "$restore_rc" -eq 0 ]; then
+        restore_rc=1
       fi
     fi
-    exit "$status"
+    exit "$restore_rc"
   }
   trap restore_driver EXIT
   printf '%s' "$interface" | sudo tee "$driver/unbind" >/dev/null || exit $?

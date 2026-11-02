@@ -47,24 +47,26 @@ status, selects the base register bank, and restores only the power requests it
 acquired. `DebugPort.Connect` performs SWD entry; later DP, AP, transaction, and
 MEM-AP operations require that active connection. `ReadAPIDR` reads and decodes
 AP identity. For raw access, `APSel.Address` combines a selector with the
-complete eight-bit register address. Posted reads and writes complete through
-`RDBUFF`. The simulator models the same DP and AP state changes. Raw access has
-the effects defined by the selected AP class; writing a MEM-AP data register can
-write target memory. Any raw access which completes or might have completed
-invalidates existing `MemAP` values. `dap.DebugPort` retries only the physical
-request that returned WAIT. The one-argument `NewDebugPort` keeps retrying while
-the operation context remains active; `WithMaxWaits(1)` instead returns the
-first clean WAIT as `swd.ErrWait`. `SetMaxWaits` can change the limit while the
-port is idle. The count does not bound host I/O, so callers which need that
-bound still use a context deadline. A FAULT ends the operation. If a limit or
-context ends AP waiting, the debug port issues DAPABORT rather than replaying
-the whole logical access. A MEM-AP client and its model can perform
-arbitrary-range and aligned-scalar reads and writes, then restore the CSW, TAR,
-and optional TARHI values changed by that access. Cleanup terminates an
-incomplete 64-bit transfer through CSW before restoring the target address
-registers. An accepted write is not replayed; if its RDBUFF completion request
-returns WAIT, only that request is retried. If the MEM-AP does not accept single
-address increment, block access writes TAR before each word instead.
+eight-bit ADIv5 or twelve-bit ADIv6 register offset. Posted reads and writes
+complete through `RDBUFF`. The simulator models the same DP and AP state
+changes. Raw access has the effects defined by the selected AP class; writing a
+MEM-AP data register can write target memory. Any raw access which completes or
+might have completed invalidates existing `MemAP` values. `dap.DebugPort`
+retries only the physical request that returned WAIT. The one-argument
+`NewDebugPort` keeps retrying while the operation context remains active;
+`WithMaxWaits(1)` instead returns the first clean WAIT as `swd.ErrWait`.
+`SetMaxWaits` can change the limit while the port is idle. The count does not
+bound host I/O, so callers which need that bound still use a context deadline. A
+FAULT ends the operation. If a limit or context ends AP waiting, the debug port
+issues DAPABORT rather than replaying the whole logical access. A MEM-AP client
+and its model can perform arbitrary-range and aligned-scalar reads and writes.
+Those operations leave CSW, TAR, and optional TARHI changed until
+`MemAP.Release`, or the owning `armdebug.Conn.Close`, restores the values saved
+at acquisition. Cleanup terminates an incomplete 64-bit transfer through CSW
+before restoring the target address registers. An accepted write is not
+replayed; if its RDBUFF completion request returns WAIT, only that request is
+retried. If the MEM-AP does not accept single address increment, block access
+writes TAR before each word instead.
 
 The [examples](examples) begin with a raw SWD debug-port identity read, then add
 posted access-port reads and a Cortex-M identity read through a MEM-AP. They
@@ -142,12 +144,13 @@ Hz for targets that require another rate.
 
 The inspection examples and `ost` commands avoid reset, halt, target-memory
 writes, and persistent changes. The separately gated `cortexm-control` example
-enables halting debug, halts a Cortex-M0, reads PC, SP, R0, and R4, then resumes
-it. Add `-step` to perform one architectural step before resume. The `dap.MemAP`
-API does expose effectful scalar writes; callers choose the addresses and own
-the consequences. Establishing an ADIv5 connection also changes volatile
-debug-port control state; the connection releases its own power requests before
-return.
+enables halting debug on Cortex-M0 or Cortex-M33, halts the core, reads PC, SP,
+R0, and R4, then resumes it. Cortex-M33 requires Secure invasive debug
+permission. Add `-step` to perform one architectural step before resume. The
+`dap.MemAP` API does expose effectful scalar writes; callers choose the
+addresses and own the consequences. Establishing an ADIv5 connection also
+changes volatile debug-port control state; the connection releases its own power
+requests before return.
 
 ## SWD DPIDR example
 
@@ -229,8 +232,9 @@ go run ./examples/simple/cortexm-info
 
 A successful read prints the debug port, access port, and processor identities,
 for example `DPIDR=0x2ba01477 AP0_IDR=0x24770011 CPUID=0x410fc241`. The
-operation restores CSW, TAR, DP selection, and acquired power state. It does not
-reset or halt the target or write target memory.
+operation restores saved CSW, TAR, optional TARHI, and acquired power state, and
+clears DP selection to zero. It does not reset or halt the target or write
+target memory.
 
 ## Command
 
