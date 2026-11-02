@@ -8,18 +8,14 @@ import (
 )
 
 const (
-	commandClockDescribe       = 0xc0
-	commandScanV3              = 0xcf
-	commandClockSet            = 0x05
-	interfaceSWD               = 1
-	interfaceJTAG              = 0
-	capabilityClock            = 9
-	defaultTransferBits        = 504
-	minimumSWDFrameBits        = 136
-	delayedInputFirmware       = "J-Link EDU Mini V2 compiled Jun 25 2026 10:27:52"
-	delayedInputFirmwareRecord = delayedInputFirmware + "\x00" +
-		"Copyright 2016-2024 SEGGER: www.segger.com" +
-		"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+	commandClockDescribe = 0xc0
+	commandScanV3        = 0xcf
+	commandClockSet      = 0x05
+	interfaceSWD         = 1
+	interfaceJTAG        = 0
+	capabilityClock      = 9
+	defaultTransferBits  = 504
+	minimumSWDFrameBits  = 136
 )
 
 // ScanError reports a complete scan response with a nonzero probe status.
@@ -76,7 +72,7 @@ func (s *Session) configureTarget(ctx context.Context, maxClockHz uint32, target
 		return fmt.Errorf("jlink: set %s clock: %w", name, err)
 	}
 	s.clockHz, s.transferBits = clockHz, limit
-	s.delayInput = target == interfaceSWD && s.info.USB.PID == 0x1020 && string(s.info.FirmwareRecord) == delayedInputFirmwareRecord
+	s.delayInput = target == interfaceSWD
 	s.inputCarry = false
 	s.configured = true
 	return nil
@@ -149,7 +145,9 @@ func (s *Session) MaxTransferBits() int {
 // SWDIO executes one direction-explicit SWD bit stream through scan v3. Bits
 // are packed least-significant first. A set direction bit drives the matching
 // output bit; a clear direction bit samples the target and masks that output.
-// The returned stream contains one sample per clock. A complete response with
+// The returned stream contains one sample per clock, correcting scan-v3 input
+// alignment across calls for every product and firmware record. A complete
+// response with
 // a nonzero status returns *ScanError. Direct sessions require ConfigureSWD;
 // probe-owned sessions reconfigure before the next valid request. An ambiguous
 // transfer poisons the session and requires close and reopen. SWDIO never

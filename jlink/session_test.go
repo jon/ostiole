@@ -49,10 +49,14 @@ type peerUSBDevice struct {
 	handleWrite       func([]byte) (int, error)
 }
 
-type peerUSBClaim struct{ device *peerUSBDevice }
+type peerUSBClaim struct {
+	device  *peerUSBDevice
+	pending *peerUSBTransfer
+}
 
 type peerUSBTransfer struct {
 	done      chan struct{}
+	aborted   bool
 	count     int
 	err       error
 	afterWait func()
@@ -124,6 +128,11 @@ func (c *peerUSBClaim) SubmitBulk(ctx context.Context, endpoint uint8, buffer []
 	if endpoint&0x80 == 0 {
 		transfer.count, transfer.err = c.device.write(buffer)
 	} else {
+		if len(c.device.responses) == 0 && c.device.readErr == nil && len(c.device.readErrs) == 0 {
+			c.pending = transfer
+			c.device.reads++
+			return transfer, nil
+		}
 		transfer.count, transfer.err = c.device.read(buffer)
 		if c.device.readCount != 0 {
 			transfer.count = c.device.readCount
@@ -282,6 +291,12 @@ func TestSessionPoisonsConsecutiveZeroLengthCompletions(t *testing.T) {
 
 func (c *peerUSBClaim) AbortBulk(uint8) error {
 	c.device.aborts++
+	if c.pending != nil {
+		c.pending.err = context.Canceled
+		c.pending.aborted = true
+		close(c.pending.done)
+		c.pending = nil
+	}
 	return nil
 }
 
@@ -884,3 +899,6 @@ func TestInspectApplicationCallerCancelsRetries(t *testing.T) {
 
 // The peer models the native device's one-shot final close.
 func (d *peerUSBDevice) CleanupPending() bool { return d.closes == 0 }
+
+func (t *peerUSBTransfer) Aborted() bool   { return t.aborted }
+func (t *cancelUSBTransfer) Aborted() bool { return false }
