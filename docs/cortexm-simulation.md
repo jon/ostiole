@@ -55,6 +55,12 @@ Reads never advance time or complete a transition. DHCSR reads consume sticky
 reset, retirement and M33 restart status; `Snapshot` consumes none of them. DFSR
 writes clear the selected reason bits.
 
+An `Initial` value with C_DEBUGEN and C_HALT set but S_HALT clear contains a
+pending halt. `New` schedules it from the clock's current tick using
+`HaltDelay`; zero delay completes during construction, including other events
+already due at that tick. `NoCompletion` leaves it pending. A completion beyond
+the clock's range fails before an event is queued.
+
 Advance the shared clock from the fixture's wire wrapper or scenario runner,
 independently of which register the driver reads:
 
@@ -82,7 +88,10 @@ Events can record retirement, warm reset, external restart or halt, and changes
 to M33 Secure debug permission. Permission changes update the underlying
 permission immediately; reported S_SDE remains latched while halted and updates
 when the core leaves Debug state. Secure halt requests are ignored when debug is
-denied. Warm reset clears the halt request, Debug state, interrupt mask and
+denied. Repeating a denied halt request preserves an existing pending request
+and its completion time or readiness; explicitly clearing C_HALT can still
+cancel it. A halt whose delay elapsed while denied completes when permission
+returns. Warm reset clears the halt request, Debug state, interrupt mask and
 retirement/restart indicators, sets reset status, and preserves debug enable,
 permission, snap-stall control and DFSR. UNKNOWN reset fields use the documented
 fixture values rather than an arbitrary physical implementation's values.

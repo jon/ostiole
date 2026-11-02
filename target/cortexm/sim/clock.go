@@ -76,6 +76,11 @@ func (c *Core) transitionPossible(control uint32) bool {
 	return control&enabled != 0 && (control&haltRequest != 0) != (c.state.DHCSR&inDebug != 0)
 }
 
+func (c *Core) transitionOverflows(control uint32) bool {
+	delay := c.transitionDelay(control)
+	return c.transitionPossible(control) && delay != NoCompletion && delay > math.MaxUint64-c.clock.now
+}
+
 func (c *Core) queueTransition(control uint32) {
 	if !c.transitionPossible(control) {
 		return
