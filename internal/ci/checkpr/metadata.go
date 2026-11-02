@@ -6,15 +6,12 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 
-	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
-	"github.com/yuin/goldmark/extension"
 	extast "github.com/yuin/goldmark/extension/ast"
-	markdownhtml "github.com/yuin/goldmark/renderer/html"
-	"github.com/yuin/goldmark/text"
 	xhtml "golang.org/x/net/html"
 )
 
@@ -79,15 +76,11 @@ type pullRequestBody struct {
 
 func pullRequestSections(body string) map[string]bool {
 	result := pullRequestBody{sections: make(map[string]bool), first: true}
-	markdown := goldmark.New(
-		goldmark.WithExtensions(extension.GFM, extension.Footnote),
-		goldmark.WithRendererOptions(markdownhtml.WithUnsafe()),
-	)
-	source := []byte(body)
-	document := markdown.Parser().Parse(text.NewReader(source))
+	parsed := parseMarkdown(body)
+	source, document := parsed.source, parsed.root
 	removeDecorations(document, source)
 	var rendered bytes.Buffer
-	if err := markdown.Renderer().Render(&rendered, source, document); err != nil {
+	if err := parsed.markdown.Renderer().Render(&rendered, source, document); err != nil {
 		return result.sections
 	}
 	filtered := disallowedHTML.ReplaceAll(rendered.Bytes(), []byte("&lt;$1$2$3"))
@@ -130,13 +123,83 @@ func (body *pullRequestBody) addHTMLNode(node *xhtml.Node, sections bool) {
 			sections = false
 		}
 	}
-	if node.Type == xhtml.TextNode && visibleText(node.Data) {
+	if node.Type == xhtml.ElementNode && node.Data == "pre" {
+		body.addVisibleText(metadataInlineText(node))
+		return
+	}
+	var inline strings.Builder
+	for _, child := range visibleChildren(node) {
+		if blockHTMLNode(child) {
+			body.addVisibleText(inline.String())
+			inline.Reset()
+			body.addHTMLNode(child, sections)
+		} else {
+			inline.WriteString(metadataInlineText(child))
+		}
+	}
+	body.addVisibleText(inline.String())
+}
+
+func (body *pullRequestBody) addVisibleText(value string) {
+	if visibleText(mathSpan.ReplaceAllString(value, "")) {
 		body.sections[body.current] = true
 		body.first = false
 	}
-	for _, child := range visibleChildren(node) {
-		body.addHTMLNode(child, sections)
+}
+
+func blockHTMLNode(node *xhtml.Node) bool {
+	if node.Type != xhtml.ElementNode {
+		return false
 	}
+	switch node.Data {
+	case "html", "head", "body", "div", "section", "article", "main", "p", "pre", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "details", "summary", "table", "thead", "tbody", "tfoot", "tr", "td", "th", "ol", "ul", "li", "dl", "dt", "dd", "hr", "address", "form", "fieldset":
+		return true
+	}
+	for _, child := range visibleChildren(node) {
+		if blockHTMLNode(child) {
+			return true
+		}
+	}
+	return false
+}
+
+func metadataInlineText(node *xhtml.Node) string {
+	if literalDollar(node) {
+		return "code"
+	}
+	if node.Type == xhtml.TextNode {
+		return node.Data
+	}
+	if node.Type == xhtml.ElementNode && node.Data == "code" {
+		if mathCode(node) {
+			return ""
+		}
+		if visibleText(htmlText(node)) {
+			return "code"
+		}
+		return ""
+	}
+	var value strings.Builder
+	for _, child := range visibleChildren(node) {
+		value.WriteString(metadataInlineText(child))
+	}
+	if node.Type == xhtml.ElementNode && node.Data == "pre" && visibleText(value.String()) {
+		return "code"
+	}
+	return value.String()
+}
+
+func literalDollar(node *xhtml.Node) bool {
+	return node.Type == xhtml.ElementNode && node.Data == "span" && htmlText(node) == "$"
+}
+
+func mathCode(node *xhtml.Node) bool {
+	for _, attribute := range node.Attr {
+		if attribute.Key == "class" && slices.Contains(strings.Fields(attribute.Val), "language-math") {
+			return true
+		}
+	}
+	return false
 }
 
 func htmlText(node *xhtml.Node) string {
@@ -149,6 +212,8 @@ func htmlText(node *xhtml.Node) string {
 	}
 	return result.String()
 }
+
+var mathSpan = regexp.MustCompile(`(?s)\$\$.*?\$\$|\$[^$\n]+\$`)
 
 func visibleText(value string) bool {
 	return strings.ContainsFunc(value, func(r rune) bool {
@@ -200,6 +265,9 @@ func collapsedDetails(node *xhtml.Node) bool {
 }
 
 func visibleChildren(node *xhtml.Node) []*xhtml.Node {
+	if node.Type == xhtml.ElementNode && node.Data == "rp" {
+		return nil
+	}
 	var children []*xhtml.Node
 	collapsed := collapsedDetails(node)
 	for child := node.FirstChild; child != nil; child = child.NextSibling {
