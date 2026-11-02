@@ -248,7 +248,7 @@ err = errors.Join(err, cleanupErr)
 // After terminal probe loss, Close can release host resources without restoring the target.
 ```
 
-The Cortex-M0 [control example](../examples/simple/cortexm-control/main.go)
+The Cortex-M0/M33 [control example](../examples/simple/cortexm-control/main.go)
 selects one probe and AP, halts, prints PC, SP, R0, and R4, resumes, then
 releases the target before closing the connection. With `-step`, it also steps
 once and prints the resulting PC. It requires explicit consent to control

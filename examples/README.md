@@ -6,7 +6,7 @@ Ostiole examples are grouped by how much of the library they compose.
 operation visible and are primarily useful for learning or hardware bring-up.
 
 `simple/` contains focused inspection and control tools, such as processor
-identity, CoreSight discovery, and Cortex-M0 halt/resume.
+identity, CoreSight discovery, and Cortex-M0/M33 halt/resume.
 
 `advanced/` is reserved for composed workflows such as loading ELF payloads,
 programming firmware or FPGA bitstreams, and extracting data through a target's
@@ -29,11 +29,12 @@ example has been implemented.
   entry of a selected MEM-AP, or a known component page, through a managed SWD
   connection. Add `-walk` for bounded ROM traversal with partial-result
   reporting.
-- [`simple/cortexm-control`](simple/cortexm-control) enables Cortex-M0 halting
-  debug, halts and resumes the processor, then restores debug control. It
-  preserves an already halted core without stepping or resuming it. It requires
-  `-allow-control`; see [Cortex-M control](../docs/cortexm.md) for effects and
-  cleanup limits.
+- [`simple/cortexm-control`](simple/cortexm-control) enables Cortex-M0/M33
+  halting debug, halts and resumes the processor, then restores debug control.
+  It preserves an already halted core without stepping or resuming it. It
+  requires `-allow-control`. Cortex-M33 requires Secure invasive debug
+  permission; see [Cortex-M control](../docs/cortexm.md) for effects and cleanup
+  limits.
 
 For ADIv6 SW-DP targets, `coresight-info -debug-space -walk` inspects the DP's
 advertised discovery tree. Use `-ap-base ADDRESS` instead of `-ap INDEX` to

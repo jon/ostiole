@@ -21,6 +21,9 @@ and how to assemble them without duplicating lower-level behavior.
 - [Cortex-M control](cortexm.md) describes Cortex-M0/M33 acquisition,
   halt/resume, register access, stepping, restoration, and the explicitly gated
   control example.
+- [Cortex-M simulation](cortexm-simulation.md) composes modeled core debug state
+  and explicit virtual events beneath Arm/SWD/DAP owners, without
+  register-transfer or instruction execution.
 - [Composition](composition.md) maps common tasks to the narrowest public
   package that implements them and gives coding agents a selection checklist.
 - [Capabilities](capabilities.md) distinguishes implemented behavior from

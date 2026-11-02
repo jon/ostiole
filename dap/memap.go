@@ -70,6 +70,7 @@ type MemAP struct {
 
 // OpenMemAP validates sel and saves the state changed by target-memory access.
 // It performs AP traffic. A returned MemAP must be paired with MemAP.Release.
+// Missing or non-memory ports are named by ADIv5 index or ADIv6 base address.
 // The debug port must be connected and must not have cleanup pending.
 // Only one handle may own a selector in that session. A duplicate is rejected
 // before traffic, including after MemAP.Release; reuse the existing valid
@@ -103,8 +104,7 @@ func OpenMemAP(ctx context.Context, dp *DebugPort, sel APSel) (memory *MemAP, er
 }
 
 func (dp *DebugPort) snapshotMemAP(ctx context.Context, sel APSel) (*MemAP, error) {
-	selection, err := validateAPSel(sel)
-	if err != nil {
+	if _, err := validateAPSel(sel); err != nil {
 		return nil, err
 	}
 	idr, err := dp.ReadAPIDR(ctx, sel)
@@ -112,10 +112,10 @@ func (dp *DebugPort) snapshotMemAP(ctx context.Context, sel APSel) (*MemAP, erro
 		return nil, err
 	}
 	if idr.Raw == 0 {
-		return nil, fmt.Errorf("dap: AP %d is absent", selection)
+		return nil, fmt.Errorf("dap: %s is absent", sel)
 	}
 	if idr.Class != memAPClass {
-		return nil, fmt.Errorf("dap: AP %d is not a MEM-AP", selection)
+		return nil, fmt.Errorf("dap: %s is not a MEM-AP", sel)
 	}
 	cfg, err := dp.readAP(ctx, sel, memAPCFG)
 	if err != nil {

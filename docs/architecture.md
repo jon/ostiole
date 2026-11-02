@@ -35,25 +35,26 @@ service.
 
 ## Package responsibilities
 
-| Package           | Responsibility                                                                                                                                                                                                                                 |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `usb`             | Enumerate, open, inspect the active standard configuration, claim, transfer through, and close one host USB attachment, including explicit asynchronous bulk transfers.                                                                        |
-| `probe`           | Own one supplied implementation and lend its supported protocol surfaces; the implementation retains its transport and cleanup obligations.                                                                                                    |
-| `armdebug`        | Own a probe, its connected SW-DP or baseline JTAG-DP, and explicitly acquired MEM-APs; restore APs before releasing DAP and its connection or chain, then close the probe.                                                                     |
-| `discover`        | Enumerate registered transports, classify probe bindings, and select one candidate without owning an open probe.                                                                                                                               |
-| `discover/probes` | Register all bundled probe providers for generic tools.                                                                                                                                                                                        |
-| `ftdi`            | Own one explicitly selected FTDI MPSSE port and expose direction-safe SWD bits or packed JTAG clocks.                                                                                                                                          |
-| `jlink`           | Find one reviewed J-Link USB application interface, own its command session, configure SWD or JTAG, and adapt scan v3 to the selected wire protocol.                                                                                           |
-| `cmsisdap`        | Shortlist CMSIS-DAP product strings, validate one explicitly selected v2 bulk interface, own its command session, configure SWD, complete register operations, and execute preflighted explicit sequences within command direction boundaries. |
-| `swd`             | Enter SWD, establish its response grammar, and encode, execute, and validate individual or packed DP/AP register transactions.                                                                                                                 |
-| `jtag`            | Track TAP state, scan registers, discover reset entries, measure IR length, and validate explicit chains for selected-TAP access over a caller-supplied wire.                                                                                  |
-| `swd/sim`         | Model SWD protocol entry, register transfers, fixed-frame packing, and transfer limits without hardware.                                                                                                                                       |
-| `dap`             | Bind SW-DP or baseline ADIv5 JTAG-DP, manage identity and power, execute ordered DP/AP transactions, and provide scalar or block MEM-AP access.                                                                                                |
-| `dap/sim`         | Model the DP, AP, and byte-addressed target-memory state consumed by `dap`.                                                                                                                                                                    |
-| `coresight`       | Identify debug components and walk ROM tables through borrowed scalar memory, with explicit bounds and no resource acquisition or target-memory writes.                                                                                        |
-| `target/cortexm`  | Identify Cortex-M processors and own Cortex-M0/M33 halting debug, with halted register access, over borrowed word memory.                                                                                                                      |
-| `examples/...`    | Demonstrate public package compositions as executable programs.                                                                                                                                                                                |
-| `cmd/ost`         | Provide a small command hierarchy over the same public packages.                                                                                                                                                                               |
+| Package              | Responsibility                                                                                                                                                                                                                                 |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `usb`                | Enumerate, open, inspect the active standard configuration, claim, transfer through, and close one host USB attachment, including explicit asynchronous bulk transfers.                                                                        |
+| `probe`              | Own one supplied implementation and lend its supported protocol surfaces; the implementation retains its transport and cleanup obligations.                                                                                                    |
+| `armdebug`           | Own a probe, its connected SW-DP or baseline JTAG-DP, and explicitly acquired MEM-APs; restore APs before releasing DAP and its connection or chain, then close the probe.                                                                     |
+| `discover`           | Enumerate registered transports, classify probe bindings, and select one candidate without owning an open probe.                                                                                                                               |
+| `discover/probes`    | Register all bundled probe providers for generic tools.                                                                                                                                                                                        |
+| `ftdi`               | Own one explicitly selected FTDI MPSSE port and expose direction-safe SWD bits or packed JTAG clocks.                                                                                                                                          |
+| `jlink`              | Find one reviewed J-Link USB application interface, own its command session, configure SWD or JTAG, and adapt scan v3 to the selected wire protocol.                                                                                           |
+| `cmsisdap`           | Shortlist CMSIS-DAP product strings, validate one explicitly selected v2 bulk interface, own its command session, configure SWD, complete register operations, and execute preflighted explicit sequences within command direction boundaries. |
+| `swd`                | Enter SWD, establish its response grammar, and encode, execute, and validate individual or packed DP/AP register transactions.                                                                                                                 |
+| `jtag`               | Track TAP state, scan registers, discover reset entries, measure IR length, and validate explicit chains for selected-TAP access over a caller-supplied wire.                                                                                  |
+| `swd/sim`            | Model SWD protocol entry, register transfers, fixed-frame packing, and transfer limits without hardware.                                                                                                                                       |
+| `dap`                | Bind SW-DP or baseline ADIv5 JTAG-DP, manage identity and power, execute ordered DP/AP transactions, and provide scalar or block MEM-AP access.                                                                                                |
+| `dap/sim`            | Model the DP, AP, and byte-addressed target-memory state consumed by `dap`.                                                                                                                                                                    |
+| `coresight`          | Identify debug components and walk ROM tables through borrowed scalar memory, with explicit bounds and no resource acquisition or target-memory writes.                                                                                        |
+| `target/cortexm`     | Identify Cortex-M processors and own Cortex-M0/M33 halting debug, with halted register access, over borrowed word memory.                                                                                                                      |
+| `target/cortexm/sim` | Model core-local M0 and Secure M33 debug state behind composed MEM-APs, with explicit virtual events and no instruction execution.                                                                                                             |
+| `examples/...`       | Demonstrate public package compositions as executable programs.                                                                                                                                                                                |
+| `cmd/ost`            | Provide a small command hierarchy over the same public packages.                                                                                                                                                                               |
 
 A backend may implement `probe.RegisterSWDBackend` to lend completed SW-DP
 register operations. Its capability is visible before activation; the generic
@@ -463,10 +464,11 @@ replaceable while exercising the public protocol and DAP layers.
 
 The inspection examples and `ost` commands do not reset or halt the target,
 write target memory, or change persistent state. The explicitly gated
-`cortexm-control` example enables debug, halts Cortex-M0, reads PC, SP, R0, and
-R4, then resumes it. Its `-step` option steps once while halted. The `dap.MemAP`
-API does expose scalar and block target-memory writes; applications choose the
-affected addresses and own the consequences.
+`cortexm-control` example enables debug on Cortex-M0 or Cortex-M33, halts the
+core, reads PC, SP, R0, and R4, then resumes it. Cortex-M33 requires Secure
+invasive debug permission. Its `-step` option steps once while halted. The
+`dap.MemAP` API does expose scalar and block target-memory writes; applications
+choose the affected addresses and own the consequences.
 
 The layers are not entirely passive:
 
@@ -488,8 +490,9 @@ The layers are not entirely passive:
 - Raw AP access has the effects defined by the selected AP class. A raw read can
   change class-specific state, and a raw write to a MEM-AP data register can
   write target memory. `DebugPort` does not restore either operation.
-- Reading or writing through a MEM-AP temporarily changes CSW, TAR, and
-  sometimes TARHI, then restores their prior values.
+- MEM-AP reads and writes leave CSW, TAR, and sometimes TARHI changed until
+  `MemAP.Release` restores the acquisition snapshot. An owning
+  `armdebug.Conn.Close` releases its MEM-APs before their debug port.
 
 Callers should always complete the documented release sequence, including when
 the primary operation fails.
