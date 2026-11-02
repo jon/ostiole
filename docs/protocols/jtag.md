@@ -75,6 +75,12 @@ actual length fits the supplied bound (2 through 65,536 bits). A wrong bound or
 interrupted transfer can leave other instructions; the caller must account for
 that effect when inspecting an unknown chain.
 
+The bound must be an upper limit known to cover the chain, not a trial length. A
+shorter bound can return an incorrect length without error. For example, a
+16-bit IR capturing `0xd801` can report length 2 with bound 11: an unflushed
+capture bit looks like the zero marker. A successful call does not prove that
+the bound was sufficient. The largest accepted bound is 65,536 bits.
+
 ## Explicit layouts
 
 `layout.Validate()` checks a `jtag.Layout` before opening a probe. It rejects
