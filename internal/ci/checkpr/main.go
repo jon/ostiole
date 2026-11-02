@@ -102,7 +102,7 @@ func writeFinding(output io.Writer, finding finding) {
 	}
 	if os.Getenv("GITHUB_ACTIONS") == "true" {
 		title := escapeAnnotation(finding.rule + " in " + commit)
-		message := escapeAnnotation(finding.message)
+		message := escapeAnnotationData(finding.message)
 		_, _ = fmt.Fprintf(output, "::%s title=%s::%s\n", finding.level, title, message)
 		return
 	}
@@ -111,12 +111,16 @@ func writeFinding(output io.Writer, finding finding) {
 }
 
 func escapeAnnotation(value string) string {
-	value = strings.ReplaceAll(value, "%", "%25")
-	value = strings.ReplaceAll(value, "\r", "%0D")
-	value = strings.ReplaceAll(value, "\n", "%0A")
+	value = escapeAnnotationData(value)
 	value = strings.ReplaceAll(value, ":", "%3A")
 	value = strings.ReplaceAll(value, ",", "%2C")
 	return value
+}
+
+func escapeAnnotationData(value string) string {
+	value = strings.ReplaceAll(value, "%", "%25")
+	value = strings.ReplaceAll(value, "\r", "%0D")
+	return strings.ReplaceAll(value, "\n", "%0A")
 }
 
 func gitOutput(repo string, args ...string) ([]byte, error) {

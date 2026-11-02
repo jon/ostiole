@@ -69,7 +69,7 @@ func TestCheckMessageAllowsUnwrappableBodyLines(t *testing.T) {
 		"https://example.com/" + long,
 		"    " + long,
 		"`" + long + "`",
-		"git show --format=" + long,
+		"$ git show --format=" + long,
 		"Signed-off-by: Example Person <person@example.com>",
 	}
 
