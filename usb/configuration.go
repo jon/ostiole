@@ -18,7 +18,6 @@ const (
 	descriptorConfiguration        = 0x02
 	descriptorInterface            = 0x04
 	descriptorEndpoint             = 0x05
-	classAudio                     = 0x01
 )
 
 // TransferType identifies a USB endpoint transfer type.
@@ -58,7 +57,8 @@ type AlternateSetting struct {
 
 // Endpoint describes one endpoint in an interface alternate setting.
 // MaxPacketSize is the descriptor's packet payload size, excluding periodic
-// transaction multipliers and burst capacity.
+// transaction multipliers and burst capacity. Zero payload is retained for
+// zero-bandwidth periodic endpoints.
 type Endpoint struct {
 	Address       uint8
 	TransferType  TransferType
@@ -175,7 +175,7 @@ func configurationCount(ctx context.Context, device controlTransferer) (int, err
 	if err := readStandard(ctx, device, requestGetDescriptor, descriptorDevice<<8, deviceDescriptor); err != nil {
 		return 0, fmt.Errorf("usb: read device descriptor: %w", err)
 	}
-	if int(deviceDescriptor[0]) != len(deviceDescriptor) || deviceDescriptor[1] != descriptorDevice || deviceDescriptor[17] == 0 {
+	if int(deviceDescriptor[0]) < len(deviceDescriptor) || deviceDescriptor[1] != descriptorDevice || deviceDescriptor[17] == 0 {
 		return 0, errors.New("usb: malformed device descriptor")
 	}
 	return int(deviceDescriptor[17]), nil
@@ -185,6 +185,7 @@ type configurationHeader struct {
 	index int
 	value uint8
 	total int
+	size  uint8
 }
 
 func configurationHeaderAt(ctx context.Context, device controlTransferer, index int) (configurationHeader, error) {
@@ -193,10 +194,10 @@ func configurationHeaderAt(ctx context.Context, device controlTransferer, index 
 	if err := readStandard(ctx, device, requestGetDescriptor, descriptorValue, header); err != nil {
 		return configurationHeader{}, fmt.Errorf("usb: read configuration %d header: %w", index, err)
 	}
-	if int(header[0]) != len(header) || header[1] != descriptorConfiguration {
+	if int(header[0]) < len(header) || header[1] != descriptorConfiguration {
 		return configurationHeader{}, fmt.Errorf("usb: malformed configuration %d header", index)
 	}
-	return configurationHeader{index: index, value: header[5], total: int(binary.LittleEndian.Uint16(header[2:4]))}, nil
+	return configurationHeader{index: index, value: header[5], total: int(binary.LittleEndian.Uint16(header[2:4])), size: header[0]}, nil
 }
 
 func configurationAt(ctx context.Context, device controlTransferer, header configurationHeader, active uint8) (Configuration, error) {
@@ -206,6 +207,9 @@ func configurationAt(ctx context.Context, device controlTransferer, header confi
 	raw, err := configurationBytes(ctx, device, header)
 	if err != nil {
 		return Configuration{}, fmt.Errorf("usb: read configuration %d: %w", header.index, err)
+	}
+	if raw[0] != header.size {
+		return Configuration{}, fmt.Errorf("usb: configuration %d descriptor length changed from %d to %d", header.index, header.size, raw[0])
 	}
 	if raw[5] != active {
 		return Configuration{}, fmt.Errorf("usb: configuration %d value changed from %d to %d", header.index, active, raw[5])
@@ -286,7 +290,7 @@ func validConfigurationHeader(raw []byte) bool {
 	if len(raw) < 9 {
 		return false
 	}
-	return raw[0] == 9 && raw[1] == descriptorConfiguration && int(binary.LittleEndian.Uint16(raw[2:4])) == len(raw) && raw[7]&0x80 != 0 && raw[7]&0x1f == 0
+	return raw[0] >= 9 && int(raw[0]) <= len(raw) && raw[1] == descriptorConfiguration && int(binary.LittleEndian.Uint16(raw[2:4])) == len(raw) && raw[7]&0x80 != 0 && raw[7]&0x1f == 0
 }
 
 type configurationParser struct {
@@ -317,7 +321,7 @@ func configurationDescriptor(raw []byte, position int) ([]byte, int, error) {
 }
 
 func (p *configurationParser) addInterface(descriptor []byte, position int) error {
-	if len(descriptor) != 9 {
+	if len(descriptor) < 9 {
 		return fmt.Errorf("usb: invalid interface descriptor length %d at offset %d", len(descriptor), position)
 	}
 	if err := p.finishAlternate(); err != nil {
@@ -357,7 +361,7 @@ func (p *configurationParser) addEndpoint(descriptor []byte, position int) error
 	if p.alternate == nil {
 		return fmt.Errorf("usb: invalid endpoint descriptor at offset %d", position)
 	}
-	endpoint, err := endpointFromDescriptor(descriptor, position, p.alternate.Class)
+	endpoint, err := endpointFromDescriptor(descriptor, position)
 	if err != nil {
 		return err
 	}
@@ -369,12 +373,9 @@ func (p *configurationParser) addEndpoint(descriptor []byte, position int) error
 	return nil
 }
 
-func endpointFromDescriptor(descriptor []byte, position int, class uint8) (Endpoint, error) {
-	if len(descriptor) != 7 && len(descriptor) != 9 {
+func endpointFromDescriptor(descriptor []byte, position int) (Endpoint, error) {
+	if len(descriptor) < 7 {
 		return Endpoint{}, fmt.Errorf("usb: invalid endpoint descriptor length %d at offset %d", len(descriptor), position)
-	}
-	if len(descriptor) == 9 && class != classAudio {
-		return Endpoint{}, fmt.Errorf("usb: nine-byte endpoint descriptor outside audio interface at offset %d", position)
 	}
 	address := descriptor[2]
 	if address&0x0f == 0 || address&0x70 != 0 {
@@ -424,7 +425,7 @@ func endpointMaxPacketSize(encoded uint16, transferType TransferType) (uint16, b
 	}
 	size := encoded & 0x07ff
 	minimum := endpointPacketSizeMinimum(transactions)
-	return size, size <= 1024 && (size >= minimum || transactions == 0 && size == 0 && transferType == TransferInterrupt)
+	return size, size <= 1024 && (size >= minimum || transactions == 0 && size == 0 && (transferType == TransferInterrupt || transferType == TransferIsochronous))
 }
 
 func validEndpointTransactions(transactions uint16, transferType TransferType) bool {
