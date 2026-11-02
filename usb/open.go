@@ -24,7 +24,9 @@ type Device struct {
 	closed        bool
 }
 
-// Open opens the exact attachment selected during enumeration.
+// Open opens the exact attachment selected during enumeration. Loss of the
+// selected node matches ErrStaleCandidate while preserving the native error.
+// A failed node open does not trigger another inventory scan or open attempt.
 func (e *Enumerator) Open(ctx context.Context, info DeviceInfo) (*Device, error) {
 	if ctx == nil {
 		return nil, errors.New("usb: nil open context")
@@ -39,8 +41,11 @@ func (e *Enumerator) Open(ctx context.Context, info DeviceInfo) (*Device, error)
 		return nil, err
 	}
 	path := filepath.Join(e.devRoot, fmt.Sprintf("%03d", info.Bus), fmt.Sprintf("%03d", info.Address))
-	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	file, err := e.openFile(path, os.O_RDWR, 0)
 	if err != nil {
+		if attachmentDisappeared(err) {
+			err = errors.Join(ErrStaleCandidate, err)
+		}
 		return nil, fmt.Errorf("usb: open USB attachment: %w", err)
 	}
 	if err := e.revalidate(ctx, info); err != nil {
@@ -74,6 +79,9 @@ func (e *Enumerator) revalidate(ctx context.Context, expected DeviceInfo) error 
 			continue
 		}
 		info.Product, info.Serial, err = e.readStrings(entry)
+		if attachmentDisappeared(err) {
+			return errors.Join(ErrStaleCandidate, err)
+		}
 		if err != nil {
 			return err
 		}

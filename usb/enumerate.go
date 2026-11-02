@@ -11,12 +11,15 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 // Enumerator reads one explicit snapshot of the Linux USB inventory.
 type Enumerator struct {
 	sysfsRoot string
 	devRoot   string
+	readFile  func(string) ([]byte, error)
+	openFile  func(string, int, os.FileMode) (*os.File, error)
 }
 
 // New constructs an enumerator for the host USB inventory.
@@ -25,10 +28,11 @@ func New() *Enumerator {
 }
 
 func newEnumerator(sysfsRoot, devRoot string) *Enumerator {
-	return &Enumerator{sysfsRoot: sysfsRoot, devRoot: devRoot}
+	return &Enumerator{sysfsRoot: sysfsRoot, devRoot: devRoot, readFile: os.ReadFile, openFile: os.OpenFile}
 }
 
-// List returns devices matching one of the supplied filters.
+// List returns devices matching one of the supplied filters. Disappearing or
+// incomplete sysfs entries are skipped; other I/O failures remain errors.
 func (e *Enumerator) List(ctx context.Context, filters []DeviceFilter) ([]DeviceInfo, error) {
 	if ctx == nil {
 		return nil, errors.New("usb: nil enumeration context")
@@ -74,13 +78,16 @@ func (e *Enumerator) readMatchingDevice(entry os.DirEntry, filters []DeviceFilte
 		return DeviceInfo{}, false, err
 	}
 	info.Product, info.Serial, err = e.readStrings(entry)
+	if attachmentDisappeared(err) {
+		return DeviceInfo{}, false, nil
+	}
 	return info, err == nil, err
 }
 
 func (e *Enumerator) readDevice(entry os.DirEntry) (DeviceInfo, bool, error) {
 	root := filepath.Join(e.sysfsRoot, entry.Name())
 	info, err := os.Stat(root)
-	if errors.Is(err, os.ErrNotExist) {
+	if attachmentDisappeared(err) {
 		return DeviceInfo{}, false, nil
 	}
 	if err != nil {
@@ -89,20 +96,20 @@ func (e *Enumerator) readDevice(entry os.DirEntry) (DeviceInfo, bool, error) {
 	if !info.IsDir() {
 		return DeviceInfo{}, false, nil
 	}
-	vendor, present, err := readNumber(root, "idVendor", 16, 16)
+	vendor, present, err := e.readNumber(root, "idVendor", 16, 16)
 	if err != nil || !present {
 		return DeviceInfo{}, false, err
 	}
-	product, _, err := readNumber(root, "idProduct", 16, 16)
-	if err != nil {
+	product, present, err := e.readNumber(root, "idProduct", 16, 16)
+	if err != nil || !present {
 		return DeviceInfo{}, false, err
 	}
-	bus, _, err := readNumber(root, "busnum", 10, 8)
-	if err != nil {
+	bus, present, err := e.readNumber(root, "busnum", 10, 8)
+	if err != nil || !present {
 		return DeviceInfo{}, false, err
 	}
-	address, _, err := readNumber(root, "devnum", 10, 8)
-	if err != nil {
+	address, present, err := e.readNumber(root, "devnum", 10, 8)
+	if err != nil || !present {
 		return DeviceInfo{}, false, err
 	}
 	return DeviceInfo{
@@ -115,16 +122,16 @@ func (e *Enumerator) readDevice(entry os.DirEntry) (DeviceInfo, bool, error) {
 
 func (e *Enumerator) readStrings(entry os.DirEntry) (string, string, error) {
 	root := filepath.Join(e.sysfsRoot, entry.Name())
-	product, err := readText(root, "product")
+	product, err := e.readText(root, "product")
 	if err != nil {
 		return "", "", err
 	}
-	serial, err := readText(root, "serial")
+	serial, err := e.readText(root, "serial")
 	return product, serial, err
 }
 
-func readText(root, name string) (string, error) {
-	value, err := os.ReadFile(filepath.Join(root, name))
+func (e *Enumerator) readText(root, name string) (string, error) {
+	value, err := e.readFile(filepath.Join(root, name))
 	if errors.Is(err, os.ErrNotExist) {
 		return "", nil
 	}
@@ -134,9 +141,9 @@ func readText(root, name string) (string, error) {
 	return strings.TrimSuffix(strings.TrimSuffix(string(value), "\n"), "\r"), nil
 }
 
-func readNumber(root, name string, base, bits int) (uint64, bool, error) {
-	value, err := os.ReadFile(filepath.Join(root, name))
-	if errors.Is(err, os.ErrNotExist) {
+func (e *Enumerator) readNumber(root, name string, base, bits int) (uint64, bool, error) {
+	value, err := e.readFile(filepath.Join(root, name))
+	if attachmentDisappeared(err) {
 		return 0, false, nil
 	}
 	if err != nil {
@@ -156,4 +163,8 @@ func matchesAny(info DeviceInfo, filters []DeviceFilter) bool {
 		}
 	}
 	return false
+}
+
+func attachmentDisappeared(err error) bool {
+	return errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENODEV)
 }

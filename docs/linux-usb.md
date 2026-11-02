@@ -5,13 +5,28 @@ commands should run as an unprivileged user. Do not work around device
 permissions with `sudo go run` or `sudo go test`: those commands compile and
 execute repository code as root.
 
-Endpoint-zero control transfers accept buffers up to 65,535 bytes. The host
-timeout defaults to five seconds; a context deadline rounds up to the next
-millisecond and clamps to the Linux unsigned 32-bit millisecond limit. Control
-requests use the native pointer width, and their buffers remain pinned until the
-ioctl returns. Interface and bulk requests use the ioctl direction encoding for
-the host architecture, including the PowerPC and MIPS variants. This ABI
-handling does not establish physical validation on every Linux architecture.
+Discovery skips sysfs entries whose required identity or bus/address attributes
+are missing, including entries returning `ENODEV` during removal. Permission and
+other I/O failures remain errors. If the selected usbfs node disappears during
+open, the error matches `usb.ErrStaleCandidate` and preserves the native open
+error. Opening is not replayed and does not trigger another inventory scan.
+
+`ActiveConfiguration` reads configuration descriptor bytes from the already
+opened attachment's usbfs file. This avoids the control ioctl's host-page-size
+limit for large configurations. The active value is still queried before and
+after inspection. Malformed, truncated or inconsistent descriptor data fails
+without opening another attachment or falling back to a control transfer. An
+`ENODEV` during either cached descriptor read matches `usb.ErrDeviceGone` and
+preserves the native cause; other read errors retain their identity.
+
+The control API accepts buffers up to the USB limit of 65,535 bytes; Linux usbfs
+can reject a request larger than the host page size. The host timeout defaults
+to five seconds; a context deadline rounds up to the next millisecond and clamps
+to the Linux unsigned 32-bit millisecond limit. Control requests use the native
+pointer width, and their buffers remain pinned until the ioctl returns.
+Interface and bulk requests use the ioctl direction encoding for the host
+architecture, including the PowerPC and MIPS variants. This ABI handling does
+not establish physical validation on every Linux architecture.
 
 ## Grant device access
 

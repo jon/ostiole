@@ -72,6 +72,8 @@ type controlTransferer interface {
 // ActiveConfiguration returns a detached snapshot of the device's active USB
 // configuration. It does not claim an interface or change device state. If
 // the device reports configuration zero, the error matches ErrNotConfigured.
+// Linux reads descriptor bytes from the opened attachment's usbfs cache. The
+// active configuration value is checked before and after inspection.
 func (d *Device) ActiveConfiguration(ctx context.Context) (Configuration, error) {
 	if d == nil {
 		return Configuration{}, errors.New("usb: nil device")
@@ -201,9 +203,8 @@ func configurationAt(ctx context.Context, device controlTransferer, header confi
 	if header.total < 9 {
 		return Configuration{}, fmt.Errorf("usb: invalid configuration %d length %d", header.index, header.total)
 	}
-	raw := make([]byte, header.total)
-	descriptorValue := uint16(descriptorConfiguration)<<8 | uint16(header.index)
-	if err := readStandard(ctx, device, requestGetDescriptor, descriptorValue, raw); err != nil {
+	raw, err := configurationBytes(ctx, device, header)
+	if err != nil {
 		return Configuration{}, fmt.Errorf("usb: read configuration %d: %w", header.index, err)
 	}
 	if raw[5] != active {
@@ -214,6 +215,22 @@ func configurationAt(ctx context.Context, device controlTransferer, header confi
 		return Configuration{}, fmt.Errorf("usb: parse configuration %d: %w", header.index, err)
 	}
 	return configuration, nil
+}
+
+type configurationDescriptorReader interface {
+	readConfigurationDescriptor(context.Context, int, int) ([]byte, error)
+}
+
+func configurationBytes(ctx context.Context, device controlTransferer, header configurationHeader) ([]byte, error) {
+	if reader, ok := device.(configurationDescriptorReader); ok {
+		return reader.readConfigurationDescriptor(ctx, header.index, header.total)
+	}
+	raw := make([]byte, header.total)
+	value := uint16(descriptorConfiguration)<<8 | uint16(header.index)
+	if err := readStandard(ctx, device, requestGetDescriptor, value, raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
 }
 
 func readStandard(ctx context.Context, device controlTransferer, request uint8, value uint16, data []byte) error {

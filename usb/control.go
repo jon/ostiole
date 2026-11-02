@@ -26,7 +26,9 @@ type usbControlTransfer struct {
 }
 
 // ControlTransfer performs one deadline-bounded endpoint-zero transfer.
-// Buffers may contain at most 65,535 bytes. Without a context deadline, the
+// Buffers may contain at most 65,535 bytes; usbfs can reject requests larger
+// than the host page size. ActiveConfiguration reads attachment descriptors
+// without that control-request limit. Without a context deadline, the
 // transfer timeout is five seconds. Positive deadlines round up to milliseconds
 // and clamp to the host's 32-bit millisecond limit.
 func (d *Device) ControlTransfer(ctx context.Context, requestType, request uint8, value, index uint16, data []byte) (int, error) {
