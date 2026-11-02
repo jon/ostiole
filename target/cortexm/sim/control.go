@@ -2,7 +2,6 @@ package sim
 
 import (
 	"errors"
-	"math"
 )
 
 // ErrUnsupported reports behavior outside this model or an architecturally
@@ -22,16 +21,16 @@ func (c *Core) writeControl(value uint32) error {
 		c.state.DHCSR &^= enabled | haltRequest | maskInterrupts
 		return nil
 	}
-	if !c.debugAllowed() {
-		control &^= haltRequest
-	}
-	delay := c.transitionDelay(control)
-	if c.transitionPossible(control) && delay != NoCompletion && delay > math.MaxUint64-c.clock.now {
-		return ErrUnsupported
+	if !c.debugAllowed() && control&haltRequest != 0 {
+		control = control & ^haltRequest | c.state.DHCSR&haltRequest
 	}
 	previous := c.state.DHCSR & (enabled | haltRequest)
+	changed := previous != control&(enabled|haltRequest)
+	if changed && c.transitionOverflows(control) {
+		return ErrUnsupported
+	}
 	c.state.DHCSR = c.state.DHCSR & ^(enabled|haltRequest|maskInterrupts|snapStall) | control
-	if previous != control&(enabled|haltRequest) {
+	if changed {
 		c.invalidateTransition()
 		c.queueTransition(control)
 	}

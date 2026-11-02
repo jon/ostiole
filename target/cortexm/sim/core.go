@@ -72,7 +72,10 @@ const (
 	sticky         = retired | reset | restarted
 )
 
-// New constructs a core without target traffic or cleanup obligations.
+// New constructs a core without target traffic or cleanup obligations. An
+// inherited enabled halt request without Debug state follows HaltDelay from the
+// clock's current tick. Zero delay completes during New, including other due
+// clock events. An overflowing completion fails before scheduling.
 func New(cfg Config) (*Core, error) {
 	mask := enabled | haltRequest | maskInterrupts | registerReady | inDebug | retired | reset
 	if cfg.Profile == M33 {
@@ -87,12 +90,17 @@ func New(cfg Config) (*Core, error) {
 	if cfg.Clock == nil {
 		cfg.Clock = new(Clock)
 	}
-	return &Core{
+	c := &Core{
 		profile: cfg.Profile, state: cfg.Initial, clock: cfg.Clock,
 		haltDelay: cfg.HaltDelay, resumeDelay: cfg.ResumeDelay,
 		secureAllowed: cfg.Initial.DHCSR&secureDebug != 0,
 		unsafeMemory:  cfg.Initial.DHCSR&snapStall != 0,
-	}, nil
+	}
+	if c.transitionOverflows(c.state.DHCSR) {
+		return nil, ErrUnsupported
+	}
+	c.queueTransition(c.state.DHCSR)
+	return c, nil
 }
 
 // Snapshot returns current fixture state without consuming sticky status.
