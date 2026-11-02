@@ -178,7 +178,7 @@ func TestKnownPaths(t *testing.T) {
 				if bit {
 					index = 1
 				}
-				state = transitions[state][index]
+				state = modelTransitions[state][index]
 			}
 			if state != to {
 				t.Fatalf("unreachable %v -> %v", from, to)
