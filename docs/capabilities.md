@@ -42,7 +42,9 @@ Probe classifiers register with `discover.RegisterProbe` or an explicit
 returning sorted candidates alongside attributed classification errors. It does
 not repeat enumeration or open hardware. Handle the original transport error
 separately before classifying a partial snapshot; the sequence does not retain
-that error.
+that error. The snapshot retains probe registrations even when no attachments
+were found, so missing providers remain distinct from an empty scan. Its `All()`
+method returns a repeatable attachment sequence without I/O.
 
 `discover.Candidate` captures an exact opening callback and copied display
 metadata. `ProbeInventory.Select` requires one match; `Open` combines that

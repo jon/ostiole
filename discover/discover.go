@@ -27,6 +27,9 @@ func (r *Registry) Probes(ctx context.Context) (ProbeInventory, error) {
 		return ProbeInventory(slices.Values([]Candidate{})), ErrNoProviders
 	}
 	inventory, transportErr := enumerate(ctx, transports, probes)
+	if ctx.Err() != nil && errors.Is(transportErr, ctx.Err()) {
+		return ProbeInventory(slices.Values([]Candidate{})), transportErr
+	}
 	candidates, classifyErr := inventory.Probes(ctx)
 	return candidates, errors.Join(transportErr, classifyErr)
 }
@@ -55,4 +58,12 @@ func missingDependencies(transports []*TransportProvider, probes []*ProbeProvide
 		}
 	}
 	return failures
+}
+
+func discoveryErrors(ctx context.Context, failures []error) error {
+	err := errors.Join(failures...)
+	if cause := ctx.Err(); cause != nil && !errors.Is(err, cause) {
+		return errors.Join(err, cause)
+	}
+	return err
 }

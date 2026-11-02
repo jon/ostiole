@@ -50,7 +50,7 @@ func TestEqualSerialUSBLocationsSortLexicographically(t *testing.T) {
 		t.Fatal(err)
 	}
 	var locations []string
-	for transport := range inventory {
+	for transport := range inventory.All() {
 		locations = append(locations, transport.Info().Location)
 	}
 	if !reflect.DeepEqual(locations, []string{"10:2", "2:10", "2:2"}) {

@@ -3,7 +3,6 @@ package discover
 import (
 	"context"
 	"errors"
-	"iter"
 	"slices"
 	"sync"
 	"testing"
@@ -41,12 +40,12 @@ func TestTransportRegistrationAndSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 2 {
-		got := slices.Collect(iter.Seq[Transport](inv))
+		got := slices.Collect(inv.All())
 		if len(got) != 2 || got[0].Info().Serial != "a" || got[1].Info().Serial != "z" {
 			t.Fatalf("order: %v", got)
 		}
 	}
-	for range inv {
+	for range inv.All() {
 		break
 	}
 	if calls != 1 {
@@ -68,7 +67,7 @@ func TestTransportPartialFailureAndCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	inv, err := r.Transports(t.Context())
-	if !errors.Is(err, want) || len(slices.Collect(iter.Seq[Transport](inv))) != 2 {
+	if !errors.Is(err, want) || len(slices.Collect(inv.All())) != 2 {
 		t.Fatalf("partial result: %v", err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
@@ -91,7 +90,7 @@ func TestRegistryConcurrentEnsure(t *testing.T) {
 	}
 	wg.Wait()
 	inv, err := r.Transports(t.Context())
-	if err != nil || inv == nil || len(slices.Collect(iter.Seq[Transport](inv))) != 0 {
+	if err != nil || len(slices.Collect(inv.All())) != 0 {
 		t.Fatalf("empty success: %v", err)
 	}
 }
