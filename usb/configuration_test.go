@@ -170,7 +170,7 @@ func TestActiveConfigurationRejectsChangedConfigurationLength(t *testing.T) {
 		{request: 6, value: 0x0200, data: full},
 		{request: 8, data: []byte{7}},
 	}}
-	if _, err := activeConfiguration(context.Background(), device); err == nil || !strings.Contains(err.Error(), "malformed configuration descriptor") {
+	if _, err := activeConfiguration(context.Background(), device); err == nil || !strings.Contains(err.Error(), "descriptor length changed") {
 		t.Fatalf("ActiveConfiguration() error = %v", err)
 	}
 }
@@ -269,15 +269,12 @@ func TestConfigurationValidatesAlternateSettings(t *testing.T) {
 }
 
 func TestConfigurationRejectsInvalidInterfaceHierarchy(t *testing.T) {
-	long := append(interfaceDescriptor(0, 0, 0), 0)
-	long[0] = 10
 	tests := []struct {
 		name string
 		raw  []byte
 		want string
 	}{
 		{name: "zero interfaces", raw: rawConfiguration(1, 0), want: "configuration descriptor has no interfaces"},
-		{name: "long interface descriptor", raw: rawConfiguration(1, 1, long), want: "invalid interface descriptor length 10"},
 		{name: "noncontiguous interface numbers", raw: rawConfiguration(1, 2, interfaceDescriptor(0, 0, 0), interfaceDescriptor(2, 0, 0)), want: "interface 2 is outside configuration interface count 2"},
 	}
 	for _, test := range tests {
@@ -302,12 +299,12 @@ func TestConfigurationValidatesConfigurationAttributes(t *testing.T) {
 func TestConfigurationValidatesEndpointDescriptorLengths(t *testing.T) {
 	long := append(endpointDescriptor(0x81), 0)
 	long[0] = 8
-	if _, err := parseConfiguration(rawConfiguration(1, 1, interfaceDescriptor(0, 0, 1), long)); err == nil || !strings.Contains(err.Error(), "invalid endpoint descriptor length 8") {
+	if _, err := parseConfiguration(rawConfiguration(1, 1, interfaceDescriptor(0, 0, 1), long)); err != nil {
 		t.Fatalf("parseConfiguration() error = %v", err)
 	}
 	vendor := append(endpointDescriptor(0x81), 0, 0)
 	vendor[0] = 9
-	if _, err := parseConfiguration(rawConfiguration(1, 1, interfaceDescriptor(0, 0, 1), vendor)); err == nil || !strings.Contains(err.Error(), "outside audio interface") {
+	if _, err := parseConfiguration(rawConfiguration(1, 1, interfaceDescriptor(0, 0, 1), vendor)); err != nil {
 		t.Fatalf("parseConfiguration() error = %v", err)
 	}
 	audioInterface := interfaceDescriptor(0, 0, 1)
@@ -426,7 +423,7 @@ func TestActiveConfigurationRejectsUnavailableMetadata(t *testing.T) {
 	for _, test := range []struct {
 		name   string
 		length byte
-	}{{name: "short device descriptor header", length: 17}, {name: "long device descriptor header", length: 19}} {
+	}{{name: "short device descriptor header", length: 17}, {name: "zero device descriptor header", length: 0}} {
 		t.Run(test.name, func(t *testing.T) {
 			deviceDescriptor := make([]byte, 18)
 			deviceDescriptor[0], deviceDescriptor[1], deviceDescriptor[17] = test.length, 1, 1
@@ -452,7 +449,6 @@ func TestActiveConfigurationRejectsShortAndMalformedDescriptors(t *testing.T) {
 	})
 	tests := [][]byte{
 		{10, 2, 9, 0, 0, 1, 0, 0x80, 50},
-		{10, 2, 19, 0, 1, 1, 0, 0x80, 50, 0, 9, 4, 0, 0, 0, 0xff, 0xff, 0xff, 0},
 		{9, 2, 11, 0, 0, 1, 0, 0x80, 50, 0, 4},
 		{9, 2, 16, 0, 0, 1, 0, 0x80, 50, 7, 5, 0x81, 2, 64, 0, 0},
 		{9, 2, 18, 0, 1, 1, 0, 0x80, 50, 9, 4, 0, 0, 1, 0xff, 0xff, 0xff, 0},

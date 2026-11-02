@@ -88,9 +88,11 @@ explicitly or use the package registry. Each call enumerates each provider once.
 
 Import `usb/discovery` to register all-device USB enumeration, or call its
 `Register` with an explicit registry. Its detached `Attachment` retains the
-exact `usb.DeviceInfo` snapshot for later opening. USB identity breaks final
-ordering ties by numeric bus/address and VID/PID; missing or duplicate serials
-cannot keep physical-device ordering stable when replugging changes addresses.
+exact `usb.DeviceInfo` snapshot for later opening. For equal serials, USB
+ordering compares the unpadded `bus:address` location lexicographically, then
+product and the fixed-width identity key; `10:2` therefore precedes `2:1`.
+Missing or duplicate serials cannot keep physical-device ordering stable when
+replugging changes addresses.
 
 Each concrete driver exposes `OpenProbe` to acquire an exact USB attachment
 under a generic `probe.Probe`. Interface claim and protocol configuration happen

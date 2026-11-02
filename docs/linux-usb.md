@@ -19,6 +19,13 @@ without opening another attachment or falling back to a control transfer. An
 `ENODEV` during either cached descriptor read matches `usb.ErrDeviceGone` and
 preserves the native cause; other read errors retain their identity.
 
+Standard device, configuration, interface and endpoint descriptors retain their
+defined fields while ignoring legal trailing bytes. Parsing advances by the
+returned descriptor length. Zero-bandwidth isochronous alternates may report a
+zero maximum packet size; bulk endpoints still require a nonzero payload size.
+After a successful alternate selection, endpoint lookup reloads its descriptors
+using the known selection without another `GET_INTERFACE` request.
+
 The control API accepts buffers up to the USB limit of 65,535 bytes; Linux usbfs
 can reject a request larger than the host page size. The host timeout defaults
 to five seconds; a context deadline rounds up to the next millisecond and clamps

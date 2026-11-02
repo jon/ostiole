@@ -22,9 +22,10 @@ func NewAttachment(identity usb.DeviceInfo) Attachment { return Attachment{ident
 // Identity returns the exact snapshot needed by usb.Enumerator.Open.
 func (a Attachment) Identity() usb.DeviceInfo { return a.identity }
 
-// Info returns common metadata. The fixed-width key sorts bus, address, VID,
-// and PID numerically. Missing or duplicate serials cannot guarantee physical
-// ordering across replugging because the host may assign another address.
+// Info returns common metadata. For equal serials, registry ordering compares
+// the unpadded bus:address location lexicographically, then product and the
+// fixed-width identity key. Missing or duplicate serials cannot guarantee
+// physical ordering across replugging because the host may assign another address.
 func (a Attachment) Info() discover.AttachmentInfo {
 	i := a.identity
 	return discover.AttachmentInfo{

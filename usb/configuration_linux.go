@@ -60,7 +60,7 @@ func attachmentConfigurationLength(reader io.ReaderAt, index int, offset int64) 
 		return 0, fmt.Errorf("usb: read attachment configuration %d header: %w", index, linuxUSBError(err))
 	}
 	length := int(binary.LittleEndian.Uint16(header[2:4]))
-	if header[0] != 9 || header[1] != descriptorConfiguration || length < 9 {
+	if header[0] < 9 || int(header[0]) > length || header[1] != descriptorConfiguration || length < 9 {
 		return 0, fmt.Errorf("usb: malformed attachment configuration %d header", index)
 	}
 	return length, nil
