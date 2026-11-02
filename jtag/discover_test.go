@@ -72,7 +72,7 @@ func (w *chainWire) tick(tms, tdi byte) byte {
 			offset += w.taps[i].ir
 		}
 	}
-	w.state = transitions[w.state][tms]
+	w.state = modelTransitions[w.state][tms]
 	return out
 }
 
