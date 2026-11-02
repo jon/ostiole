@@ -94,7 +94,7 @@ func TestTransportOrderingWithSerialCollisions(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for n, a := range slices.Collect(iter.Seq[Transport](i)) {
+		for n, a := range slices.Collect(i.All()) {
 			if a.Info().Key != string(rune('0'+n)) {
 				t.Fatalf("order at %d: %v", n, a.Info())
 			}

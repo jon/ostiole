@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"slices"
 )
 
@@ -24,9 +25,8 @@ type TransportInfo struct {
 
 // Transport is a detached attachment from a registry snapshot.
 type Transport struct {
-	info        TransportInfo
-	attachment  Attachment
-	classifiers []*ProbeProvider
+	info       TransportInfo
+	attachment Attachment
 }
 
 // Info returns detached metadata.
@@ -35,8 +35,15 @@ func (t Transport) Info() TransportInfo { return t.info }
 // Attachment returns the immutable transport-specific identity for classifiers.
 func (t Transport) Attachment() Attachment { return t.attachment }
 
-// TransportInventory is a repeatable snapshot sequence; iteration performs no I/O.
-type TransportInventory func(func(Transport) bool)
+// TransportInventory retains detached attachments and their provider snapshot.
+// Its zero value has no registered providers. Iteration performs no I/O.
+type TransportInventory struct {
+	values      []Transport
+	classifiers []*ProbeProvider
+}
+
+// All returns a repeatable attachment sequence without performing I/O.
+func (i TransportInventory) All() iter.Seq[Transport] { return slices.Values(i.values) }
 
 // Transports enumerates each package-registered transport once.
 func Transports(ctx context.Context) (TransportInventory, error) {
@@ -53,19 +60,18 @@ func (r *Registry) Transports(ctx context.Context) (TransportInventory, error) {
 
 func enumerate(ctx context.Context, providers []*TransportProvider, classifiers []*ProbeProvider) (TransportInventory, error) {
 	if ctx == nil {
-		return nil, errors.New("discover: nil context")
+		return TransportInventory{}, errors.New("discover: nil context")
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return TransportInventory{}, err
 	}
+	failures := missingDependencies(providers, classifiers)
 	if len(providers) == 0 {
-		return TransportInventory(slices.Values([]Transport{})), ErrNoProviders
+		return TransportInventory{classifiers: classifiers}, errors.Join(append(failures, ErrNoProviders)...)
 	}
 	var found []Transport
-	failures := missingDependencies(providers, classifiers)
 	for _, p := range providers {
 		if err := ctx.Err(); err != nil {
-			failures = append(failures, err)
 			break
 		}
 		attachments, err := p.enumerate(ctx)
@@ -77,11 +83,11 @@ func enumerate(ctx context.Context, providers []*TransportProvider, classifiers 
 				failures = append(failures, fmt.Errorf("discover: transport %s returned invalid attachment", p.id))
 				continue
 			}
-			found = append(found, Transport{info: TransportInfo{Provider: p.id, AttachmentInfo: a.Info()}, attachment: a, classifiers: classifiers})
+			found = append(found, Transport{info: TransportInfo{Provider: p.id, AttachmentInfo: a.Info()}, attachment: a})
 		}
 	}
 	slices.SortFunc(found, compareTransports)
-	return TransportInventory(slices.Values(found)), errors.Join(append(failures, ctx.Err())...)
+	return TransportInventory{values: found, classifiers: classifiers}, discoveryErrors(ctx, failures)
 }
 
 func compareStrings(a, b string) int { return cmp.Compare(a, b) }

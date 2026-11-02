@@ -58,3 +58,37 @@ func TestCandidateOpenFailureAndPreflight(t *testing.T) {
 		t.Fatal("zero opened")
 	}
 }
+
+func TestLocationSelectionOpensOnlyExactPhysicalCandidate(t *testing.T) {
+	var opened []string
+	candidates := []Candidate{}
+	for _, location := range []string{"2:1", "10:2"} {
+		candidates = append(candidates, NewCandidate(probe.Info{Serial: "same", Location: location}, location, func(context.Context) (*probe.Probe, error) {
+			opened = append(opened, location)
+			return probe.New(probe.Info{Location: location}, nil), nil
+		}))
+	}
+	inventory := ProbeInventory(func(yield func(Candidate) bool) {
+		for _, candidate := range candidates {
+			if !yield(candidate) {
+				return
+			}
+		}
+	})
+	p, err := inventory.Open(t.Context(), Selection{Location: "10:2"})
+	if err != nil || p.Info().Location != "10:2" || len(opened) != 1 || opened[0] != "10:2" {
+		t.Fatalf("wrong physical candidate: %v, %v", opened, err)
+	}
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	single := ProbeInventory(func(yield func(Candidate) bool) { yield(candidates[0]) })
+	for _, i := range []ProbeInventory{inventory, single} {
+		if _, err := i.Open(t.Context(), Selection{Location: "absent"}); !errors.Is(err, ErrCandidateNotFound) {
+			t.Fatalf("unknown location: %v", err)
+		}
+	}
+	if len(opened) != 1 {
+		t.Fatal("unknown location opened hardware")
+	}
+}

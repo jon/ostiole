@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"iter"
 	"slices"
 	"strings"
 	"sync"
@@ -107,7 +106,7 @@ func TestDiscoveryCancellationStopsIndependentProviders(t *testing.T) {
 		}
 	}
 	i, err := r.Transports(ctx)
-	if !errors.Is(err, context.Canceled) || len(slices.Collect(iter.Seq[Transport](i))) != 1 {
+	if !errors.Is(err, context.Canceled) || len(slices.Collect(i.All())) != 1 {
 		t.Fatalf("partial cancellation: %v", err)
 	}
 }

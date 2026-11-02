@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/jon/ostiole/dap"
 )
 
 func TestBorrowedWireFollowsOwner(t *testing.T) {
@@ -107,3 +109,45 @@ func (b *backend) SWDIO(context.Context, []byte, []byte, int) ([]byte, error) {
 	return nil, nil
 }
 func (*backend) MaxTransferBits() int { return 64 }
+
+type emptySurfaceBackend struct {
+	backend
+	activations int
+}
+
+func (b *emptySurfaceBackend) SWD(context.Context, SWDConfig) (Wire, error) {
+	b.activations++
+	return nil, nil
+}
+func (b *emptySurfaceBackend) JTAG(context.Context, JTAGConfig) (JTAGWire, error) {
+	b.activations++
+	return nil, nil
+}
+func (b *emptySurfaceBackend) RegisterSWD(context.Context, SWDConfig) (dap.RegisterTransport, error) {
+	b.activations++
+	return nil, nil
+}
+
+func TestEmptySuccessfulActivationRetainsCleanupAndCannotRepeat(t *testing.T) {
+	for name, activate := range map[string]func(*Probe) error{
+		"swd":       func(p *Probe) error { _, err := p.SWD(t.Context(), SWDConfig{MaxClockHz: 1000}); return err },
+		"jtag":      func(p *Probe) error { _, err := p.JTAG(t.Context(), JTAGConfig{MaxClockHz: 1000}); return err },
+		"registers": func(p *Probe) error { _, err := p.RegisterSWD(t.Context(), SWDConfig{MaxClockHz: 1000}); return err },
+	} {
+		t.Run(name, func(t *testing.T) {
+			cleanup := errors.New("cleanup")
+			b := &emptySurfaceBackend{backend: backend{closeErr: cleanup}}
+			p := New(Info{}, b)
+			if err := activate(p); err == nil || !errors.Is(err, cleanup) || b.activations != 1 || b.closes != 1 || !p.CleanupPending() {
+				t.Fatalf("empty surface activation: %v, %+v", err, b)
+			}
+			if err := activate(p); err == nil || b.activations != 1 {
+				t.Fatal("repeated empty activation")
+			}
+			b.closeErr = nil
+			if err := p.Close(); err != nil || b.closes != 2 || p.CleanupPending() {
+				t.Fatalf("cleanup retry: %v", err)
+			}
+		})
+	}
+}

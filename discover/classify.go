@@ -52,12 +52,18 @@ type classification struct {
 
 // Probes classifies the snapshot using the registrations captured by Transports.
 // It performs no enumeration. Handle Transports' error separately: a sequence
-// does not carry that error, including when its snapshot is empty. Nil is empty.
+// does not carry that error. An empty provider snapshot returns ErrNoProviders.
 // Results are ordered by provider, serial, function, location, product, then
 // binding key, using case-sensitive lexical comparisons with empty strings first.
 func (i TransportInventory) Probes(ctx context.Context) (ProbeInventory, error) {
 	if ctx == nil {
 		return nil, errors.New("discover: nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if len(i.classifiers) == 0 {
+		return ProbeInventory(slices.Values([]Candidate{})), ErrNoProviders
 	}
 	work := i.classificationWork()
 	var found []Candidate
@@ -73,7 +79,7 @@ func (i TransportInventory) Probes(ctx context.Context) (ProbeInventory, error) 
 		}
 		for _, c := range candidates {
 			if c.open == nil || c.key == "" {
-				failures = append(failures, fmt.Errorf("discover: probe %s returned invalid candidate", w.provider.id))
+				failures = append(failures, fmt.Errorf("discover: probe %s over %s at %s returned invalid candidate", w.provider.id, w.provider.transport, w.transport.info.Key))
 				continue
 			}
 			c.info.Provider = w.provider.id
@@ -82,17 +88,15 @@ func (i TransportInventory) Probes(ctx context.Context) (ProbeInventory, error) 
 		}
 	}
 	slices.SortFunc(found, compareCandidates)
-	return ProbeInventory(slices.Values(found)), errors.Join(append(failures, ctx.Err())...)
+	return ProbeInventory(slices.Values(found)), discoveryErrors(ctx, failures)
 }
 
 func (i TransportInventory) classificationWork() []classification {
 	var work []classification
-	if i != nil {
-		for t := range i {
-			for _, p := range t.classifiers {
-				if p.transport == t.info.Provider {
-					work = append(work, classification{p, t})
-				}
+	for _, t := range i.values {
+		for _, p := range i.classifiers {
+			if p.transport == t.info.Provider {
+				work = append(work, classification{p, t})
 			}
 		}
 	}

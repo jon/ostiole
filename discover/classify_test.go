@@ -86,7 +86,7 @@ func TestClassificationKeepsPartialResults(t *testing.T) {
 	}
 	var empty TransportInventory
 	p, err = empty.Probes(t.Context())
-	if err != nil || p == nil {
-		t.Fatal("nil inventory not empty")
+	if !errors.Is(err, ErrNoProviders) || p == nil {
+		t.Fatal("zero inventory did not report missing providers")
 	}
 }

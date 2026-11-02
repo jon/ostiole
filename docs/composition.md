@@ -205,14 +205,17 @@ returns an owner with its error, preserve that owner for cleanup. No open path
 tries another candidate after failure. Selection errors return copied matching
 metadata in inventory order.
 
-Transport discovery uses registered providers:
+Transport discovery returns a snapshot of the attachments and probe providers.
+Use `All()` to iterate the attachments; classification retains the captured
+provider registrations even when no attachment was found. An inventory with no
+probe providers reports `discover.ErrNoProviders`:
 
 ```go
 transports, err := discover.Transports(ctx)
 if err != nil {
     return err
 }
-for transport := range transports {
+for transport := range transports.All() {
     fmt.Println(transport.Info())
 }
 inventory, err := transports.Probes(ctx)
