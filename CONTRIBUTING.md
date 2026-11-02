@@ -158,6 +158,19 @@ not count as an approval. Resolve its actionable conversations or explain the
 disposition before merging. If Codex completes after the gate's polling window,
 rerun the failed `codex-reviewed` job to evaluate the completed result.
 
+The change checker requires Git 2.41 or later. It reads statistics against an
+empty attribute tree and disables external diff drivers and text conversions, so
+head-controlled attributes cannot hide Go additions. Public declaration
+comparisons use committed Go syntax, including grouped declarations, removed
+symbols and signatures, while ignoring function bodies. Only added test or
+Markdown lines count as supporting changes. Moving existing production Go
+retains its addition count; promoting a test or non-Go file counts the complete
+production destination.
+
+Review-policy warnings precede ordinary annotations. Size warnings distinguish
+commits near the review checkpoint, those above it, and those requiring an
+approved exception. These warnings remain advisory.
+
 Changes to policy tooling, lint and format configuration, files under
 `.github/`, and `AGENTS*.md` instruction files receive a review-policy warning
 and are assigned to the maintainer in CODEOWNERS.

@@ -4,17 +4,12 @@ import (
 	"bytes"
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 )
 
 const nontrivialChangeLines = 20
 const reviewCheckpointWarning = 180
-
-var publicGoDeclaration = regexp.MustCompile(
-	`^\+\s*(func\s+(\([^)]*\)\s*)?[A-Z]|(const|type|var)\s+[A-Z])`,
-)
 
 type changedFile struct {
 	path         string
@@ -54,8 +49,8 @@ func summarizeChanges(files []changedFile) changeSummary {
 			summary.addedProductionGo += file.added
 		}
 		summary.topLevels[topLevel(file.path)] = true
-		summary.tests = summary.tests || (!file.renameSource && isTestFile(file.path))
-		summary.docs = summary.docs || strings.HasSuffix(file.path, ".md")
+		summary.tests = summary.tests || (!file.renameSource && file.added > 0 && isTestFile(file.path))
+		summary.docs = summary.docs || file.added > 0 && strings.HasSuffix(file.path, ".md")
 		summary.productionGo = summary.productionGo || isProductionGo(file.path)
 		summary.policy = summary.policy || isReviewPolicy(file.path)
 	}
@@ -73,7 +68,7 @@ func changeFindings(summary changeSummary, publicAPI bool, commit, message strin
 	if summary.addedProductionGo >= reviewCheckpointWarning {
 		findings = append(findings, changeWarning(
 			"change-size", commit,
-			fmt.Sprintf("commit adds %d non-test Go lines and is near the 200-line review checkpoint", summary.addedProductionGo),
+			changeSizeMessage(summary.addedProductionGo),
 		))
 	}
 	if summary.productionGo && !summary.tests {
@@ -104,7 +99,11 @@ func changeFindings(summary changeSummary, publicAPI bool, commit, message strin
 }
 
 func readChangedFiles(repo, commit string) ([]changedFile, error) {
-	output, err := gitOutput(repo, "diff", "--numstat", "-z", commit+"^", commit, "--")
+	tree, err := gitOutput(repo, "mktree")
+	if err != nil {
+		return nil, err
+	}
+	output, err := gitOutput(repo, "--attr-source="+strings.TrimSpace(string(tree)), "diff", "--numstat", "-z", "--text", "--no-ext-diff", "--no-textconv", "--find-renames", commit+"^", commit, "--")
 	if err != nil {
 		return nil, err
 	}
@@ -130,28 +129,19 @@ func readChangedFiles(repo, commit string) ([]changedFile, error) {
 				path:         string(records[index+1]),
 				renameSource: true,
 			})
+			source := string(records[index+1])
 			path = string(records[index+2])
+			previousAdded := added
+			added, err = productionRenameAdditions(repo, commit, source, path, added)
+			if err != nil {
+				return nil, err
+			}
+			lines += added - previousAdded
 			index += 2
 		}
 		files = append(files, changedFile{path: path, added: added, lines: lines})
 	}
 	return files, nil
-}
-
-func changesPublicGo(repo, commit string) (bool, error) {
-	output, err := gitOutput(
-		repo, "diff", "--unified=0", commit+"^", commit, "--",
-		":(glob)**/*.go", ":(glob,exclude)**/*_test.go",
-	)
-	if err != nil {
-		return false, err
-	}
-	for _, line := range strings.Split(string(output), "\n") {
-		if publicGoDeclaration.MatchString(line) {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 func hasCommitBody(message string) bool {
@@ -164,12 +154,12 @@ func isProductionGo(path string) bool {
 }
 
 func isTestFile(path string) bool {
-	return strings.HasSuffix(path, "_test.go") || strings.Contains(path, "/testdata/")
+	return strings.HasSuffix(path, "_test.go") || strings.HasPrefix(path, "testdata/") || strings.Contains(path, "/testdata/")
 }
 
 func isReviewPolicy(path string) bool {
 	name := filepath.Base(path)
-	return path == "CONTRIBUTING.md" || path == "SECURITY.md" ||
+	return name == ".gitattributes" || path == "CONTRIBUTING.md" || path == "SECURITY.md" ||
 		path == "CODE_OF_CONDUCT.md" ||
 		(strings.HasPrefix(name, "AGENTS") && strings.HasSuffix(name, ".md")) ||
 		(strings.HasPrefix(path, ".golangci") && strings.HasSuffix(path, ".yml")) ||
@@ -185,4 +175,28 @@ func topLevel(path string) string {
 
 func changeWarning(rule, commit, message string) finding {
 	return newFinding(warningLevel, rule, commit, message)
+}
+
+func changeSizeMessage(lines int) string {
+	description := "is near the 200-line review checkpoint"
+	if lines > 300 {
+		description = "exceeds 300 lines and requires an explicitly approved exception"
+	} else if lines > 200 {
+		description = "exceeds the 200-line review checkpoint"
+	}
+	return fmt.Sprintf("commit adds %d non-test Go lines and %s", lines, description)
+}
+
+func productionRenameAdditions(repo, commit, source, destination string, added int) (int, error) {
+	if !isProductionGo(destination) || isProductionGo(source) {
+		return added, nil
+	}
+	data, _, err := readGitFile(repo, commit, destination)
+	if err != nil {
+		return 0, err
+	}
+	if len(data) == 0 {
+		return 0, nil
+	}
+	return len(bytes.SplitAfter(bytes.TrimSuffix(data, []byte{'\n'}), []byte{'\n'})), nil
 }

@@ -92,7 +92,7 @@ func checkRange(repo, base, head string) ([]finding, error) {
 		return nil, err
 	}
 	findings = append(findings, markdownFindings...)
-	return findings, nil
+	return prioritizeReviewPolicy(findings), nil
 }
 
 func writeFinding(output io.Writer, finding finding) {
@@ -127,4 +127,16 @@ func gitOutput(repo string, args ...string) ([]byte, error) {
 		return nil, fmt.Errorf("git %s: %w: %s", args[0], err, bytes.TrimSpace(output))
 	}
 	return output, nil
+}
+
+func prioritizeReviewPolicy(findings []finding) []finding {
+	var policy, ordinary []finding
+	for _, f := range findings {
+		if f.rule == "review-policy" {
+			policy = append(policy, f)
+		} else {
+			ordinary = append(ordinary, f)
+		}
+	}
+	return append(policy, ordinary...)
 }
