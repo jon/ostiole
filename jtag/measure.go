@@ -10,6 +10,8 @@ import (
 // It flushes ones, shifts a zero marker through, then updates BYPASS and ends
 // in Idle. If the bound is wrong or the wire fails, the resulting instructions
 // cannot be guaranteed. Reset must have established state before this call.
+// A bound shorter than the chain can return an incorrect length without error;
+// a successful measurement does not establish that the bound was sufficient.
 func (c *Conn) MeasureIR(ctx context.Context, maxBits int) (int, error) {
 	if _, err := c.validate(ctx); err != nil {
 		return 0, err
