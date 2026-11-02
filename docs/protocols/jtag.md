@@ -13,16 +13,25 @@ return conn.Move(ctx, jtag.Idle)
 ```
 
 Reset clocks five TMS-high cycles; it does not assert a physical reset pin. Move
-follows a shortest path through the IEEE 1149.1 state machine, driving TDI low.
-Crossing update states can commit instructions or data, and TAP reset can change
-debug state. The caller chooses which transitions are appropriate for the
-target.
+follows a shortest path through the IEEE 1149.1 state machine, driving TDI low,
+without entering Test-Logic-Reset unless Reset is the requested destination.
+Crossing capture, shift and update states has its ordinary effects: an update
+can commit an instruction or data. For example, moving from Select-IR to Idle
+passes through Capture-IR and Update-IR, committing the captured instruction
+value. Explicit TAP reset can change debug state. The caller chooses which
+transitions are appropriate for the target.
 
 `ScanIR` and `ScanDR` capture and update a complete chain, then return to Idle.
 They accept a packed input buffer and a positive bit count; unused buffer bits
 are ignored. Each call starts a new capture, including when a previous Move
 stopped in a shift or pause state. Raw scans must not bypass a higher-level
 owner using the connection.
+
+Scan entry first moves to Idle without reset, then captures a new register. That
+entry movement can commit a previous partial shift, or pass through a capture
+and update when starting in Select-DR or Select-IR. It does not restore an
+inherited instruction. `Idle` and `MeasureIR` use the same non-reset movement to
+Idle, with the same ordinary register effects.
 
 ```go
 captured, err := conn.ScanIR(ctx, []byte{0xff}, 8)

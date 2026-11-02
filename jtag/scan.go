@@ -14,6 +14,8 @@ const MaxScanBits = 1 << 20
 // established state. Do not use raw scans while a higher owner uses this Conn.
 // A started scan finishes under WithCompletionTimeout before reporting caller
 // cancellation. A non-nil capture means the scan and exit to Idle completed.
+// Entry first moves to Idle without reset; that movement can update a register
+// left by a previous Move before the scan captures a fresh value.
 func (c *Conn) ScanIR(ctx context.Context, data []byte, bits int) ([]byte, error) {
 	return c.scan(ctx, data, bits, ShiftIR)
 }

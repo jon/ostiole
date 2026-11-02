@@ -51,6 +51,9 @@ func path(from, to State) []bool {
 			return r.bits
 		}
 		for bit, next := range transitions[r.state] {
+			if next == Reset && to != Reset {
+				continue
+			}
 			if !seen[next] {
 				seen[next] = true
 				bits := append(append([]bool(nil), r.bits...), bit != 0)

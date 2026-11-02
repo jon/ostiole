@@ -14,6 +14,7 @@ type chainWire struct {
 	register           []byte
 	calls, limit, fail int
 	stuck              *byte
+	visits             [17]int
 }
 type modelTAP struct {
 	ir          int
@@ -43,6 +44,7 @@ func (w *chainWire) JTAGIO(_ context.Context, tms, tdi []byte, bits int) ([]byte
 }
 
 func (w *chainWire) tick(tms, tdi byte) byte {
+	w.visits[w.state]++
 	var out byte
 	switch w.state {
 	case Reset:
