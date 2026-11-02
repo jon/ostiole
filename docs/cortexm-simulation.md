@@ -8,9 +8,9 @@ execution with privileged Secure debugger access. The identities are
 
 ## Compose a core
 
-Add a MEM-AP to a `dap/sim.Target`, then map the core's implemented word
-registers before connecting the wire. Here `coresim` is `target/cortexm/sim` and
-`dapsim` is `dap/sim`:
+Add a MEM-AP to a `dap/sim.Target`, then map the core's register windows before
+connecting the wire. Here `coresim` is `target/cortexm/sim` and `dapsim` is
+`dap/sim`:
 
 ```go
 clock := new(coresim.Clock)
@@ -24,8 +24,12 @@ core, err := coresim.New(coresim.Config{
 if err != nil {
     return err
 }
-for _, addr := range []uint64{0xe000ed00, 0xe000ed30, 0xe000edf0} {
-    if err := target.MapMEMAPDevice(sel, addr, 4, core); err != nil {
+for _, window := range []struct{ addr, size uint64 }{
+    {0xe000ed00, 4}, // CPUID.
+    {0xe000ed30, 4}, // DFSR.
+    {0xe000edf0, 16}, // DHCSR through DEMCR, including unsupported registers.
+} {
+    if err := target.MapMEMAPDevice(sel, window.addr, window.size, core); err != nil {
         return err
     }
 }
@@ -36,7 +40,10 @@ before := core.Snapshot()
 each AP for distinct debug windows at the same addresses. Shared RAM may use a
 single `dapsim.RAM` store through both APs. The core accepts only aligned,
 little-endian word accesses; use little-endian MEM-AP fixtures for Cortex-M.
-Unknown registers and other access widths bus-fault.
+Unknown registers and other access widths bus-fault. Map the whole 16-byte debug
+window so unsupported DCRSR, DCRDR and DEMCR accesses reach the core instead of
+falling through to fixture RAM. Register transfers then fail with a bus fault
+rather than returning fabricated register values.
 
 Compose `swd/sim` and a minimal probe backend using its public wire interface,
 then use `armdebug.Connect`, `OpenMemAP`, and `cortexm.Acquire` or
@@ -113,7 +120,10 @@ Behavioral tests compose two M0 or Secure M33 cores through one Arm owner, SWD
 connection and DAP, including RP2350-shaped ADIv6 APs at `0x2000` and `0x4000`.
 They cover inherited stops, selected resume, delayed completion, cancellation
 with a fresh cleanup context, and retained cleanup after shared transport loss.
-These tests do not establish physical halt/resume behavior.
+Register read/write attempts fail at the unsupported debug registers. A step
+attempt reports a device-model failure and retains the existing uncertain-launch
+cleanup obligation; the model does not execute the step. These tests do not
+establish physical halt/resume behavior.
 
 The modeled control and observation rules follow Arm DDI 0419E C1.5/C1.6.2–3 and
 DDI 0553B.y D1.2.38/D1.2.39. See the architecture references in
