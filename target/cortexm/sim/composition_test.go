@@ -98,8 +98,8 @@ func compose(t *testing.T, p sim.Profile, inherited bool) *composition {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, address := range []uint64{cpuid, dfsr, dhcsr} {
-			if err := dp.MapMEMAPDevice(sel, address, 4, core); err != nil {
+		for _, window := range []struct{ address, size uint64 }{{cpuid, 4}, {dfsr, 4}, {dhcsr, 16}} {
+			if err := dp.MapMEMAPDevice(sel, window.address, window.size, core); err != nil {
 				t.Fatal(err)
 			}
 		}
