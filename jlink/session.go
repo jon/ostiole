@@ -40,6 +40,7 @@ type usbClaim interface {
 
 type usbBulkTransfer interface {
 	Wait(context.Context) (int, error)
+	Aborted() bool
 }
 
 type ownedUSBDevice struct{ *usb.Device }
@@ -80,12 +81,17 @@ type Session struct {
 	closing      bool
 }
 
-// Open claims the J-Link application interface, reads probe metadata, applies
-// its options, and takes ownership of the device on success. With no options it
+// Open claims the J-Link application interface, drains stale input, reads probe
+// metadata, applies its options, and takes ownership of the device on success.
+// With no options it
 // does not select or configure a target interface. After an error, the caller
 // must still call device.Close; Open has already attempted cleanup. Inspection
 // retries an unconfigured USB device until the caller cancels or its deadline
 // expires. Without either, an unconfigured device can keep Open waiting.
+// Input synchronization requires 100 ms of quiet within a one-second budget;
+// each discarded packet restarts the quiet interval. Abort, final observation and
+// failed-open cleanup keep their own bounds. Later firmware replies remain
+// outside that guarantee. A quiet open takes at least 100 ms.
 func Open(ctx context.Context, device *usb.Device, options ...Option) (*Session, error) {
 	if device == nil {
 		return nil, errors.New("jlink: nil USB device")
@@ -123,22 +129,29 @@ func openSession(ctx context.Context, device usbDevice, options ...Option) (_ *S
 	if err := claim.SetAltSetting(application.alternate); err != nil {
 		return nil, fmt.Errorf("jlink: select USB interface %d alternate %d: %w", application.number, application.alternate, err)
 	}
-	bulkIn, err := selectedEndpoint(ctx, claim, application.bulkIn.Address, "IN")
-	if err != nil {
-		return nil, err
-	}
-	bulkOut, err := selectedEndpoint(ctx, claim, application.bulkOut.Address, "OUT")
-	if err != nil {
-		return nil, err
-	}
-	session.application.bulkIn, session.application.bulkOut = bulkIn, bulkOut
-	if err := session.readInfo(ctx); err != nil {
+	if err := session.readApplicationInfo(ctx); err != nil {
 		return nil, err
 	}
 	if err := configureOpen(ctx, session, config); err != nil {
 		return nil, err
 	}
 	return session, nil
+}
+
+func (s *Session) readApplicationInfo(ctx context.Context) error {
+	bulkIn, err := selectedEndpoint(ctx, s.claim, s.application.bulkIn.Address, "IN")
+	if err != nil {
+		return err
+	}
+	bulkOut, err := selectedEndpoint(ctx, s.claim, s.application.bulkOut.Address, "OUT")
+	if err != nil {
+		return err
+	}
+	s.application.bulkIn, s.application.bulkOut = bulkIn, bulkOut
+	if err := s.synchronizeInput(ctx); err != nil {
+		return err
+	}
+	return s.readInfo(ctx)
 }
 
 func configureOpen(ctx context.Context, session *Session, config openConfig) error {

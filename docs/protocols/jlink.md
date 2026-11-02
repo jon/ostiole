@@ -15,10 +15,9 @@ claims in the reference. Ostiole's exact candidate catalog also includes the
 additional PIDs recorded from the pinned libjaylink revision; those remain
 discovery candidates rather than a product-family rule, and `Open` still
 requires the active descriptors to match. Ostiole narrows descriptor binding to
-`ff/ff/ff` with exactly two bulk endpoints. The firmware-scoped sample
-correction described below applies the corresponding `observed-extension` only
-under its exact product and record guard. The package emits no `research-only`
-operation.
+`ff/ff/ff` with exactly two bulk endpoints. SWD scan-v3 input alignment applies
+across product and firmware records. The bench observations below remain
+specific to the exercised probe. The package emits no `research-only` operation.
 
 ## Session boundary
 
@@ -29,8 +28,19 @@ stream, capability gates, interface selection, target clock, scan framing, and
 probe status. `swd` owns SWD request and response grammar; `jtag` owns TAP
 state, chain validation, and selected-TAP scans.
 
-A metadata-only open sends version and capability-gated metadata queries but
-does not select a target interface. `WithSWD` or `ConfigureSWD` selects
+Opening first drains stale application IN data. It requires a 100 ms quiet
+interval, restarted after every discarded packet, within a one-second
+synchronization budget. Continuous input, caller cancellation and host failures
+end opening with a resynchronization error before metadata or target commands.
+The timed-out request is aborted and its final completion is observed under a
+fresh bounded context. A packet completing at that deadline, including an empty
+packet, restarts the interval; only a completed empty abort establishes quiet.
+Abort, final observation and failed-open cleanup retain their own bounds and
+errors. A quiet open takes at least 100 ms. Arbitrarily delayed firmware replies
+after the quiet window remain outside this guarantee.
+
+A metadata-only open then sends version and capability-gated metadata queries
+but does not select a target interface. `WithSWD` or `ConfigureSWD` selects
 advertised interface 1; `WithJTAG` or `ConfigureJTAG` selects advertised
 interface 0. Both then request the target clock. The package reports the
 requested whole-kHz rate. The clock operation has no application response, so it
@@ -60,17 +70,19 @@ explicit reconfiguration; commands are never replayed.
 The request is command `0xcf`, reserved byte zero, a little-endian bit count,
 then two packed streams. In SWD these are direction and output; in JTAG they are
 TMS and TDI. Bits are least-significant first. SWD clears output bits for
-target-driven cycles; JTAG preserves TDI independently of TMS and returns TDO
-without sample shifting. Neither method changes the caller's buffers. It reads
-the packed sample bytes and trailing status as distinct response phases. Status
-zero succeeds; status 6 reports insufficient probe workspace. A complete nonzero
-status leaves USB framing known but clears protocol configuration. A directly
-opened session requires explicit reconfiguration. A session acquired through
-`OpenProbe` retains its interface, clock, and transfer limit; its next valid
-nonempty borrowed-wire call reconfigures before sending the new scan. Invalid
-input and cancellation before traffic do not trigger reconfiguration. The failed
-scan is never replayed. A live configuration failure remains retryable; device
-loss or command-stream poisoning prevents recovery.
+target-driven cycles. SWD corrects the one-input-clock sample displacement
+across scan boundaries for all product and firmware records. JTAG preserves TDI
+independently of TMS and returns TDO without sample shifting. Neither method
+changes the caller's buffers. It reads the packed sample bytes and trailing
+status as distinct response phases. Status zero succeeds; status 6 reports
+insufficient probe workspace. A complete nonzero status leaves USB framing known
+but clears protocol configuration. A directly opened session requires explicit
+reconfiguration. A session acquired through `OpenProbe` retains its interface,
+clock, and transfer limit; its next valid nonempty borrowed-wire call
+reconfigures before sending the new scan. Invalid input and cancellation before
+traffic do not trigger reconfiguration. The failed scan is never replayed. A
+live configuration failure remains retryable; device loss or command-stream
+poisoning prevents recovery.
 
 The default ceiling is 504 bits, and a reported workspace can lower it. USB
 packet size does not lower the scan ceiling: the USB layer preserves full,
@@ -132,10 +144,10 @@ See [JTAG](jtag.md) for the full chain lifecycle and cleanup example.
 A J-Link EDU Mini V2 running firmware
 `J-Link EDU Mini V2 compiled Jun 25 2026 10:27:52` was exercised at 100 kHz. Its
 raw target-input samples were displaced by one target-driven clock across scan
-boundaries. The package corrects that stream only for the exact observed USB
-product and full firmware record. For an unrecognized firmware record, the
-package returns the protocol sample bytes unchanged. This correction applies
-only to SWD; JTAG samples are unchanged even on that firmware.
+boundaries. The package applies that input-clock correction to all SWD scans,
+following the scan-v3 sample ordering also used by [OpenOCD][openocd-swd].
+Software tests cover different product and firmware records and carry across
+calls. This correction applies only to SWD; JTAG samples are unchanged.
 
 The initial target returned DPIDR `0x0BB11477`, SW-DP version 1, designer
 `0x23B`, and AP0 IDR `0x04770021`. SW-DP version 1 does not use the SW-DPv2
@@ -152,6 +164,10 @@ two sessions agreed on DPIDR and CPUID, DHCSR.S_HALT was unchanged, and the
 saved AP0 CSW and TAR values were restored before release. Each composition used
 20 fixed frames in 48 SWDIO calls per session.
 
-These observations establish the current path only. They do not generalize the
-sample correction or transfer limit to other J-Link products, firmware, USB
-speeds, or targets.
+These observations establish the current path only. They do not establish
+physical validation of other J-Link products, firmware, USB speeds, or targets.
+The general SWD alignment rule has separate software coverage; the transfer
+limit remains conservative.
+
+[openocd-swd]:
+  https://github.com/openocd-org/openocd/blob/1f68633948d6503dbb32015583119c02801eab73/src/jtag/drivers/jlink.c#L2306

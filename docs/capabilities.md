@@ -174,8 +174,9 @@ its MPSSE port for debugging.
 Import `jlink/discovery` to register those bindings with `discover`, or call its
 `Register` with an explicit registry. The J-Link session does not depend on
 FTDI. The tested EDU Mini returned target-input samples displaced by one clock.
-The correction is gated to its USB product and full firmware record; for other
-firmware records, the package returns the samples unchanged.
+The driver applies the scan-v3 input-clock correction across product and
+firmware records. Behavioral tests cover that rule; physical observations still
+apply only to the exercised bench.
 
 The J-Link JTAG bench on Nostalgia uses EDU Mini V2 serial `000802011345` and a
 two-TAP ESP32 chain. Direct and registered-probe paths at 100 kHz found two

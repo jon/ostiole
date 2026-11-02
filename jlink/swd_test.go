@@ -13,6 +13,13 @@ import (
 	"github.com/jon/ostiole/usb"
 )
 
+const (
+	delayedInputFirmware       = "J-Link EDU Mini V2 compiled Jun 25 2026 10:27:52"
+	delayedInputFirmwareRecord = delayedInputFirmware + "\x00" +
+		"Copyright 2016-2024 SEGGER: www.segger.com" +
+		"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+)
+
 var _ swd.Wire = (*Session)(nil)
 var _ swd.TransferLimits = (*Session)(nil)
 
@@ -113,8 +120,8 @@ func TestSWDIOFramesDirectionAndZeroesUndrivenOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, []byte{0xaa, 0x01}) {
-		t.Fatalf("SWDIO() = %x, want aa01", got)
+	if !reflect.DeepEqual(got, []byte{0x52, 0x01}) {
+		t.Fatalf("SWDIO() = %x, want 5201", got)
 	}
 }
 
@@ -132,7 +139,9 @@ func TestSWDIOConsumesCoalescedPacketBoundaryStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(got, samples) || device.reads != 1 {
+	expected := bytes.Repeat([]byte{0x4b}, bits/8)
+	expected[0] = 0x4a
+	if !bytes.Equal(got, expected) || device.reads != 1 {
 		t.Fatalf("SWDIO() = %x after %d reads", got, device.reads)
 	}
 }
@@ -173,7 +182,7 @@ func TestSWDIOCarriesObservedEDUMiniInputDelayAcrossCalls(t *testing.T) {
 	}
 }
 
-func TestSWDIOLeavesUnrecognizedFirmwareSamplesUnchanged(t *testing.T) {
+func TestSWDIOAlignsUnrecognizedFirmwareSamples(t *testing.T) {
 	device := metadataPeer(t, []peerOperation{{
 		request: []byte{0xcf, 0, 4, 0, 0, 0}, response: [][]byte{{0x0d}, {0}},
 	}})
@@ -186,8 +195,8 @@ func TestSWDIOLeavesUnrecognizedFirmwareSamplesUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, []byte{0x0d}) {
-		t.Fatalf("SWDIO() = %x, want 0d", got)
+	if !reflect.DeepEqual(got, []byte{0x0a}) {
+		t.Fatalf("SWDIO() = %x, want 0a", got)
 	}
 }
 
@@ -321,6 +330,6 @@ func configuredSession(device *peerUSBDevice, record string) *Session {
 			bulkIn: usb.Endpoint{Address: 0x84, MaxPacketSize: 512}, bulkOut: usb.Endpoint{Address: 0x03, MaxPacketSize: 512},
 		},
 		info: Info{USB: device.identity, Firmware: firmware, FirmwareRecord: []byte(record), SelectedInterface: interfaceSWD}, configured: true, clockHz: 100_000, transferBits: 504,
-		delayInput: device.identity.PID == 0x1020 && record == delayedInputFirmwareRecord,
+		delayInput: true,
 	}
 }

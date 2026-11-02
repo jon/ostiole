@@ -281,6 +281,7 @@ type recoverySWDPeer struct {
 	t        *testing.T
 	device   *peerUSBDevice
 	wire     *swdsim.Wire
+	target   *earlySampleTarget
 	fail     bool
 	scans    [][]byte
 	commands []byte
@@ -304,6 +305,7 @@ func (p *recoverySWDPeer) write(request []byte) (int, error) {
 			if err != nil {
 				p.t.Fatal(err)
 			}
+			samples = earlyScanInput(request[4:4+size], samples, bits, p.target.pending && p.target.value&1 != 0)
 			status = 0
 		}
 		p.fail = false
@@ -332,7 +334,8 @@ func TestBorrowedJLinkSWDReleaseAfterScanStatus(t *testing.T) {
 	owner, wire, _, d := borrowedRecoveryWire(t, 1)
 	d.operations = nil
 	target := dapsim.New(0x2ba01477)
-	peer := &recoverySWDPeer{t: t, device: d, wire: swdsim.New(target)}
+	early := &earlySampleTarget{Target: target}
+	peer := &recoverySWDPeer{t: t, device: d, wire: swdsim.New(early), target: early}
 	d.handleWrite = peer.write
 	conn := swd.New(wire)
 	if _, err := conn.Connect(t.Context()); err != nil {
@@ -418,4 +421,57 @@ func TestBorrowedJLinkEmptyJTAGDoesNotReconfigure(t *testing.T) {
 	if err := owner.Close(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func earlyScanInput(direction, logical []byte, bits int, next bool) []byte {
+	raw := append([]byte(nil), logical...)
+	previous := -1
+	for bit := 0; bit < bits; bit++ {
+		if direction[bit/8]&(1<<uint(bit%8)) != 0 {
+			continue
+		}
+		if previous >= 0 {
+			mask := byte(1 << uint(previous%8))
+			raw[previous/8] &^= mask
+			if logical[bit/8]&(1<<uint(bit%8)) != 0 {
+				raw[previous/8] |= mask
+			}
+		}
+		previous = bit
+	}
+	if previous >= 0 {
+		raw[previous/8] &^= 1 << uint(previous%8)
+		if next {
+			raw[previous/8] |= 1 << uint(previous%8)
+		}
+	}
+	return raw
+}
+
+// earlySampleTarget makes the next accepted read bit available at the end of
+// the request scan. The decoded request comes from swd/sim; no wire framing is
+// reproduced here. The data phase consumes the saved result exactly once.
+type earlySampleTarget struct {
+	*dapsim.Target
+	pending bool
+	request swdsim.Request
+	value   uint32
+	err     error
+}
+
+func (t *earlySampleTarget) Acknowledge(ctx context.Context, request swdsim.Request) error {
+	err := t.Target.Acknowledge(ctx, request)
+	if err == nil && request.Read {
+		t.value, t.err = t.Target.Read(ctx, request)
+		t.request, t.pending = request, true
+	}
+	return err
+}
+
+func (t *earlySampleTarget) Read(ctx context.Context, request swdsim.Request) (uint32, error) {
+	if t.pending && request == t.request {
+		t.pending = false
+		return t.value, t.err
+	}
+	return t.Target.Read(ctx, request)
 }

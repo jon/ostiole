@@ -449,10 +449,14 @@ func readJLinkInfo(ctx context.Context) (_ jlink.Info, cleanup func() error, err
 
 Inventory policy still belongs to the application. `jlink.Open` takes ownership
 on success. It claims only the J-Link application interface, resolves the active
-endpoints after selecting its alternate, and does not select or configure a
-target interface. If a close fails, the returned `cleanup` function keeps the
-affected device or session reachable. Calling it again either retries a retained
-interface claim or returns the cached device-close result.
+endpoints after selecting its alternate, and drains stale IN data before
+metadata. It requires a 100 ms quiet interval within a one-second
+synchronization budget, with separate abort and cleanup bounds. Replies delayed
+beyond the quiet window remain outside that guarantee. With no options it does
+not select or configure a target interface. If a close fails, the returned
+`cleanup` function keeps the affected device or session reachable. Calling it
+again either retries a retained interface claim or returns the cached
+device-close result.
 
 To use the same selected probe as an SWD wire, configure it while opening and
 pass the session to `swd.New`. Keep the cleanup closure when the operation
