@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 	"net/url"
@@ -11,11 +10,17 @@ import (
 	"unicode"
 
 	"github.com/yuin/goldmark"
-	"github.com/yuin/goldmark/parser"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/extension"
+	markdownhtml "github.com/yuin/goldmark/renderer/html"
 	"github.com/yuin/goldmark/text"
+	"github.com/yuin/goldmark/util"
+	xhtml "golang.org/x/net/html"
 )
 
-var inlineLink = regexp.MustCompile(`!?\[[^]]*\]\(([^)]+)\)`)
+var linkScheme = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*:`)
+
+var sourceLineAnchor = regexp.MustCompile(`^l[0-9]+(-l[0-9]+)?$`)
 
 type markdownTree struct {
 	repo          string
@@ -23,7 +28,7 @@ type markdownTree struct {
 	files         map[string]bool
 	directories   map[string]bool
 	markdownFiles []string
-	contents      map[string]string
+	documents     map[string]*markdownDocument
 }
 
 func checkMarkdown(repo, head string) ([]finding, error) {
@@ -51,8 +56,8 @@ func loadMarkdownTree(repo, head string) (*markdownTree, error) {
 		repo:        repo,
 		head:        head,
 		files:       make(map[string]bool),
-		directories: make(map[string]bool),
-		contents:    make(map[string]string),
+		directories: map[string]bool{".": true},
+		documents:   make(map[string]*markdownDocument),
 	}
 	for _, entry := range bytes.Split(bytes.TrimSuffix(output, []byte{0}), []byte{0}) {
 		name := string(entry)
@@ -67,25 +72,26 @@ func loadMarkdownTree(repo, head string) (*markdownTree, error) {
 	return tree, nil
 }
 
-func (tree *markdownTree) readFile(name string) (string, error) {
-	if content, ok := tree.contents[name]; ok {
-		return content, nil
+func (tree *markdownTree) document(name string) (*markdownDocument, error) {
+	if document, ok := tree.documents[name]; ok {
+		return document, nil
 	}
-	content, err := gitOutput(tree.repo, "show", tree.head+":"+name)
+	content, _, err := readGitFile(tree.repo, tree.head, name)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	tree.contents[name] = string(content)
-	return string(content), nil
+	document := parseMarkdown(string(content))
+	tree.documents[name] = document
+	return document, nil
 }
 
 func (tree *markdownTree) checkFile(source string) ([]finding, error) {
-	content, err := tree.readFile(source)
+	document, err := tree.document(source)
 	if err != nil {
 		return nil, err
 	}
 	var findings []finding
-	for _, link := range markdownLinks(content) {
+	for _, link := range document.links() {
 		linkFinding, err := tree.checkLink(source, link)
 		if err != nil {
 			return nil, err
@@ -98,7 +104,11 @@ func (tree *markdownTree) checkFile(source string) ([]finding, error) {
 }
 
 func (tree *markdownTree) checkLink(source, link string) (*finding, error) {
-	target, fragment, local := resolveMarkdownLink(source, link)
+	target, fragment, local, parseErr := resolveMarkdownLink(source, link)
+	if parseErr != nil {
+		result := newFinding(errorLevel, "markdown-link", tree.head, fmt.Sprintf("%s has invalid link %q: %v", source, link, parseErr))
+		return &result, nil
+	}
 	if !local {
 		return nil, nil
 	}
@@ -112,11 +122,11 @@ func (tree *markdownTree) checkLink(source, link string) (*finding, error) {
 	if fragment == "" || target == "" || tree.directories[target] {
 		return nil, nil
 	}
-	targetContent, err := tree.readFile(target)
+	exists, err := tree.anchorExists(target, fragment)
 	if err != nil {
 		return nil, err
 	}
-	if markdownAnchors(targetContent)[fragment] {
+	if exists {
 		return nil, nil
 	}
 	result := newFinding(
@@ -126,101 +136,106 @@ func (tree *markdownTree) checkLink(source, link string) (*finding, error) {
 	return &result, nil
 }
 
-func markdownLinks(content string) []string {
+func (tree *markdownTree) anchorExists(target, fragment string) (bool, error) {
+	if !strings.HasSuffix(strings.ToLower(target), ".md") {
+		return sourceLineAnchor.MatchString(fragment), nil
+	}
+	document, err := tree.document(target)
+	if err != nil {
+		return false, err
+	}
+	return document.anchors()[fragment], nil
+}
+
+type markdownDocument struct {
+	source    []byte
+	root      ast.Node
+	markdown  goldmark.Markdown
+	anchorSet map[string]bool
+}
+
+func parseMarkdown(content string) *markdownDocument {
+	markdown := goldmark.New(goldmark.WithExtensions(extension.GFM, extension.Footnote), goldmark.WithRendererOptions(markdownhtml.WithUnsafe()))
+	source := []byte(content)
+	return &markdownDocument{source: source, root: markdown.Parser().Parse(text.NewReader(source)), markdown: markdown}
+}
+
+func markdownLinks(content string) []string { return parseMarkdown(content).links() }
+
+func (document *markdownDocument) links() []string {
 	var links []string
-	inFence := false
-	scanner := bufio.NewScanner(strings.NewReader(content))
-	for scanner.Scan() {
-		line := scanner.Text()
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
-			inFence = !inFence
-			continue
+	_ = ast.Walk(document.root, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+		if entering {
+			switch node := node.(type) {
+			case *ast.Link:
+				links = append(links, string(util.URLEscape(node.Destination, true)))
+			case *ast.Image:
+				links = append(links, string(util.URLEscape(node.Destination, true)))
+				return ast.WalkSkipChildren, nil
+			}
 		}
-		if inFence || strings.HasPrefix(line, "    ") || strings.HasPrefix(line, "\t") {
-			continue
-		}
-		line = removeInlineCode(line)
-		for _, match := range inlineLink.FindAllStringSubmatch(line, -1) {
-			links = append(links, linkDestination(match[1]))
-		}
-	}
-	context := parser.NewContext()
-	goldmark.DefaultParser().Parse(text.NewReader([]byte(content)), parser.WithContext(context))
-	for _, reference := range context.References() {
-		links = append(links, string(reference.Destination()))
-	}
+		return ast.WalkContinue, nil
+	})
 	return links
 }
 
-func linkDestination(value string) string {
-	value = strings.TrimSpace(value)
-	if strings.HasPrefix(value, "<") {
-		if end := strings.Index(value, ">"); end >= 0 {
-			return value[1:end]
-		}
+func resolveMarkdownLink(source, destination string) (string, string, bool, error) {
+	if linkScheme.MatchString(destination) || strings.HasPrefix(destination, "//") {
+		return "", "", false, nil
 	}
-	if fields := strings.Fields(value); len(fields) > 0 {
-		return fields[0]
-	}
-	return ""
-}
-
-func resolveMarkdownLink(source, destination string) (string, string, bool) {
 	parsed, err := url.Parse(destination)
-	if err != nil || parsed.Scheme != "" || parsed.Host != "" || strings.HasPrefix(destination, "/") {
-		return "", "", false
-	}
-	decodedPath, err := url.PathUnescape(parsed.Path)
 	if err != nil {
-		return "", "", false
+		return "", "", true, err
+	}
+	if parsed.Scheme != "" || parsed.Host != "" {
+		return "", "", false, nil
 	}
 	target := source
-	if decodedPath != "" {
-		target = path.Clean(path.Join(path.Dir(source), decodedPath))
+	if strings.HasPrefix(parsed.Path, "/") {
+		target = path.Clean(strings.TrimPrefix(parsed.Path, "/"))
+	} else if parsed.Path != "" {
+		target = path.Clean(path.Join(path.Dir(source), parsed.Path))
 	}
-	if target == ".." || strings.HasPrefix(target, "../") {
-		return target, "", true
-	}
-	fragment, err := url.PathUnescape(parsed.Fragment)
-	if err != nil {
-		fragment = parsed.Fragment
-	}
-	return target, strings.ToLower(fragment), true
+	return target, strings.ToLower(parsed.Fragment), true, nil
 }
 
-func markdownAnchors(content string) map[string]bool {
-	anchors := make(map[string]bool)
-	counts := make(map[string]int)
-	inFence := false
-	for _, line := range strings.Split(content, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
-			inFence = !inFence
-			continue
-		}
-		if inFence || !strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		heading := strings.TrimLeft(trimmed, "#")
-		if heading == trimmed || !strings.HasPrefix(heading, " ") {
-			continue
-		}
-		heading = strings.TrimSpace(strings.TrimRight(heading, "#"))
-		base := githubSlug(heading)
-		slug := base
-		if counts[base] > 0 {
-			slug = fmt.Sprintf("%s-%d", base, counts[base])
-		}
-		counts[base]++
-		anchors[slug] = true
+func markdownAnchors(content string) map[string]bool { return parseMarkdown(content).anchors() }
+
+func (document *markdownDocument) anchors() map[string]bool {
+	if document.anchorSet != nil {
+		return document.anchorSet
 	}
+	anchors := make(map[string]bool)
+	_ = ast.Walk(document.root, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+		if entering && node.Kind() == ast.KindHeading {
+			base := githubSlug(document.headingText(node))
+			slug := base
+			for suffix := 1; anchors[slug]; suffix++ {
+				slug = fmt.Sprintf("%s-%d", base, suffix)
+			}
+			anchors[slug] = true
+		}
+		return ast.WalkContinue, nil
+	})
+	document.anchorSet = anchors
 	return anchors
+}
+
+func (document *markdownDocument) headingText(node ast.Node) string {
+	var rendered bytes.Buffer
+	if err := document.markdown.Renderer().Render(&rendered, document.source, node); err != nil {
+		return ""
+	}
+	root, err := xhtml.Parse(&rendered)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(htmlText(root))
 }
 
 func githubSlug(heading string) string {
 	var slug strings.Builder
-	for _, character := range strings.ToLower(removeInlineCode(heading)) {
+	for _, character := range strings.ToLower(heading) {
 		switch {
 		case unicode.IsLetter(character), unicode.IsDigit(character), character == '-', character == '_':
 			slug.WriteRune(character)
@@ -229,19 +244,4 @@ func githubSlug(heading string) string {
 		}
 	}
 	return slug.String()
-}
-
-func removeInlineCode(line string) string {
-	var output strings.Builder
-	inCode := false
-	for _, character := range line {
-		if character == '`' {
-			inCode = !inCode
-			continue
-		}
-		if !inCode {
-			output.WriteRune(character)
-		}
-	}
-	return output.String()
 }

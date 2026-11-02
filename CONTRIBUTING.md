@@ -132,6 +132,19 @@ integration-tagged Go, including the native macOS implementation. The `CodeQL`
 workflow analyzes Go and native C/C++ with the security-extended query suite on
 every pull request, including pull requests from forks.
 
+Local Markdown links and heading anchors are checked from a shared parsed
+GitHub-flavored Markdown document, including footnotes. Repository-root links
+resolve within the committed tree. Link destinations follow the renderer’s
+Markdown punctuation and entity decoding before URL escapes are decoded once.
+Links to non-Markdown files may use GitHub line fragments such as `#L10-L20`;
+other fragments are rejected. HTML comments and code examples do not contribute
+links or headings. Heading slugs retain rendered text, including inline code.
+
+Pull-request sections need visible explanatory text. Ruby fallback text and
+math-only content, including fenced math, do not satisfy the opening, Why or
+Documentation requirement; include ordinary explanatory prose alongside
+formulas.
+
 Policy annotations remain advisory when judgment is required. These include 73-
 through 120-column subjects, ambiguous imperative mood, weak bodies, commits
 near the 200-line review checkpoint, likely missing tests or docs, mixed
