@@ -17,10 +17,11 @@ type chainWire struct {
 	visits             [17]int
 }
 type modelTAP struct {
-	ir          int
-	id          uint32
-	instruction uint64
-	badCapture  bool
+	ir            int
+	id            uint32
+	instruction   uint64
+	badCapture    bool
+	captureBitOne bool
 }
 
 func (w *chainWire) MaxTransferBits() int { return w.limit }
@@ -84,6 +85,9 @@ func (w *chainWire) capture() {
 		bits, value := 1, uint64(0)
 		if w.state == CaptureIR {
 			bits, value = tap.ir, 1
+			if tap.captureBitOne {
+				value = 3
+			}
 			if tap.badCapture {
 				value = 0
 			}
