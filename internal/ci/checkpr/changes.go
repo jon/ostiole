@@ -146,7 +146,11 @@ func readChangedFiles(repo, commit string) ([]changedFile, error) {
 
 func hasCommitBody(message string) bool {
 	parts := strings.SplitN(strings.TrimSuffix(message, "\n"), "\n\n", 2)
-	return len(parts) == 2 && strings.TrimSpace(parts[1]) != ""
+	if len(parts) != 2 {
+		return false
+	}
+	lines := strings.Split(parts[1], "\n")
+	return strings.TrimSpace(strings.Join(lines[:trailerStart(lines)], "\n")) != ""
 }
 
 func isProductionGo(path string) bool {

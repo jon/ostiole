@@ -300,9 +300,15 @@ not tell callers which register they will access. Give each register a
 logical identity and keep direction and bank selection inside DebugPort.
 ```
 
-Wrap prose in stored commit bodies at 72 columns. Leave URLs, command lines,
-code blocks, and other text that cannot be broken safely intact. Keep messages
-timeless and omit internal planning, construction history, and agent activity.
+Wrap prose in stored commit bodies at 72 columns. Leave URLs and other text that
+cannot be broken safely intact. Mark command lines with a `$` prompt followed by
+a space, indent them, enclose the whole line in backticks, or use a closed code
+fence. Fence delimiters must use the same character and a closing run at least
+as long as the opening run. Bare command names and an unclosed fence do not
+exempt wrappable prose, including shorter fences inside an unclosed block. Only
+a final trailer paragraph receives the trailer exemption; trailers alone do not
+explain a nontrivial change. Keep messages timeless and omit internal planning,
+construction history, and agent activity.
 
 ## History and pull requests
 
