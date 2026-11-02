@@ -85,8 +85,9 @@ func (c *Conn) Reset(ctx context.Context) error {
 	return nil
 }
 
-// Move takes a shortest TMS path to a known destination. It drives TDI low;
-// paths through shift or update states have their ordinary target effects.
+// Move takes a shortest TMS path which does not enter Reset unless requested.
+// It drives TDI low; paths through capture, shift or update states have their
+// ordinary target effects, including instruction or data-register updates.
 // No clocks are sent when already at the destination.
 func (c *Conn) Move(ctx context.Context, target State) error {
 	if _, err := c.validate(ctx); err != nil {
