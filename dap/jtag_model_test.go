@@ -27,6 +27,11 @@ type dpModelTAP struct {
 	dp          *jtagDPModel
 }
 
+func (t dpModelTAP) matches(instruction uint64) bool {
+	want := instruction | ((uint64(1)<<uint(t.ir))-1)&^0xf
+	return t.instruction == want
+}
+
 type jtagDPWire struct {
 	taps         []dpModelTAP
 	state        jtag.State
@@ -86,7 +91,7 @@ func (m *jtagDPModel) capture() uint64 {
 }
 
 func (m *jtagDPModel) update(instruction uint64, value uint64) {
-	if instruction&0xf == 8 {
+	if instruction == 8 {
 		if value != 8 {
 			panic("non-baseline ABORT")
 		}
@@ -101,7 +106,7 @@ func (m *jtagDPModel) update(instruction uint64, value uint64) {
 	if m.ack == 1 {
 		return
 	}
-	r := jtagRequest{ap: instruction&0xf == 0xb, read: value&1 != 0, addr: uint8(value>>1&3) * 4, data: uint32(value >> 3)}
+	r := jtagRequest{ap: instruction == 0xb, read: value&1 != 0, addr: uint8(value>>1&3) * 4, data: uint32(value >> 3)}
 	m.accepted = append(m.accepted, r)
 	m.pending = &r
 	if m.onAccept != nil {
@@ -216,11 +221,11 @@ func (w *jtagDPWire) capture() {
 		switch {
 		case w.state == jtag.CaptureIR:
 			bits, value = tap.ir, 1
-		case tap.instruction&0xf == 0xe:
+		case tap.matches(0xe):
 			bits, value = 32, uint64(tap.id)
-		case tap.dp != nil && (tap.instruction&0xf == 0xa || tap.instruction&0xf == 0xb):
+		case tap.dp != nil && (tap.matches(0xa) || tap.matches(0xb)):
 			bits, value = 35, tap.dp.capture()
-		case tap.dp != nil && tap.instruction&0xf == 8:
+		case tap.dp != nil && tap.matches(8):
 			bits = 35
 		}
 		for i := range bits {
@@ -237,9 +242,9 @@ func (w *jtagDPWire) update() {
 		switch {
 		case w.state == jtag.UpdateIR:
 			bits = tap.ir
-		case tap.instruction&0xf == 0xe:
+		case tap.matches(0xe):
 			bits = 32
-		case tap.dp != nil && (tap.instruction&0xf == 0xa || tap.instruction&0xf == 0xb || tap.instruction&0xf == 8):
+		case tap.dp != nil && (tap.matches(0xa) || tap.matches(0xb) || tap.matches(8)):
 			bits = 35
 		}
 		var value uint64
@@ -249,7 +254,7 @@ func (w *jtagDPWire) update() {
 		if w.state == jtag.UpdateIR {
 			tap.instruction = value
 		} else if bits == 35 {
-			tap.dp.update(tap.instruction, value)
+			tap.dp.update(tap.instruction&0xf, value)
 		}
 		offset += bits
 	}

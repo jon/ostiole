@@ -11,11 +11,13 @@ type wireFake struct {
 	tms, tdi           []bool
 	short              bool
 	cancel             context.CancelFunc
+	sizes              []int
 }
 
 func (w *wireFake) MaxTransferBits() int { return w.limit }
 func (w *wireFake) JTAGIO(_ context.Context, tms, tdi []byte, bits int) ([]byte, error) {
 	w.calls++
+	w.sizes = append(w.sizes, bits)
 	if bits > w.limit {
 		panic("transfer exceeds limit")
 	}

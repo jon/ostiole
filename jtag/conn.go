@@ -67,7 +67,7 @@ func (c *Conn) validate(ctx context.Context) (int, error) {
 		if w.MaxTransferBits() <= 0 {
 			return 0, errors.New("jtag: invalid wire transfer limit")
 		}
-		limit = min(limit, w.MaxTransferBits())
+		limit = w.MaxTransferBits()
 	}
 	return limit, nil
 }

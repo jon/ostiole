@@ -173,10 +173,11 @@ use of the Conn and serialize all Chain and TAP calls.
 The wire packs the earliest TMS, TDI, and TDO bit into bit zero of byte zero.
 Each call clocks exactly the requested number of cycles. A wire can advertise a
 positive `MaxTransferBits` limit; the connection splits longer movements without
-inserting cycles. Without that interface, calls are capped at 4,096 bits. An
-invalid response length or a wire error loses TAP synchronization. Only an
-explicit successful Reset permits movement afterward. Cancellation before a wire
-call preserves the last confirmed state.
+inserting cycles. An advertised limit above 4,096 is honored too. Without that
+interface, calls are capped at 4,096 bits. An invalid response length or a wire
+error loses TAP synchronization. Only an explicit successful Reset permits
+movement afterward. Cancellation before a wire call preserves the last confirmed
+state.
 
 ## FTDI wire
 
